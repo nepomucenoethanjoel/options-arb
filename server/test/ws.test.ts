@@ -184,3 +184,17 @@ describe('/ws per-underlying subscription', () => {
     expect(full.signals).toHaveLength(3);
   });
 });
+
+describe('buildKpis — pool-aware Σ', () => {
+  it('sums each pool\'s best clip, not per-row totals (shared custody)', () => {
+    const rows = [
+      sig('SOL-20261030-100-C', 'SOL', { totalNetUsdc: 10 }),
+      sig('SOL-20261030-110-C', 'SOL', { totalNetUsdc: 7 }),   // same pool — must NOT add
+      sig('ETH-20261030-2000-C', 'ETH', { totalNetUsdc: 4 }),
+      sig('ETH-20261030-2100-C', 'ETH', { direction: 'buy_derive_sell_olive', flags: ['direction_limited'], totalNetUsdc: 99 }), // not executable
+    ];
+    const k = buildKpis(rows);
+    expect(k.totalExecutableUsd).toBe(14); // SOL best 10 + ETH best 4
+    expect(k.executableProfitableCount).toBe(3);
+  });
+});

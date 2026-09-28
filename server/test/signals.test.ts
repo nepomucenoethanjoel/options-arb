@@ -466,3 +466,35 @@ describe('fee models — verified against venue docs + a live fill (2026-09-29)'
     expect(s.totalNetUsdc).toBeCloseTo(s.netAfterCapitalUsdc! * 3 - 0.5, 1); // totals round to 2dp
   });
 });
+
+describe('execution own-impact + pool-aware totals (2026-09-29)', () => {
+  it('flags execution_moves_rate when a full fill pushes the custody past 90% utilization', () => {
+    // 50% utilized pool (5 free of 10 owned): a 5-call max fill → 100% —
+    // the convex borrow curve reprices the AMM mid-fill (observed live:
+    // a ~$50 ZEC fill moved the short rate 30% → 69.5%).
+    const custody = { ...cfg, poolCustodyByAsset: { ETH: { underlyingFree: 5, underlyingOwned: 10, usdcFreeUsd: 1e6 } } };
+    const [s] = computeSignals([row(deriveQuote({ bidSize: 20, askSize: 20 }), oliveQuote())], custody, NOW);
+    expect(s.maxExecutableSize).toBe(5);
+    expect(s.flags).toContain('execution_moves_rate');
+  });
+
+  it('does not flag when plenty of headroom remains', () => {
+    const custody = { ...cfg, poolCustodyByAsset: { ETH: { underlyingFree: 95, underlyingOwned: 100, usdcFreeUsd: 1e6 } } };
+    const [s] = computeSignals([row(deriveQuote({ bidSize: 3, askSize: 3 }), oliveQuote())], custody, NOW);
+    expect(s.maxExecutableSize).toBe(3);
+    expect(s.flags).not.toContain('execution_moves_rate');
+  });
+
+  it('flags puts via USDC-owned utilization at the strike collateral', () => {
+    // USDC custody: $3,000 owned, $500 free; K=2900 put, book 5 → size 0.172;
+    // end util = (3000-500+0.172×2900)/3000 = 99.9% → flag.
+    const custody = { ...cfg, poolCustodyByAsset: { ETH: { underlyingFree: 50, usdcFreeUsd: 500, usdcOwnedUsd: 3000 } } };
+    const [s] = computeSignals(
+      [row(deriveQuote({ bidSize: 5, askSize: 5, iv: 0.6 }), oliveQuote(70, 0.55), NOW + 30 * 86_400_000, { kind: 'put', pairKey: 'ETH-20261030-2900-P' })],
+      custody,
+      NOW,
+    );
+    expect(s.maxExecutableSize).toBeCloseTo(500 / 2900, 4);
+    expect(s.flags).toContain('execution_moves_rate');
+  });
+});

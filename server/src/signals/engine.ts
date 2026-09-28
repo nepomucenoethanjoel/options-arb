@@ -26,8 +26,15 @@ export interface SignalConfig {
   poolLiquidityUsdByAsset: Record<string, number>;
   /** Live per-custody pool capacity from the market file's on-chain snapshot
    *  (null = unknown for that asset). Calls cap by free underlying custody
-   *  (units — each locks 1 underlying); puts by free USDC (each locks K). */
-  poolCustodyByAsset: Record<string, { underlyingFree: number | null; usdcFreeUsd: number | null }>;
+   *  (units — each locks 1 underlying); puts by free USDC (each locks K).
+   *  `owned` values flag rows whose execution would push the custody past
+   *  90% utilization, where the convex borrow curve moves the pricing rate. */
+  poolCustodyByAsset: Record<string, {
+    underlyingFree: number | null;
+    usdcFreeUsd: number | null;
+    underlyingOwned?: number | null;
+    usdcOwnedUsd?: number | null;
+  }>;
 }
 
 const NON_EXECUTABLE_FLAGS = new Set(['no_book', 'one_sided', 'thin_book', 'wide_book', 'stale', 'mismatched_legs']);
@@ -219,6 +226,19 @@ export function computeSignals(
         if (custodyCap == null && poolLiquidityUsd != null) {
           flags.push('pool_capacity_estimated');
         }
+      }
+    }
+    // Own-impact: a fill moves its custody's utilization, and the borrow curve
+    // (hence the AMM's pricing rate) is convex above ~90% — flag rows whose
+    // full execution would push past it (observed live 2026-09-29: a ~$50
+    // fill moved the ZEC short rate 30% → 69.5%).
+    if (custody != null && maxExecutableSize != null && maxExecutableSize > 0) {
+      const owned = row.kind === 'call' ? custody.underlyingOwned : custody.usdcOwnedUsd;
+      const free = row.kind === 'call' ? custody.underlyingFree : custody.usdcFreeUsd;
+      const perUnit = row.kind === 'call' ? 1 : row.strike;
+      if (owned != null && owned > 0 && free != null) {
+        const endUtil = (owned - free + maxExecutableSize * perUnit) / owned;
+        if (endUtil > 0.9) flags.push('execution_moves_rate');
       }
     }
     const totalNetUsdc =

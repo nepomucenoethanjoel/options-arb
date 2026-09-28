@@ -224,7 +224,8 @@ export interface SignalKpis {
   lpOnlyProfitableCount: number;
   /** Rows currently flagged as threshold opportunities (either direction). */
   opportunitiesCount: number;
-  /** Σ totalNetUsdc across executable-direction profitable rows. */
+  /** Σ of each pool's BEST single executable clip — rows on the same
+   *  underlying share custody collateral, so per-row totals can't be summed. */
   totalExecutableUsd: number;
   /** Closest-to-profitable executable-direction row (clean book), best net/contract. */
   closest: Signal | null;

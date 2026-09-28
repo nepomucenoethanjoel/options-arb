@@ -33,6 +33,11 @@ export interface OliveMarketFileData {
    */
   underlyingFree: number | null;
   usdcFreeUsd: number | null;
+  /** Total per-custody balances (owned) in the same units as the free values
+   *  — lets consumers compute post-execution utilization (the borrow curve
+   *  is convex near 100%, so fills move the pricing rate). */
+  underlyingOwned: number | null;
+  usdcOwnedUsd: number | null;
   /**
    * Live pricing rates (fractions) from the per-custody borrowRateCurve at
    * current utilization — what their UI shows as "Fixed Rate (L/S)" and what
@@ -77,18 +82,23 @@ export function parseOliveMarketFile(json: any, underlying: string): OliveMarket
   // Per-custody free balances: owned − locked, scaled by the custody's mint
   // decimals (underlying 9 for SOL, 6 for USDC). Layout verified live
   // 2026-09-28 — see DATA_SOURCES.md.
-  const custodyFree = (c: unknown): number | null => {
-    if (!c || typeof c !== 'object') return null;
+  const custodyBal = (c: unknown): { free: number | null; owned: number | null } => {
+    if (!c || typeof c !== 'object') return { free: null, owned: null };
     const o = c as Record<string, unknown>;
     const owned = num(o.tokenOwned);
     const locked = num(o.tokenLocked) ?? 0;
     const decimals = num(o.decimals);
-    if (owned == null || decimals == null || decimals < 0 || decimals > 18) return null;
-    return Math.max(0, (owned - locked) / Math.pow(10, decimals));
+    if (owned == null || decimals == null || decimals < 0 || decimals > 18) return { free: null, owned: null };
+    const scale = Math.pow(10, decimals);
+    return { free: Math.max(0, (owned - locked) / scale), owned: owned / scale };
   };
   const raw = snap?.rawOnChainPoolSnapshot;
-  const underlyingFree = custodyFree(raw?.underlyingCustody);
-  const usdcFreeUsd = custodyFree(raw?.usdcCustody);
+  const underlyingBal = custodyBal(raw?.underlyingCustody);
+  const usdcBal = custodyBal(raw?.usdcCustody);
+  const underlyingFree = underlyingBal.free;
+  const usdcFreeUsd = usdcBal.free;
+  const underlyingOwned = underlyingBal.owned;
+  const usdcOwnedUsd = usdcBal.owned;
 
   /** Borrow rate (bps) at a utilization (bps) via piecewise-linear curve. */
   const curveRate = (custody: any): number | null => {
@@ -145,6 +155,8 @@ export function parseOliveMarketFile(json: any, underlying: string): OliveMarket
     entryClaimsUsd,
     underlyingFree,
     usdcFreeUsd,
+    underlyingOwned,
+    usdcOwnedUsd,
     rates,
     asOfMs,
     volOnChainMs,

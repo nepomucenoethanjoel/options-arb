@@ -41,13 +41,21 @@ export function buildKpis(signals: Signal[]): SignalKpis {
         !s.isProfitable,
     )
     .sort((a, b) => (b.netAfterCapitalUsdc ?? -Infinity) - (a.netAfterCapitalUsdc ?? -Infinity))[0] ?? null;
+  // Σ is pool-aware: rows on the same underlying draw on the SAME custody
+  // collateral, so only each pool's best single clip adds to the total —
+  // summing per-row totals double-counts shared capacity.
+  const bestPerUnderlying = new Map<string, number>();
+  for (const s of executable) {
+    const t = s.totalNetUsdc ?? 0;
+    if (t > (bestPerUnderlying.get(s.underlying) ?? -Infinity)) bestPerUnderlying.set(s.underlying, t);
+  }
   return {
     topExecutable: executable.slice(0, 3),
     topAny: profitable.slice(0, 3),
     executableProfitableCount: executable.length,
     lpOnlyProfitableCount: profitable.length - executable.length,
     opportunitiesCount: signals.filter((s) => s.isOpportunity).length,
-    totalExecutableUsd: executable.reduce((a, s) => a + (s.totalNetUsdc ?? 0), 0),
+    totalExecutableUsd: [...bestPerUnderlying.values()].reduce((a, b) => a + b, 0),
     closest,
   };
 }

@@ -90,17 +90,29 @@ export class OliveAdapter {
 
   /**
    * Live per-custody capacity over the 10s cache — no fetch. Calls are capped
-   * by free underlying custody (units), puts by free USDC (÷ strike). Null
-   * when the market file is stale or omits the custody snapshot.
+   * by free underlying custody (units), puts by free USDC (÷ strike). `owned`
+   * values enable post-execution utilization math (fills move the borrow
+   * rate — the curve is convex near 100%). Null when the market file is
+   * stale or omits the custody snapshot.
    */
   getCachedCapacity(
     underlying: string,
-  ): { underlyingFree: number | null; usdcFreeUsd: number | null } | null {
+  ): {
+    underlyingFree: number | null;
+    usdcFreeUsd: number | null;
+    underlyingOwned?: number | null;
+    usdcOwnedUsd?: number | null;
+  } | null {
     const cached = this.marketFileCache.get(underlying.toUpperCase());
     if (!cached?.ts || Date.now() - cached.ts > 60_000) return null;
     const d = cached.data;
     if (!d || (d.underlyingFree == null && d.usdcFreeUsd == null)) return null;
-    return { underlyingFree: d.underlyingFree, usdcFreeUsd: d.usdcFreeUsd };
+    return {
+      underlyingFree: d.underlyingFree,
+      usdcFreeUsd: d.usdcFreeUsd,
+      underlyingOwned: d.underlyingOwned,
+      usdcOwnedUsd: d.usdcOwnedUsd,
+    };
   }
 
   isVolLive(): boolean {

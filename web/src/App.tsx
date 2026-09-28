@@ -119,7 +119,7 @@ export default function App() {
           </div>
         )}
         <div className="kpi"><span className="k">Executable profitable rows</span><span className="v">{kpiSummary.profitableCount}</span></div>
-        <div className="kpi"><span className="k">Σ total $ (all assets)</span><span className="v">{usd(kpiSummary.totalDollars, 0)}</span></div>
+        <div className="kpi"><span className="k">Σ best clip $ (per pool)</span><span className="v">{usd(kpiSummary.totalDollars, 0)}</span></div>
         <div className="tabs">
           <button className={tab === 'profit' ? 'active' : ''} onClick={() => setTab('profit')}>Profit</button>
           <button className={tab === 'analysis' ? 'active' : ''} onClick={() => setTab('analysis')}>Analysis</button>
