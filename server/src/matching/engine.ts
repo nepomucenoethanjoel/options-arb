@@ -85,6 +85,7 @@ export function matchChain(input: MatchInput): MatchRow[] {
         venue: 'olive',
         instrumentId: exact.instrumentId,
         quote: input.oliveQuotes?.get(exact.instrumentId) ?? null,
+        expiryOffsetDays: offDays || undefined,
       };
     } else {
       let nearest: OptionInstrument | null = null;
@@ -106,6 +107,8 @@ export function matchChain(input: MatchInput): MatchRow[] {
           venue: 'olive',
           instrumentId: nearest.instrumentId,
           quote: input.oliveQuotes?.get(nearest.instrumentId) ?? null,
+          strikeOffset: nearest.strike - d.strike,
+          expiryOffsetDays: nOff || undefined,
         };
       } else if (input.oliveQuoteProvider) {
         if (d.expiryTs - now > config.oliveMaxTenorMs) {

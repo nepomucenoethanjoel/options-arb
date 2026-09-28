@@ -30,7 +30,7 @@ export interface SignalConfig {
   poolCustodyByAsset: Record<string, { underlyingFree: number | null; usdcFreeUsd: number | null }>;
 }
 
-const NON_EXECUTABLE_FLAGS = new Set(['no_book', 'one_sided', 'thin_book', 'wide_book', 'stale']);
+const NON_EXECUTABLE_FLAGS = new Set(['no_book', 'one_sided', 'thin_book', 'wide_book', 'stale', 'mismatched_legs']);
 /** Derive settles a 30-minute TWAP of the underlying; Olive settles a Stork oracle print. */
 const SETTLEMENT_TWAP_HOURS = 0.5;
 
@@ -147,9 +147,18 @@ export function computeSignals(
     // ── Profit estimate: executable prices, held-to-expiry convergence ──────
     // Sell the rich leg at its executable price (Derive bid when Derive is
     // rich), buy the cheap leg at its take price (Olive AMM premium / Derive ask).
+    // Mismatched legs (different strike or expiry — interpolated / offset
+    // matches) never converge at expiry, so the price difference does NOT
+    // lock in: the vol spread stays meaningful, the profit estimate does not.
+    const mismatchedLegs =
+      (row.olive.strikeOffset ?? 0) !== 0 || (row.olive.expiryOffsetDays ?? 0) !== 0;
+    if (mismatchedLegs) flags.push('mismatched_legs');
     let entryPrice: number | null;
     let exitPrice: number | null;
-    if (direction === 'buy_olive_sell_derive') {
+    if (mismatchedLegs) {
+      entryPrice = null;
+      exitPrice = null;
+    } else if (direction === 'buy_olive_sell_derive') {
       entryPrice = oq.mark;
       exitPrice = deriveBid ?? deriveMark;
     } else {
@@ -186,8 +195,8 @@ export function computeSignals(
       poolLiquidityUsd != null && oliveCollateral > 0
         ? Math.floor(poolLiquidityUsd / oliveCollateral)
         : null;
-    let maxExecutableSize = bookSize;
-    if (bookSize != null) {
+    let maxExecutableSize = mismatchedLegs ? null : bookSize;
+    if (!mismatchedLegs && bookSize != null) {
       const capacity = custodyCap ?? fallbackCap;
       if (capacity != null && capacity < bookSize) {
         maxExecutableSize = capacity;

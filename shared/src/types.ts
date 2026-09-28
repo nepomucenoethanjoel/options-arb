@@ -100,6 +100,12 @@ export interface LegSnapshot {
   quote: OptionQuote | null;
   /** Provenance/semantics note, e.g. `amm_synthetic`, `nearest_strike`. */
   note?: string;
+  /** Strike offset vs this row's contract when matched to a different strike
+   *  (interpolated match). Non-zero legs are NOT the same payoff. */
+  strikeOffset?: number;
+  /** Expiry offset in days vs this row's contract (matched within the
+   *  ±tolerance window). Non-zero legs settle at different times. */
+  expiryOffsetDays?: number;
 }
 
 /** One comparison row: the same economic contract on both venues. */

@@ -402,3 +402,42 @@ describe('isPersistWorthy — 1/min burst-persistence gate', () => {
     expect(isPersistWorthy(sig({ isOpportunity: false, isProfitable: false }))).toBe(false);
   });
 });
+
+describe('computeSignals — mismatched-legs guard', () => {
+  // Nearest-strike / expiry-offset matches pair contracts whose payoffs do
+  // NOT converge — the vol spread stays, the profit estimate must not.
+  it('keeps the IV spread but nulls every profit field for a strike-mismatched leg', () => {
+    const r = row(deriveQuote(), oliveQuote());
+    r.olive.strikeOffset = 10; // interpolated match, e.g. 2910 vs 2900
+    const [s] = computeSignals([r], cfg, NOW);
+    expect(s.ivSpreadVols).toBeCloseTo(5, 5);
+    expect(s.direction).toBe('buy_olive_sell_derive');
+    expect(s.flags).toContain('mismatched_legs');
+    expect(s.entryPriceUsdc).toBeNull();
+    expect(s.exitPriceUsdc).toBeNull();
+    expect(s.edgeUsdc).toBeNull();
+    expect(s.netEdgeUsdc).toBeNull();
+    expect(s.netAfterCapitalUsdc).toBeNull();
+    expect(s.maxExecutableSize).toBeNull();
+    expect(s.totalNetUsdc).toBeNull();
+    expect(s.roiApyPct).toBeNull();
+    expect(s.isProfitable).toBe(false);
+    expect(s.isOpportunity).toBe(false); // NON_EXECUTABLE_FLAGS includes mismatched_legs
+  });
+
+  it('nulls profit for an expiry-offset match even at the same strike', () => {
+    const r = row(deriveQuote(), oliveQuote());
+    r.olive.expiryOffsetDays = 1; // exact strike, ±1-day tolerance match
+    const [s] = computeSignals([r], cfg, NOW);
+    expect(s.flags).toContain('mismatched_legs');
+    expect(s.edgeUsdc).toBeNull();
+    expect(s.isOpportunity).toBe(false);
+  });
+
+  it('same-contract AMM rows (no offsets) keep full profit estimates', () => {
+    const [s] = computeSignals([row(deriveQuote(), oliveQuote())], cfg, NOW);
+    expect(s.flags).not.toContain('mismatched_legs');
+    expect(s.edgeUsdc).toBeCloseTo(9, 6);
+    expect(s.maxExecutableSize).toBe(5);
+  });
+});

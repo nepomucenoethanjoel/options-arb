@@ -191,3 +191,58 @@ describe('matchChain', () => {
     expect(rows[0].unmatchedReason).toBe('no_olive_data');
   });
 });
+
+describe('matchChain — structured leg offsets', () => {
+  it('flags interpolated matches with the strike offset', () => {
+    const oliveListing: OptionInstrument = {
+      ...deriveInst(2910, '20261030'),
+      venue: 'olive',
+      instrumentId: 'OLIVE-20261030-2910-C',
+    };
+    const rows = matchChain({
+      now: NOW,
+      underlying: 'ETH',
+      deriveInstruments: [deriveInst(2900)],
+      deriveQuotes: new Map(),
+      oliveInstruments: [oliveListing],
+      oliveQuotes: new Map([['OLIVE-20261030-2910-C', quote('olive', 'OLIVE-20261030-2910-C', 0.52)]]),
+      config,
+    });
+    expect(rows[0].olive.strikeOffset).toBe(10);
+    expect(rows[0].olive.expiryOffsetDays).toBeUndefined();
+  });
+
+  it('flags expiry-offset matches on the exact-strike branch too', () => {
+    const oliveListing: OptionInstrument = {
+      ...deriveInst(2900, '20261031'), // same strike, +1 day
+      venue: 'olive',
+      instrumentId: 'OLIVE-20261031-2900-C',
+    };
+    const rows = matchChain({
+      now: NOW,
+      underlying: 'ETH',
+      deriveInstruments: [deriveInst(2900)],
+      deriveQuotes: new Map(),
+      oliveInstruments: [oliveListing],
+      oliveQuotes: new Map([['OLIVE-20261031-2900-C', quote('olive', 'OLIVE-20261031-2900-C', 0.52)]]),
+      config,
+    });
+    expect(rows[0].olive.strikeOffset).toBeUndefined();
+    expect(rows[0].olive.expiryOffsetDays).toBe(1);
+  });
+
+  it('leaves offsets undefined for same-day AMM synthetics (live behavior)', () => {
+    const rows = matchChain({
+      now: NOW,
+      underlying: 'ETH',
+      deriveInstruments: [deriveInst(2900)],
+      deriveQuotes: new Map([['ETH-20261030-2900-C', quote('derive', 'ETH-20261030-2900-C', 0.6)]]),
+      oliveQuoteProvider: (strike, expiryTs, kind) => ({
+        quote: quote('olive', `SYNTH-${strike}-${expiryTs}-${kind}`, 0.55),
+      }),
+      config,
+    });
+    expect(rows[0].olive.strikeOffset).toBeUndefined();
+    expect(rows[0].olive.expiryOffsetDays).toBeUndefined();
+  });
+});
