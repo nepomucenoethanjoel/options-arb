@@ -39,6 +39,7 @@ interface MarketFile {
   underlyingFree: number | null;
   usdcFreeUsd: number | null;
   liquidityUsd: number | null;
+  rates: { tokenApr: number; usdcApr: number } | null;
 }
 
 async function call(method: string, params: Record<string, unknown>) {
@@ -74,6 +75,39 @@ async function fetchMarketFile(sym: string): Promise<MarketFile> {
       const raw = snap?.rawOnChainPoolSnapshot;
       const underlyingFree = custodyFree(raw?.underlyingCustody);
       const usdcFreeUsd = custodyFree(raw?.usdcCustody);
+      // Live pricing rates: per-custody borrow curve at current utilization
+      // (their UI's "Fixed Rate (L/S)") — independent reimplementation of
+      // the adapter's parse.
+      const curveRate = (c: any): number | null => {
+        const pts = Array.isArray(c?.borrowRateCurve?.points) ? c.borrowRateCurve.points : [];
+        const byUtil = new Map<number, number>();
+        for (const p of pts) {
+          const x = n(p?.utilizationRateBps);
+          const y = n(p?.borrowRateBps);
+          if (x != null && y != null) byUtil.set(x, y);
+        }
+        const uniq = [...byUtil.entries()].sort((a, b) => a[0] - b[0]);
+        if (uniq.length === 0) return null;
+        const owned = n(c?.tokenOwned);
+        const locked = n(c?.tokenLocked) ?? 0;
+        if (owned == null || owned <= 0) return null;
+        const util = Math.min(10_000, Math.max(0, (locked / owned) * 10_000));
+        if (util <= uniq[0]![0]) return uniq[0]![1];
+        for (let i = 1; i < uniq.length; i++) {
+          const [x1, y1] = uniq[i]!;
+          if (util <= x1) {
+            const [x0, y0] = uniq[i - 1]!;
+            return y0 + ((y1 - y0) * (util - x0)) / (x1 - x0);
+          }
+        }
+        return uniq[uniq.length - 1]![1];
+      };
+      const tokenRateBps = raw?.underlyingCustody ? curveRate(raw.underlyingCustody) : null;
+      const usdcRateBps = raw?.usdcCustody ? curveRate(raw.usdcCustody) : null;
+      const rates =
+        tokenRateBps != null && usdcRateBps != null
+          ? { tokenApr: tokenRateBps / 10_000, usdcApr: usdcRateBps / 10_000 }
+          : null;
       const aum = n(snap?.poolSummary?.aumUsd);
       const claims = n(snap?.poolSummary?.openPositionEntryClaimsUsd);
       const liquidityUsd =
@@ -82,7 +116,7 @@ async function fetchMarketFile(sym: string): Promise<MarketFile> {
           : aum != null && claims != null
             ? Math.max(0, aum - claims)
             : null;
-      return { spot, vol, underlyingFree, usdcFreeUsd, liquidityUsd };
+      return { spot, vol, underlyingFree, usdcFreeUsd, liquidityUsd, rates };
     } catch (e) {
       lastErr = e instanceof Error ? e.message : String(e);
       await new Promise((r) => setTimeout(r, 1500));
@@ -123,11 +157,13 @@ async function main() {
   console.log(`verifying ${target.pairKey} (${target.how})`);
 
   const market = await fetchMarketFile(target.underlying);
-  const rates =
-    cfg.oliveRateOverrides[target.underlying] ??
-    { token: cfg.oliveTokenRateApr, usdc: cfg.oliveUsdcRateApr };
+  // Live borrow-curve rates when present; config pins only as fallback.
+  const rates = market.rates
+    ? { token: market.rates.tokenApr, usdc: market.rates.usdcApr }
+    : (cfg.oliveRateOverrides[target.underlying] ??
+      { token: cfg.oliveTokenRateApr, usdc: cfg.oliveUsdcRateApr });
   console.log(
-    `live inputs: Stork spot ${market.spot} · model vol ${(market.vol * 100).toFixed(2)}% · rates L/S ${(rates.token * 100).toFixed(2)}%/${(rates.usdc * 100).toFixed(2)}% · custody free: ${market.underlyingFree ?? '?'} ${target.underlying} / $${market.usdcFreeUsd ?? '?'}`,
+    `live inputs: Stork spot ${market.spot} · model vol ${(market.vol * 100).toFixed(2)}% · rates L/S ${(rates.token * 100).toFixed(2)}%/${(rates.usdc * 100).toFixed(2)}%${market.rates ? ' (borrow-curve, live)' : ' (config pins)'} · custody free: ${market.underlyingFree ?? '?'} ${target.underlying} / $${market.usdcFreeUsd ?? '?'}`,
   );
 
   const raw = (await call('public/get_tickers', {

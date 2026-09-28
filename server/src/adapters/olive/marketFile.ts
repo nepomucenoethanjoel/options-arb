@@ -33,6 +33,14 @@ export interface OliveMarketFileData {
    */
   underlyingFree: number | null;
   usdcFreeUsd: number | null;
+  /**
+   * Live pricing rates (fractions) from the per-custody borrowRateCurve at
+   * current utilization — what their UI shows as "Fixed Rate (L/S)" and what
+   * their pricer uses (verified 2026-09-28: SOL curve at 20.8% util = 15.02%
+   * vs UI 15.04%; BTC USDC custody 88% utilized = 42.15% short rate).
+   * Null when custody/curve data is missing.
+   */
+  rates: { tokenApr: number; usdcApr: number } | null;
   /** File generation time (ms). */
   asOfMs: number;
   /** Last on-chain EWMA write (ms) — the projection base. */
@@ -82,6 +90,38 @@ export function parseOliveMarketFile(json: any, underlying: string): OliveMarket
   const underlyingFree = custodyFree(raw?.underlyingCustody);
   const usdcFreeUsd = custodyFree(raw?.usdcCustody);
 
+  /** Borrow rate (bps) at a utilization (bps) via piecewise-linear curve. */
+  const curveRate = (custody: any): number | null => {
+    const pts = Array.isArray(custody?.borrowRateCurve?.points) ? custody.borrowRateCurve.points : [];
+    const byUtil = new Map<number, number>();
+    for (const p of pts) {
+      const x = num(p?.utilizationRateBps);
+      const y = num(p?.borrowRateBps);
+      if (x != null && y != null) byUtil.set(x, y);
+    }
+    const uniq = [...byUtil.entries()].sort((a, b) => a[0] - b[0]);
+    if (uniq.length === 0) return null;
+    const owned = num(custody?.tokenOwned);
+    const locked = num(custody?.tokenLocked) ?? 0;
+    if (owned == null || owned <= 0) return null;
+    const util = Math.min(10_000, Math.max(0, (locked / owned) * 10_000));
+    if (util <= uniq[0]![0]) return uniq[0]![1];
+    for (let i = 1; i < uniq.length; i++) {
+      const [x1, y1] = uniq[i]!;
+      if (util <= x1) {
+        const [x0, y0] = uniq[i - 1]!;
+        return y0 + ((y1 - y0) * (util - x0)) / (x1 - x0);
+      }
+    }
+    return uniq[uniq.length - 1]![1];
+  };
+  const tokenRateBps = raw?.underlyingCustody ? curveRate(raw.underlyingCustody) : null;
+  const usdcRateBps = raw?.usdcCustody ? curveRate(raw.usdcCustody) : null;
+  const rates =
+    tokenRateBps != null && usdcRateBps != null
+      ? { tokenApr: tokenRateBps / 10_000, usdcApr: usdcRateBps / 10_000 }
+      : null;
+
   // Olive's UI "Available Liquidity" is free-underlying × spot + free-USDC
   // (verified live 2026-09-28: 23.7 SOL × $118.5 + $1,296 ≈ $4,105); the
   // AUM − entry-claims form is only the fallback when custody data is absent.
@@ -105,6 +145,7 @@ export function parseOliveMarketFile(json: any, underlying: string): OliveMarket
     entryClaimsUsd,
     underlyingFree,
     usdcFreeUsd,
+    rates,
     asOfMs,
     volOnChainMs,
     projectionBranch: volObj?.projectionBranch ?? null,

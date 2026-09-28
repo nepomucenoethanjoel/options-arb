@@ -112,3 +112,61 @@ describe('parseOliveMarketFile', () => {
     expect(parseOliveMarketFile(null, 'SOL')).toBeNull();
   });
 });
+
+describe('parseOliveMarketFile — live borrow-curve rates', () => {
+  const rateFixture = (underlying: {
+    tokenOwned: string; tokenLocked: string;
+  }, usdc: { tokenOwned: string; tokenLocked: string }) => ({
+    ...fixture,
+    state: {
+      payload: {
+        snapshot: {
+          ...fixture.state.payload.snapshot,
+          rawOnChainPoolSnapshot: {
+            underlyingCustody: {
+              tokenOwned: underlying.tokenOwned, tokenLocked: underlying.tokenLocked, decimals: 9,
+              borrowRateCurve: { points: [
+                { utilizationRateBps: '0', borrowRateBps: '800' },
+                { utilizationRateBps: '8000', borrowRateBps: '3500' },
+                { utilizationRateBps: '10000', borrowRateBps: '16000' },
+              ] },
+            },
+            usdcCustody: {
+              tokenOwned: usdc.tokenOwned, tokenLocked: usdc.tokenLocked, decimals: 6,
+              borrowRateCurve: { points: [
+                { utilizationRateBps: '0', borrowRateBps: '200' },
+                { utilizationRateBps: '8000', borrowRateBps: '1500' },
+                { utilizationRateBps: '10000', borrowRateBps: '8000' },
+              ] },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  it('interpolates the curve at current utilization (SOL live values 2026-09-28)', () => {
+    // 20.80% util → 8% + 27%×(20.8/80) = 15.02% long; USDC 0% util → 2.00%
+    const d = parseOliveMarketFile(
+      rateFixture({ tokenOwned: '29933457843', tokenLocked: '6226564999' }, { tokenOwned: '1296319507', tokenLocked: '0' }),
+      'SOL',
+    )!;
+    expect(d.rates).not.toBeNull();
+    expect(d.rates!.tokenApr).toBeCloseTo(0.1502, 3);
+    expect(d.rates!.usdcApr).toBeCloseTo(0.02, 6);
+  });
+
+  it('rates move with utilization (BTC USDC custody 88.35% → 42.15% short rate)', () => {
+    const d = parseOliveMarketFile(
+      rateFixture({ tokenOwned: '851488', tokenLocked: '0' }, { tokenOwned: '424742682', tokenLocked: '375273880' }),
+      'BTC',
+    )!;
+    expect(d.rates!.tokenApr).toBeCloseTo(0.08, 6);
+    expect(d.rates!.usdcApr).toBeCloseTo(0.4215, 3);
+  });
+
+  it('rates are null when the custody snapshot or curves are absent', () => {
+    const d = parseOliveMarketFile(fixture, 'SOL')!;
+    expect(d.rates).toBeNull();
+  });
+});

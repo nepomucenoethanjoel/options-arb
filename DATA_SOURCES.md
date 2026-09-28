@@ -257,6 +257,15 @@ Contents (top-level keys): `asOf`, `ticker` (all 7 Stork prices + USDC),
   `freeUnderlying × spot + freeUSDC` (verified live: 23.7 SOL × $118.5 + $1,296 ≈
   $4,105). Wired into signal sizing 2026-09-28 (`poolCustodyByAsset`; the scalar
   AUM pin remains a fallback, flagged `pool_capacity_estimated`).
+- `…Custody.borrowRateCurve` — **live pricing rates** (decoded 2026-09-28): each
+  custody carries a utilization→bps curve (underlying: 0%→800, 80%→3500, 100%→16000
+  bps; USDC: 0%→200, 80%→1500, 100%→8000). Their UI's "Fixed Rate (L/S)" and their
+  pricer use the curve at current utilization (`tokenLocked / tokenOwned`):
+  verified SOL 20.8% util → 15.02% vs UI 15.04%; USDC 0% util → 2.00% exact;
+  BTC's USDC custody at 88.4% util → **42.15% short rate** (the 2026-09-27 2% pin
+  was utilization-0); ZEC 84.6% → 30.06% (was pinned 27.18%). Wired 2026-09-28 —
+  market-file rates override the `.env` pins (caveat `rates_live`), pins are
+  fallback-only.
 
 Live pool AUM observed 2026-09-27 ~21:30 UTC: SOL $4,921 · BTC $1,107 ·
 ETH $1,510 — the BTC/ETH pools cannot collateralize a single new option at
@@ -371,4 +380,5 @@ No published SDK or IDL reference.
 | 2026-09-28 | **Derive deep-wing mark/IV inconsistency observed**: SOL-20261225-500-P mark vs BS-at-their-IV off $1.98 on a $377 mark (other 20261225 wings $0.4–1.4); standard expiries RMS $0.05–0.09. Inverting their marks gives IVs up to 166 vpts off their quoted IV on far-OTM rows (tick-rounded marks) | App flags via `iv_mark_inconsistent` |
 | 2026-09-28 | **Independent review verification**: our BS at Derive's IV/fwd/df reproduces 187 live marks (RMS $0.05–0.09 per expiry); Olive synth premiums match market-file-input recomputation across 39 near-money pairs on all 4 assets; venue spot basis (Derive index vs Stork) ≤ 0.08% | Review session, scripts not retained |
 | 2026-09-28 | **Long-tenor pricing convention DECODED (269d UI quotes)**: SOL 25Jun2027 120C $32.4057 / δ 0.6837 and 120P $28.3989 — call fits classic BS(rL) to $0.002 (df=e^(−rL·T); flat df overstates 11.8% at 269d), put fits strike-accretion df=e^(+rS·T) to $0.008. Re-reads the 7d snapshot 8× better (Δ$0.019 → $0.002). Expiry picker: presets match Derive's calendar + Custom Date calendar; TV symbol 1813910400000 = 2027-06-25T08:00Z | Encoded in synth pricer + verify-pricing + synth.test.ts |
+| 2026-09-28 | **Live pricing rates decoded (borrowRateCurve)**: per-custody utilization→bps curves in the market file; "Fixed Rate (L/S)" = curve at locked/owned utilization. SOL 15.02%/2.00% (UI 15.04/2.00), BTC **42.15% short** at 88% USDC utilization (2% pin was wrong), ZEC 30.06%. Wired as live rates with `.env` pins as fallback (`rates_live` caveat) | Encoded in marketFile parse + adapter + handcheck |
 | | *(append new probe results here)* | |

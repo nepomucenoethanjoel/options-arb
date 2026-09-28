@@ -216,20 +216,26 @@ export class OliveAdapter {
       caveats.push('model_vol_unavailable_oracle_error');
     }
 
+    // Pricing rates: live from the market file's per-custody borrow curves
+    // at current utilization (their UI's "Fixed Rate (L/S)") when present;
+    // the config pins are the fallback.
+    const liveRates = file?.rates ?? null;
+    if (liveRates) caveats.push('rates_live');
+
     const state: VenueMarketState = {
       venue: 'olive',
       underlying: u,
       spot,
       modelVol: vol,
-      tokenRateApr: this.ratesFor(u).tokenApr,
-      usdcRateApr: this.ratesFor(u).usdcApr,
+      tokenRateApr: liveRates?.tokenApr ?? this.ratesFor(u).tokenApr,
+      usdcRateApr: liveRates?.usdcApr ?? this.ratesFor(u).usdcApr,
       ts: Date.now(),
       source: file ? 'olive:market-file(live)' : this.rest ? 'olive:rest-health+onchain' : 'olive:onchain',
       caveats,
     };
     {
       const { tokenApr, usdcApr } = this.ratesFor(u);
-      if (tokenApr === 0 && usdcApr === 0) state.caveats?.push('rates_unknown_priced_flat');
+      if (!liveRates && tokenApr === 0 && usdcApr === 0) state.caveats?.push('rates_unknown_priced_flat');
     }
 
     this.stateCache.set(underlying, { ts: Date.now(), state });
@@ -263,12 +269,22 @@ export class OliveAdapter {
     return cached.state;
   }
 
+  /** Rates for pricing: the state's rates (live borrow-curve when the market
+   * file is reachable — getMarketState resolves them) with the config pins
+   * as the fallback. */
+  private pricingRates(underlying: string, state: VenueMarketState | null): { tokenApr: number; usdcApr: number } {
+    if (state?.tokenRateApr != null && state?.usdcRateApr != null) {
+      return { tokenApr: state.tokenRateApr, usdcApr: state.usdcRateApr };
+    }
+    return this.ratesFor(underlying);
+  }
+
   /** Live quotable strike band for an expiry, or null when unbounded. */
   getBounds(underlying: string, expiryTs: number, now = Date.now()): { lower: number; upper: number } | null {
     if (this.opts.strikeBoundSigmas <= 0) return null;
     const state = this.getCachedState(underlying);
     if (!state?.spot || state.modelVol == null) return null;
-    return oliveStrikeBounds(state.spot, state.modelVol, yearsBetween(now, expiryTs), this.ratesFor(underlying), this.opts.strikeBoundSigmas);
+    return oliveStrikeBounds(state.spot, state.modelVol, yearsBetween(now, expiryTs), this.pricingRates(underlying, state), this.opts.strikeBoundSigmas);
   }
 
   /** Deterministic AMM quote at an arbitrary grid point. */
@@ -285,7 +301,7 @@ export class OliveAdapter {
     if (state.modelVol == null) return { rejected: 'no_vol' };
     const tau = yearsBetween(now, expiryTs);
     if (tau * 365 > this.opts.oliveMaxTenorDays) return { rejected: 'beyond_max_tenor' };
-    const rates = this.ratesFor(underlying);
+    const rates = this.pricingRates(underlying, state);
     if (this.opts.strikeBoundSigmas > 0) {
       const bounds = oliveStrikeBounds(state.spot, state.modelVol, tau, rates, this.opts.strikeBoundSigmas);
       if (strike < bounds.lower || strike > bounds.upper) {
