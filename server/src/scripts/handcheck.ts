@@ -248,9 +248,16 @@ async function main() {
   const gross = exit - entry;
 
   const spot = index; // engine: dq.indexPrice ?? spotByUnderlying ?? forward
-  const notional = target.kind === 'call' ? spot : target.strike;
-  const deriveFee = notional * (cfg.deriveTakerFeeBps / 10_000);
-  const oliveFee = olivePremium > 0 ? Math.min(notional * 0.00025, olivePremium * 0.1) : 0; // scheduler constants: min(2.5 bps, 10% premium)
+  // Fee models (verified 2026-09-29):
+  //   Derive taker: $0.50/order + min(3bps × notional, 12.5% × leg premium)
+  //   Olive:        min(2.5bps × qty × ORACLE SPOT, 10% × premium) — spot base for both kinds
+  const deriveLegPremium =
+    spreadVols >= 0 ? bid ?? deriveMark : ask ?? deriveMark;
+  let deriveFee = spot * (cfg.deriveTakerFeeBps / 10_000);
+  if (deriveLegPremium != null && deriveLegPremium > 0) {
+    deriveFee = Math.min(deriveFee, deriveLegPremium * 0.125);
+  }
+  const oliveFee = olivePremium > 0 ? Math.min(spot * 0.00025, olivePremium * 0.1) : 0;
   const costs = deriveFee + oliveFee + cfg.solanaFeeUsdc;
   const collateral = target.kind === 'call' ? spot : target.strike;
   const capital = collateral * cfg.capitalBorrowRateApr * tau;
@@ -270,7 +277,7 @@ async function main() {
     const capacity = custodyCap ?? fallbackCap;
     if (capacity != null && capacity < bookSize) size = capacity;
   }
-  const total = size != null && size > 0 && netAfterCapital != null ? netAfterCapital * size : null;
+  const total = size != null && size > 0 && netAfterCapital != null ? netAfterCapital * size - 0.5 : null; // $0.50 Derive order fee
   const apy = netAfterCapital / collateral / tau * 100;
   const basis = Math.abs(delta) * spot * deriveIv * Math.sqrt(0.5 / (365 * 24));
   // Cross-check: reprice at the CYCLE's olive vol (row.olive.quote.iv) so the

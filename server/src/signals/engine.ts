@@ -33,6 +33,9 @@ export interface SignalConfig {
 const NON_EXECUTABLE_FLAGS = new Set(['no_book', 'one_sided', 'thin_book', 'wide_book', 'stale', 'mismatched_legs']);
 /** Derive settles a 30-minute TWAP of the underlying; Olive settles a Stork oracle print. */
 const SETTLEMENT_TWAP_HOURS = 0.5;
+/** Derive taker base fee, per ORDER regardless of size (docs trading-fees,
+ *  verified 2026-09-29) — charged once per clip, not per contract. */
+const DERIVE_TAKER_ORDER_FEE_USDC = 0.5;
 
 /**
  * Burst-persistence gate: only rows a user could actually capture are worth
@@ -122,12 +125,24 @@ export function computeSignals(
     const spot = dq.indexPrice ?? spotByUnderlying[row.underlying] ?? dq.forward ?? null;
 
     // ── Costs ───────────────────────────────────────────────────────────────
-    const notionalProxy = row.kind === 'call' ? (spot ?? row.strike) : row.strike;
-    const deriveFee = notionalProxy * (cfg.deriveTakerFeeBps / 10_000);
+    // Derive taker (docs.derive.xyz/integrators/trading/trading-fees, verified
+    // 2026-09-29): $0.50 per ORDER + min(0.03% × notional, 12.5% × premium).
+    // Notional ≈ qty × index. The $0.50 is order-level — charged once at the
+    // clip total below, not per contract.
+    // Olive (docs.olive.exchange/options/option-fees + a live fill 2026-09-29):
+    // min(2.5bps × qty × ORACLE SPOT, 10% × premium) — spot notional for BOTH
+    // kinds (the strike-based base overstated ITM put fees).
+    const feeNotional = spot ?? row.strike;
+    const deriveLegPremium =
+      direction === 'buy_olive_sell_derive' ? deriveBid ?? deriveMark : deriveAsk ?? deriveMark;
+    let deriveFee = feeNotional * (cfg.deriveTakerFeeBps / 10_000);
+    if (deriveLegPremium != null && deriveLegPremium > 0) {
+      deriveFee = Math.min(deriveFee, deriveLegPremium * 0.125);
+    }
     const oliveFee =
       oq.mark > 0
         ? Math.min(
-            notionalProxy * (cfg.oliveFeeNotionalBps / 10_000),
+            feeNotional * (cfg.oliveFeeNotionalBps / 10_000),
             oq.mark * (cfg.oliveFeePremiumPct / 100),
           )
         : 0;
@@ -208,7 +223,7 @@ export function computeSignals(
     }
     const totalNetUsdc =
       maxExecutableSize != null && maxExecutableSize > 0 && netAfterCapitalUsdc != null
-        ? netAfterCapitalUsdc * maxExecutableSize
+        ? netAfterCapitalUsdc * maxExecutableSize - DERIVE_TAKER_ORDER_FEE_USDC
         : null;
 
     // Annualized ROI on the locked collateral — comparable across expiries.

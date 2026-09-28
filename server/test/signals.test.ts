@@ -152,7 +152,7 @@ describe('computeSignals — profit estimates', () => {
   it('caps the size at the Derive touch and totals the profit', () => {
     const [s] = computeSignals([row(deriveQuote({ bidSize: 3, askSize: 7 }), oliveQuote())], cfg, NOW);
     expect(s.maxExecutableSize).toBe(3);
-    expect(s.totalNetUsdc).toBeCloseTo(s.netAfterCapitalUsdc! * 3, 2); // totals round to 2dp
+    expect(s.totalNetUsdc).toBeCloseTo(s.netAfterCapitalUsdc! * 3 - 0.5, 2); // − $0.50 Derive order fee
     // score is USDC-native: the size-capped total ranks first
     expect(s.score).toBeCloseTo(s.totalNetUsdc!, 2);
   });
@@ -182,7 +182,7 @@ describe('computeSignals — profit estimates', () => {
     expect(s.maxExecutableSize).toBe(1);
     expect(s.flags).toContain('pool_capacity_capped');
     expect(s.flags).toContain('pool_capacity_estimated');
-    expect(s.totalNetUsdc).toBeCloseTo(s.netAfterCapitalUsdc! * 1, 2);
+    expect(s.totalNetUsdc).toBeCloseTo(s.netAfterCapitalUsdc! * 1 - 0.5, 2);
   });
 
   it('caps calls by the free underlying custody (live market-file data)', () => {
@@ -439,5 +439,30 @@ describe('computeSignals — mismatched-legs guard', () => {
     expect(s.flags).not.toContain('mismatched_legs');
     expect(s.edgeUsdc).toBeCloseTo(9, 6);
     expect(s.maxExecutableSize).toBe(5);
+  });
+});
+
+describe('fee models — verified against venue docs + a live fill (2026-09-29)', () => {
+  it('Derive taker: min(3bps × notional, 12.5% × leg premium) — the cap binds on cheap legs', () => {
+    // Deep-OTM put, derive ask $2.1: 3bps of $3000 notional = $0.90, but
+    // 12.5% of the $2.1 premium = $0.2625 binds.
+    const q = deriveQuote({ bid: 1.9, ask: 2.1, mark: 2, iv: 0.4, bidSize: 5, askSize: 5 });
+    const [s] = computeSignals([row(q, oliveQuote(3, 0.55))], cfg, NOW);
+    const deriveFee = Math.min(3000 * 0.0003, 2.1 * 0.125);
+    const oliveFee = Math.min(3000 * 0.00025, 3 * 0.1); // 10% premium cap binds
+    expect(s.costsUsdc).toBeCloseTo(deriveFee + oliveFee + 0.05, 6);
+  });
+
+  it('Olive fee uses ORACLE-SPOT notional for both kinds (live-fill fixture)', () => {
+    // ZEC put filled 2026-09-29: qty 0.031854, oracle spot $1,460.30 — the
+    // venue charged $0.011628 = min(2.5bps × qty × SPOT, 10% × premium).
+    // The old strike-based base (K≈1,670) would have charged $0.0133.
+    const qty = 0.031854, spot = 1460.30, premium = 10.99;
+    expect(Math.min(qty * spot * 0.00025, qty * premium * 0.1)).toBeCloseTo(0.011628, 5);
+  });
+
+  it('charges the $0.50 Derive order fee once per clip, not per contract', () => {
+    const [s] = computeSignals([row(deriveQuote({ bidSize: 3, askSize: 7 }), oliveQuote())], cfg, NOW);
+    expect(s.totalNetUsdc).toBeCloseTo(s.netAfterCapitalUsdc! * 3 - 0.5, 1); // totals round to 2dp
   });
 });
