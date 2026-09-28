@@ -1,22 +1,5 @@
 import type { VenueHealth } from '@options-arb/shared';
 
-export interface ObservationRecord {
-  ts: number;
-  venue: 'derive' | 'olive';
-  underlying: string;
-  expiryDate: string;
-  strike: number;
-  kind: string;
-  pairKey: string | null;
-  iv: number | null;
-  mark: number | null;
-  bid: number | null;
-  ask: number | null;
-  bidSize: number | null;
-  askSize: number | null;
-  source: string;
-}
-
 export interface SignalRecord {
   ts: number;
   pairKey: string;
@@ -47,13 +30,14 @@ export interface SpreadHistoryPoint {
 /**
  * Persistence seam — implemented by SqliteStorage today; a later
  * Postgres/Timescale swap only needs to implement this interface.
+ * Signals only: the write-only observations archive was removed 2026-09-28
+ * (nothing read it; the spread-history charts live on the signals table).
  */
 export interface Storage {
-  recordObservations(rows: ObservationRecord[]): void;
   recordSignals(rows: SignalRecord[]): void;
   upsertHealth(h: VenueHealth): void;
   getSpreadHistory(pairKey: string, sinceTs: number): SpreadHistoryPoint[];
-  countObservations(): number;
+  countSignals(): number;
   prune(olderThanTs: number): void;
   close(): void;
 }

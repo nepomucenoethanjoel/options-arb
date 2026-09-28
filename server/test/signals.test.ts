@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { bsPrice, type MatchRow, type OptionQuote } from '@options-arb/shared';
+import { bsPrice, type MatchRow, type OptionQuote, type Signal } from '@options-arb/shared';
 import { toLiteRows } from '../src/scheduler';
-import { computeSignals, type SignalConfig } from '../src/signals/engine';
+import { computeSignals, isPersistWorthy, type SignalConfig } from '../src/signals/engine';
 
 describe('toLiteRows (WS payload projection)', () => {
   it('projects flat fields without nested quotes', () => {
@@ -371,5 +371,34 @@ describe('computeSignals — gating and sorting (unchanged semantics)', () => {
     const signals = computeSignals(rows, cfg, NOW);
     expect(signals[0].isProfitable).toBe(true);
     expect(signals[signals.length - 1].isOpportunity).toBe(false);
+  });
+});
+
+describe('isPersistWorthy — 1/min burst-persistence gate', () => {
+  const sig = (overrides: Partial<Signal>): Signal => ({
+    pairKey: 'X', underlying: 'SOL', expiryDate: '20261030', expiryTs: 0, strike: 100,
+    kind: 'call', ivSpreadVols: 5, ivSpreadBps: 800, entryPriceUsdc: 1, exitPriceUsdc: 2,
+    edgeUsdc: 1, netEdgeUsdc: 0.9, netAfterCapitalUsdc: 0.5, costsUsdc: 0.1, capitalCostUsdc: 0.4,
+    maxExecutableSize: 10, totalNetUsdc: 5, roiApyPct: 10, settlementBasisUsdc: 0.1,
+    syntheticCrossCheckUsdc: 0, crossCheckDeviationUsdc: 0, bookVsMarkUsdc: 0, score: 5,
+    isOpportunity: true, isProfitable: true, direction: 'buy_olive_sell_derive', flags: [], ts: 0,
+    ...overrides,
+  });
+
+  it('keeps executable-direction opportunity/profitable rows with size', () => {
+    expect(isPersistWorthy(sig({}))).toBe(true);
+    expect(isPersistWorthy(sig({ isOpportunity: false, isProfitable: true }))).toBe(true);
+    expect(isPersistWorthy(sig({ isOpportunity: true, isProfitable: false }))).toBe(true);
+  });
+
+  it('drops LP-only directions and price-distorted books to the 10-min floor', () => {
+    expect(isPersistWorthy(sig({ direction: 'buy_derive_sell_olive', flags: ['direction_limited'] }))).toBe(false);
+    expect(isPersistWorthy(sig({ flags: ['price_distortion'] }))).toBe(false);
+  });
+
+  it('drops zero/null-size and uninteresting rows', () => {
+    expect(isPersistWorthy(sig({ maxExecutableSize: 0 }))).toBe(false);
+    expect(isPersistWorthy(sig({ maxExecutableSize: null }))).toBe(false);
+    expect(isPersistWorthy(sig({ isOpportunity: false, isProfitable: false }))).toBe(false);
   });
 });

@@ -2,37 +2,48 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { VenueHealth } from '@options-arb/shared';
-import type { ObservationRecord, SignalRecord, SpreadHistoryPoint, Storage } from './index';
+import type { SignalRecord, SpreadHistoryPoint, Storage } from './index';
 
 /**
  * SQLite-backed Storage using Node's built-in `node:sqlite` (no native addon
  * to compile). WAL mode keeps concurrent reads cheap while the scheduler
- * writes each cycle.
+ * writes each cycle. auto_vacuum=INCREMENTAL + post-prune incremental_vacuum
+ * keeps the file size tracking live data instead of its historical peak.
  */
 export class SqliteStorage implements Storage {
   private readonly db: DatabaseSync;
-  private readonly insertObservation;
   private readonly insertSignal;
 
   constructor(dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true });
     this.db = new DatabaseSync(dbPath);
     this.db.exec('PRAGMA journal_mode = WAL;');
+    // auto_vacuum must be INCREMENTAL for prune() to ever return disk space.
+    // The pragma takes effect immediately on a fresh DB; on an existing DB it
+    // reports the old value (0) until a VACUUM converts the file.
+    this.db.exec('PRAGMA auto_vacuum = INCREMENTAL;');
+    const converted = (this.db.prepare('PRAGMA auto_vacuum').get() as { auto_vacuum: number }).auto_vacuum === 2;
+    // The observations archive was removed 2026-09-28 (write-only, nothing
+    // read it) — drop it so the conversion vacuum reclaims the space.
+    this.db.exec('DROP TABLE IF EXISTS observations;');
+    this.migrate();
+    if (!converted) {
+      const t0 = Date.now();
+      this.db.exec('VACUUM;');
+      console.log(`[storage] one-time VACUUM (auto_vacuum conversion) took ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+    }
+    this.insertSignal = this.db.prepare(
+      `INSERT OR REPLACE INTO signals
+        (ts, pair_key, underlying, spread_vols, spread_bps, derive_iv, olive_iv, edge_usdc,
+         net_usdc, total_net_usdc, roi_apy_pct, max_size, costs_usdc, score,
+         is_opportunity, is_profitable, flags)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+  }
+
+  /** Additive column migration for DBs created before the profit-estimate fields. */
+  private migrate(): void {
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS observations (
-        ts INTEGER NOT NULL,
-        venue TEXT NOT NULL,
-        underlying TEXT NOT NULL,
-        expiry_date TEXT NOT NULL,
-        strike REAL NOT NULL,
-        kind TEXT NOT NULL,
-        pair_key TEXT,
-        iv REAL, mark REAL, bid REAL, ask REAL, bid_size REAL, ask_size REAL,
-        source TEXT NOT NULL,
-        PRIMARY KEY (ts, venue, underlying, expiry_date, strike, kind)
-      );
-      CREATE INDEX IF NOT EXISTS idx_obs_pair ON observations(pair_key, ts);
-      CREATE INDEX IF NOT EXISTS idx_obs_u ON observations(underlying, ts);
       CREATE TABLE IF NOT EXISTS signals (
         ts INTEGER NOT NULL,
         pair_key TEXT NOT NULL,
@@ -49,25 +60,9 @@ export class SqliteStorage implements Storage {
         last_success_ts INTEGER, last_error TEXT
       );
     `);
-    // Migrate before preparing statements that reference migrated columns.
-    this.migrate();
-    this.insertObservation = this.db.prepare(
-      `INSERT OR REPLACE INTO observations
-        (ts, venue, underlying, expiry_date, strike, kind, pair_key, iv, mark, bid, ask, bid_size, ask_size, source)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    );
-    this.insertSignal = this.db.prepare(
-      `INSERT OR REPLACE INTO signals
-        (ts, pair_key, underlying, spread_vols, spread_bps, derive_iv, olive_iv, edge_usdc,
-         net_usdc, total_net_usdc, roi_apy_pct, max_size, costs_usdc, score,
-         is_opportunity, is_profitable, flags)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    );
-  }
-
-  /** Additive column migration for DBs created before the profit-estimate fields. */
-  private migrate(): void {
     const columns: Array<[string, string]> = [
+      ['costs_usdc', 'REAL'],
+      ['score', 'REAL'],
       ['net_usdc', 'REAL'],
       ['total_net_usdc', 'REAL'],
       ['roi_apy_pct', 'REAL'],
@@ -80,23 +75,6 @@ export class SqliteStorage implements Storage {
       } catch {
         // column already exists
       }
-    }
-  }
-
-  recordObservations(rows: ObservationRecord[]): void {
-    if (rows.length === 0) return;
-    this.db.exec('BEGIN');
-    try {
-      for (const r of rows) {
-        this.insertObservation.run(
-          r.ts, r.venue, r.underlying, r.expiryDate, r.strike, r.kind, r.pairKey,
-          r.iv, r.mark, r.bid, r.ask, r.bidSize, r.askSize, r.source,
-        );
-      }
-      this.db.exec('COMMIT');
-    } catch (e) {
-      this.db.exec('ROLLBACK');
-      throw e;
     }
   }
 
@@ -148,14 +126,17 @@ export class SqliteStorage implements Storage {
     }));
   }
 
-  countObservations(): number {
-    const row = this.db.prepare('SELECT COUNT(*) AS n FROM observations').get() as { n: number };
+  /** Row count of the signals table (health/debug display). */
+  countSignals(): number {
+    const row = this.db.prepare('SELECT COUNT(*) AS n FROM signals').get() as { n: number };
     return row.n;
   }
 
   prune(olderThanTs: number): void {
-    this.db.prepare('DELETE FROM observations WHERE ts < ?').run(olderThanTs);
     this.db.prepare('DELETE FROM signals WHERE ts < ?').run(olderThanTs);
+    // Return the freed pages to the filesystem instead of holding them
+    // forever (requires auto_vacuum=INCREMENTAL — see enableAutoVacuum).
+    this.db.exec('PRAGMA incremental_vacuum;');
   }
 
   close(): void {

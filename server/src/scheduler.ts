@@ -11,8 +11,8 @@ import type { AppConfig } from './config';
 import type { DeriveAdapter } from './adapters/derive';
 import type { OliveAdapter } from './adapters/olive';
 import { matchChain } from './matching/engine';
-import { computeSignals } from './signals/engine';
-import type { ObservationRecord, Storage } from './storage';
+import { computeSignals, isPersistWorthy } from './signals/engine';
+import type { Storage } from './storage';
 import type { Alerter } from './alerts';
 
 /** Compact projection for the WS push — full rows stay server-side. */
@@ -69,7 +69,6 @@ interface UnderlyingResult {
   underlying: string;
   rows: MatchRow[];
   signals: Signal[];
-  observations: ObservationRecord[];
   spot: number | null;
   oliveCaveats: string[];
 }
@@ -183,14 +182,12 @@ export class Orchestrator extends EventEmitter {
 
       const allRows: MatchRow[] = [];
       const allSignals: Signal[] = [];
-      const observations: ObservationRecord[] = [];
       const spots: Record<string, number | null> = {};
       const oliveCaveats = new Set<string>();
       for (const r of results) {
         if (!r) continue;
         allRows.push(...r.rows);
         allSignals.push(...r.signals);
-        observations.push(...r.observations);
         spots[r.underlying] = r.spot;
         for (const c of r.oliveCaveats) oliveCaveats.add(c);
       }
@@ -208,31 +205,24 @@ export class Orchestrator extends EventEmitter {
       }
 
       try {
-        // Persistence sampling: a full-chain cycle carries ~7k rows and cycles
-        // run every ~15-20s — writing everything every cycle is ~34M rows/day,
-        // which a single SQLite file cannot absorb at 30-day retention.
-        // Rows worth charting at high resolution (opportunity/profitable with
-        // non-zero executable size) persist at most once per minute; the full
-        // sweep persists every PERSIST_FULL_INTERVAL_MS. History charts keep
-        // ≥1 point/10min for every pair and ~1/min for live candidates.
+        // Persistence sampling: a full-chain cycle carries ~2.3k signals and
+        // cycles run every ~15-20s — writing everything every cycle is ~9M
+        // rows/day, far more than SQLite (or the history charts) need.
+        // Rows worth charting at high resolution (executable-direction
+        // opportunity/profitable with non-zero size — see isPersistWorthy)
+        // persist at most once per minute; the full sweep persists every
+        // PERSIST_FULL_INTERVAL_MS. History charts keep ≥1 point/10min for
+        // every pair and ~1/min for live executable candidates.
         const persistAll = now - this.lastFullPersistMs >= PERSIST_FULL_INTERVAL_MS;
         if (persistAll) this.lastFullPersistMs = now;
         const persistInteresting = persistAll || now - this.lastInterestingPersistMs >= PERSIST_INTERESTING_INTERVAL_MS;
         if (persistInteresting) this.lastInterestingPersistMs = now;
-        const isInteresting = (s: typeof allSignals[number]) =>
-          (s.isOpportunity || s.isProfitable) && s.maxExecutableSize !== 0 && s.maxExecutableSize != null;
-        if (persistAll) {
-          this.storage.recordObservations(observations);
-        } else if (persistInteresting) {
-          const activePairs = new Set(allSignals.filter(isInteresting).map((s) => s.pairKey));
-          this.storage.recordObservations(observations.filter((o) => o.pairKey != null && activePairs.has(o.pairKey)));
-        }
         const ivsByPair = new Map(
           allRows.map((r) => [r.pairKey, { d: r.derive.quote?.iv ?? null, o: r.olive.quote?.iv ?? null }]),
         );
         this.storage.recordSignals(
           allSignals
-            .filter((s) => persistAll || (persistInteresting && isInteresting(s)))
+            .filter((s) => persistAll || (persistInteresting && isPersistWorthy(s)))
             .map((s) => ({
               ts: s.ts,
               pairKey: s.pairKey,
@@ -294,7 +284,6 @@ export class Orchestrator extends EventEmitter {
   private async processUnderlying(underlying: string, now: number): Promise<UnderlyingResult> {
     const rows: MatchRow[] = [];
     const signals: Signal[] = [];
-    const observations: ObservationRecord[] = [];
     const oliveCaveats: string[] = [];
 
     const [instruments, oliveState] = await Promise.all([
@@ -309,7 +298,7 @@ export class Orchestrator extends EventEmitter {
     ]);
     oliveCaveats.push(...(oliveState?.caveats ?? []));
     if (instruments.length === 0) {
-      return { underlying, rows, signals, observations, spot: null, oliveCaveats };
+      return { underlying, rows, signals, spot: null, oliveCaveats };
     }
 
     const expiryDates = [...new Set(instruments.map((i) => i.expiryDate))].sort();
@@ -405,52 +394,7 @@ export class Orchestrator extends EventEmitter {
       ),
     );
 
-    const pairKeyByInstrument = new Map<string, string>();
-    for (const row of matched) {
-      if (row.derive.instrumentId) pairKeyByInstrument.set(row.derive.instrumentId, row.pairKey);
-      if (row.olive.instrumentId) pairKeyByInstrument.set(row.olive.instrumentId, row.pairKey);
-    }
-    for (const q of quotes.values()) {
-      const parsed = q.instrumentId;
-      observations.push({
-        ts: now,
-        venue: 'derive',
-        underlying,
-        expiryDate: parsed.split('-')[1] ?? '',
-        strike: Number((parsed.split('-')[2] ?? '0').replace('_', '.')),
-        kind: parsed.endsWith('-P') ? 'put' : 'call',
-        pairKey: pairKeyByInstrument.get(parsed) ?? null,
-        iv: q.iv,
-        mark: q.mark,
-        bid: q.bid,
-        ask: q.ask,
-        bidSize: q.bidSize,
-        askSize: q.askSize,
-        source: q.source,
-      });
-    }
-    for (const row of matched) {
-      const oq = row.olive.quote;
-      if (!oq) continue;
-      observations.push({
-        ts: now,
-        venue: 'olive',
-        underlying,
-        expiryDate: row.expiryDate,
-        strike: row.strike,
-        kind: row.kind,
-        pairKey: row.pairKey,
-        iv: oq.iv,
-        mark: oq.mark,
-        bid: oq.bid,
-        ask: oq.ask,
-        bidSize: oq.bidSize,
-        askSize: oq.askSize,
-        source: oq.source,
-      });
-    }
-
-    return { underlying, rows, signals, observations, spot, oliveCaveats };
+    return { underlying, rows, signals, spot, oliveCaveats };
   }
 
   /** Chart payload: Derive quote smile + SVI curve vs Olive flat model vol. */

@@ -34,6 +34,22 @@ const NON_EXECUTABLE_FLAGS = new Set(['no_book', 'one_sided', 'thin_book', 'wide
 /** Derive settles a 30-minute TWAP of the underlying; Olive settles a Stork oracle print. */
 const SETTLEMENT_TWAP_HOURS = 0.5;
 
+/**
+ * Burst-persistence gate: only rows a user could actually capture are worth
+ * charting at 1/min. LP-only directions (writing to the Olive pool is an LP
+ * role) and price-distorted books (edge is book noise) drop to the 10-min
+ * full-sweep floor.
+ */
+export function isPersistWorthy(s: Signal): boolean {
+  return (
+    (s.isOpportunity || s.isProfitable) &&
+    s.maxExecutableSize != null &&
+    s.maxExecutableSize > 0 &&
+    !s.flags.includes('direction_limited') &&
+    !s.flags.includes('price_distortion')
+  );
+}
+
 function round(v: number | null, dp: number): number | null {
   if (v == null || !Number.isFinite(v)) return null;
   const f = Math.pow(10, dp);

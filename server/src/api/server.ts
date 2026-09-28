@@ -91,7 +91,7 @@ export async function buildServer(deps: ApiDeps): Promise<FastifyInstance> {
       health: latest?.health ?? null,
       oliveDetail: null,
       oliveRealtime: olive?.getRealtimeHealth() ?? latest?.realtime ?? null,
-      observationsStored: storage.countObservations(),
+      signalsStored: storage.countSignals(),
       config: overviewConfig,
     };
   });
