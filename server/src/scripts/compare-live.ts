@@ -137,9 +137,12 @@ async function main() {
         : p.kind === 'call'
           ? spot * Math.exp(r.token * tau)
           : spot * Math.exp(-r.usdc * tau);
+    // Verified convention (269d + 7d): calls discount at the token rate,
+    // puts accrete the strike at the USDC rate.
+    const df = p.kind === 'call' ? Math.exp(-r.token * tau) : Math.exp(r.usdc * tau);
     const indepOlive =
       forward != null && vol != null
-        ? bsPrice({ forward, strike: p.strike, tauYears: tau, vol, discountFactor: 1, kind: p.kind })
+        ? bsPrice({ forward, strike: p.strike, tauYears: tau, vol, discountFactor: df, kind: p.kind })
         : null;
 
     console.log(`\n=== ${pairKey} (τ=${tau.toFixed(4)}y) ===`);

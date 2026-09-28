@@ -1,56 +1,78 @@
 /**
  * Pricing accuracy verification against BOTH venues' production numbers.
  *
- *  A) Olive ground truth: their live UI quote (SOL 120.17C, Oct-4 expiry)
- *     vs our bsPrice/bsGreeks at their displayed inputs (spot 122.94,
- *     vol 69.06%, rates 15.07% L / 2.00% S). Multiple rate conventions tested;
- *     the one that matches identifies Olive's exact pricing convention.
+ *  A) Olive ground truth — three UI snapshots (7d call 2026-09-27, 269d
+ *     call + 269d put 2026-09-28) tested against the old flat-df convention
+ *     and the verified one:
+ *       call: F=S·e^(rL·T), df=e^(−rL·T)  (classic BS at the long rate)
+ *       put:  F=S·e^(−rS·T), df=e^(+rS·T)  (strike accretes at the short rate)
+ *     The 269d tenor is what discriminates: at 7d the discount factors are
+ *     ≈1 and both conventions fit; at 269d the old one is off by $3.81 on
+ *     the call.
  *  B) Derive ground truth: their option_pricing mark vs bsPrice at their own
  *     IV/forward/discount factor for a live SOL chain.
  */
-import { bsPrice, bsGreeks, normCdf, yearsBetween } from '@options-arb/shared';
+import { bsPrice, bsGreeks, yearsBetween } from '@options-arb/shared';
 
-const snap = {
-  snapshotAt: '2026-09-27T20:45:46.665Z',
-  kind: 'call' as const,
-  strike: 120.17,
-  expiryText: '04 Oct 2026',
-  countdown: '6d 11h 14m',
-  theirPrice: 6.1631,
-  theirDelta: 0.6265,
-  theirGamma: 0.0335,
-  theirTheta: -0.3601, // per day
-  theirVega: 0.0620, // per 1% vol
-  theirPITM: 0.591,
-  spot: 122.94,
-  vol: 0.6906,
-  rateL: 0.1507,
-  rateS: 0.0200,
-};
+const snapshots = [
+  {
+    label: '7d call (2026-09-27 UI)',
+    kind: 'call' as const,
+    strike: 120.17,
+    expiryTs: Date.UTC(2026, 9, 4, 8),
+    nowMs: Date.parse('2026-09-27T20:45:46.665Z'),
+    theirPrice: 6.1631,
+    theirDelta: 0.6265,
+    spot: 122.94,
+    vol: 0.6906,
+    rateL: 0.1507,
+    rateS: 0.02,
+  },
+  {
+    label: '269d call (2026-09-28 UI)',
+    kind: 'call' as const,
+    strike: 120,
+    expiryTs: Date.UTC(2027, 5, 25, 8), // TV symbol 1813910400000
+    nowMs: Date.parse('2026-09-28T13:23:00Z'),
+    theirPrice: 32.4057,
+    theirDelta: 0.6837,
+    spot: 119.81,
+    vol: 0.6697,
+    rateL: 0.1504,
+    rateS: 0.02,
+  },
+  {
+    label: '269d put (2026-09-28 UI)',
+    kind: 'put' as const,
+    strike: 120,
+    expiryTs: Date.UTC(2027, 5, 25, 8),
+    nowMs: Date.parse('2026-09-28T13:20:00Z'),
+    theirPrice: 28.3989,
+    theirDelta: -0.3783, // NOTE: their put delta display uses classic d1 at +rS — inconsistent with their own price form
+    spot: 119.75,
+    vol: 0.6701,
+    rateL: 0.1504,
+    rateS: 0.02,
+  },
+];
 
 async function main() {
   console.log('=== A) Olive ground truth ===\n');
-  const snapMs = Date.parse(snap.snapshotAt);
-  // Countdown implies expiry at 04 Oct 2026 08:00 UTC (Derive-style 08:00).
-  const expiryTs = Date.UTC(2026, 9, 4, 8, 0, 0);
-  const tau = yearsBetween(snapMs, expiryTs);
-  console.log(`tenor: ${tau.toFixed(8)} y (countdown ${snap.countdown} → ${(tau * 365 * 24).toFixed(2)} h)`);
-
-  const conventions: Array<[string, number, number]> = [
-    ['F=S·e^(rL·T), df=1', snap.spot * Math.exp(snap.rateL * tau), 1],
-    ['F=S·e^(rL·T), df=e^(−rS·T)', snap.spot * Math.exp(snap.rateL * tau), Math.exp(-snap.rateS * tau)],
-    ['F=S, df=1 (flat — our current demo convention)', snap.spot, 1],
-    ['F=S·e^(rS·T), df=1', snap.spot * Math.exp(snap.rateS * tau), 1],
-  ];
-  for (const [label, F, df] of conventions) {
-    const price = bsPrice({ forward: F, strike: snap.strike, tauYears: tau, vol: snap.vol, discountFactor: df, kind: 'call' });
-    const g = bsGreeks({ forward: F, strike: snap.strike, tauYears: tau, vol: snap.vol, discountFactor: df, kind: 'call' });
-    const pitm = normCdf((Math.log(F / snap.strike) - 0.5 * snap.vol ** 2 * tau) / (snap.vol * Math.sqrt(tau)));
-    console.log(`${label}`);
-    console.log(`  price ${price.toFixed(4)}  (theirs ${snap.theirPrice}, diff ${(price - snap.theirPrice).toFixed(4)})`);
-    console.log(`  delta ${g.delta.toFixed(4)} (theirs ${snap.theirDelta}) | gamma ${g.gamma.toFixed(4)} (theirs ${snap.theirGamma})`);
-    console.log(`  vega/1% ${(g.vega / 100).toFixed(4)} (theirs ${snap.theirVega}) | theta/day ${(g.thetaPerYear / 365).toFixed(4)} (theirs ${snap.theirTheta})`);
-    console.log(`  PITM ${pitm.toFixed(4)} (theirs ${snap.theirPITM})`);
+  for (const snap of snapshots) {
+    const tau = yearsBetween(snap.nowMs, snap.expiryTs);
+    console.log(`${snap.label} — ${snap.kind} K=${snap.strike}, τ=${(tau * 365).toFixed(1)}d, their price ${snap.theirPrice}`);
+    const conventions: Array<[string, number, number]> = [
+      ['old: F=S·e^(±r·T), df=1', snap.spot * Math.exp((snap.kind === 'call' ? snap.rateL : -snap.rateS) * tau), 1],
+      ['verified: call df=e^(−rL·T) / put df=e^(+rS·T)',
+        snap.spot * Math.exp((snap.kind === 'call' ? snap.rateL : -snap.rateS) * tau),
+        snap.kind === 'call' ? Math.exp(-snap.rateL * tau) : Math.exp(snap.rateS * tau)],
+    ];
+    for (const [label, F, df] of conventions) {
+      const price = bsPrice({ forward: F, strike: snap.strike, tauYears: tau, vol: snap.vol, discountFactor: df, kind: snap.kind });
+      const g = bsGreeks({ forward: F, strike: snap.strike, tauYears: tau, vol: snap.vol, discountFactor: df, kind: snap.kind });
+      console.log(`  ${label}`);
+      console.log(`    price ${price.toFixed(4)}  (theirs ${snap.theirPrice}, diff ${(price - snap.theirPrice).toFixed(4)})  delta ${g.delta.toFixed(4)} (theirs ${snap.theirDelta})`);
+    }
     console.log('');
   }
 

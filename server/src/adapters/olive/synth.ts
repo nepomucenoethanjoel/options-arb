@@ -23,9 +23,12 @@ export function synthInstrumentId(
 }
 
 /**
- * Deterministic AMM quote in Olive's pricing convention (docs.olive.exchange):
- * Black-Scholes with their own vol oracle; calls use r_TOKEN, puts use
- * −r_USDC; no published discounting → df = 1. Bid/ask are null by design —
+ * Deterministic AMM quote in Olive's pricing convention (docs.olive.exchange,
+ * verified live against their production UI at 7d AND 269d tenors — see
+ * DATA_SOURCES.md §2d and verify-pricing.ts):
+ *   call: F = S·e^(r_TOKEN·T), df = e^(−r_TOKEN·T)   (classic BS at the long rate)
+ *   put:  F = S·e^(−r_USDC·T), df = e^(+r_USDC·T)   (strike accretes at the short rate)
+ * At short tenors both discount factors ≈ 1. Bid/ask are null by design —
  * the pool quotes one premium, there is no order book.
  */
 export function buildSyntheticAmmQuote(inputs: OlivePricingInputs): OptionQuote {
@@ -33,7 +36,9 @@ export function buildSyntheticAmmQuote(inputs: OlivePricingInputs): OptionQuote 
   const tau = yearsBetween(now, expiryTs);
   const r = kind === 'call' ? tokenRateApr : -usdcRateApr;
   const forward = spot * Math.exp(r * tau);
-  const mark = bsPrice({ forward, strike, tauYears: tau, vol, discountFactor: 1, kind });
+  const discountFactor =
+    kind === 'call' ? Math.exp(-tokenRateApr * tau) : Math.exp(usdcRateApr * tau);
+  const mark = bsPrice({ forward, strike, tauYears: tau, vol, discountFactor, kind });
   const expiryDate = new Date(expiryTs).toISOString().slice(0, 10).replace(/-/g, '');
   return {
     venue: 'olive',
@@ -48,7 +53,7 @@ export function buildSyntheticAmmQuote(inputs: OlivePricingInputs): OptionQuote 
     iv: vol,
     ivSource: 'model',
     forward,
-    discountFactor: 1,
+    discountFactor,
     source: 'olive:synthetic-amm',
   };
 }

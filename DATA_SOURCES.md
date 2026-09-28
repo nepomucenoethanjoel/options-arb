@@ -196,13 +196,20 @@ value, not live vol. Consequences encoded in the app:
 - **AMM, not an order book**: options are minted/sold by the liquidity pool.
   Any strike within live bounds can be quoted at any expiry 1–365 d, so the
   Derive chain drives the comparison grid.
-- **Pricing** (convention **verified against their live production UI on
-  2026-09-27**, see §3): Black-Scholes in forward form with
-  `F = S·e^(r_long·T)` for calls and `F = S·e^(−r_USDC·T)` for puts,
-  discount factor ≈ 1, expiry at **08:00 UTC** (TradingView symbol timestamp
-  1791100800000 = 2026-10-04T08:00Z). Rates are per-custody admin-set values
-  surfaced in their UI as "Fixed Rate (L/S)" (SOL: 15.07% / 2.00%). Their UI
-  displays vega per 1% vol and theta/day including the carry term.
+- **Pricing** (convention **verified against their live production UI at 7d
+  (2026-09-27) AND 269d (2026-09-28) tenors** — see §3): Black-Scholes with
+  per-kind rate treatment —
+  `call: F = S·e^(r_long·T), df = e^(−r_long·T)` (classic BS at the long
+  rate) and `put: F = S·e^(−r_USDC·T), df = e^(+r_USDC·T)` (strike accretes
+  at the short rate) — expiry at **08:00 UTC** (TV symbol timestamps
+  1791100800000 / 1813910400000). At 7d the discount factors are ≈1 (the
+  original "df ≈ 1" reading); at 269d they are decisive (SOL call: df=1
+  overstates by $3.81 = 11.8%; put: understates by $0.41). Rates are
+  per-custody admin-set values surfaced in their UI as "Fixed Rate (L/S)"
+  (SOL: 15.04% / 2.00% as of 2026-09-28). Their UI displays vega per 1% vol
+  and theta/day including the carry term. NOTE: their displayed PUT delta
+  uses classic d1 at +r_USDC — inconsistent with their own price form (which
+  the 269d put fits to $0.008); trust the price, not their put delta.
 - **Model vol**: per-asset EWMA realized vol. Their frontend shows it live
   (SOL ≈ 69% on 2026-09-27) via socket.io streaming; the on-chain vol-oracle
   word is only maintained by the (currently inactive) keeper.
@@ -363,4 +370,5 @@ No published SDK or IDL reference.
 | 2026-09-28 | **SVI feed vs per-strike quoted IVs measured** (187 SOL options, 4 expiries): near-money ~1 vol pt, full-chain RMS 2.8–17.9 vpts by expiry, worst near-dated deep wings (20261002 RMS 17.98, max 61 pts); earlier "reproduces quote IVs" claim corrected — SVI is chart-overlay only, signals use quoted IVs | See §1 SVI surface |
 | 2026-09-28 | **Derive deep-wing mark/IV inconsistency observed**: SOL-20261225-500-P mark vs BS-at-their-IV off $1.98 on a $377 mark (other 20261225 wings $0.4–1.4); standard expiries RMS $0.05–0.09. Inverting their marks gives IVs up to 166 vpts off their quoted IV on far-OTM rows (tick-rounded marks) | App flags via `iv_mark_inconsistent` |
 | 2026-09-28 | **Independent review verification**: our BS at Derive's IV/fwd/df reproduces 187 live marks (RMS $0.05–0.09 per expiry); Olive synth premiums match market-file-input recomputation across 39 near-money pairs on all 4 assets; venue spot basis (Derive index vs Stork) ≤ 0.08% | Review session, scripts not retained |
+| 2026-09-28 | **Long-tenor pricing convention DECODED (269d UI quotes)**: SOL 25Jun2027 120C $32.4057 / δ 0.6837 and 120P $28.3989 — call fits classic BS(rL) to $0.002 (df=e^(−rL·T); flat df overstates 11.8% at 269d), put fits strike-accretion df=e^(+rS·T) to $0.008. Re-reads the 7d snapshot 8× better (Δ$0.019 → $0.002). Expiry picker: presets match Derive's calendar + Custom Date calendar; TV symbol 1813910400000 = 2027-06-25T08:00Z | Encoded in synth pricer + verify-pricing + synth.test.ts |
 | | *(append new probe results here)* | |

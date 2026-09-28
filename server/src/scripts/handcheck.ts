@@ -192,12 +192,16 @@ async function main() {
   const tau = Math.max(0, (expiryTs - now) / (365 * 86_400_000));
   const r = target.kind === 'call' ? rates.token : -rates.usdc;
   const oliveForward = serverSynthSpot * Math.exp(r * tau);
+  // Verified convention (269d + 7d, DATA_SOURCES.md §2d): calls discount at
+  // the token rate, puts accrete the strike at the USDC rate.
+  const oliveDf =
+    target.kind === 'call' ? Math.exp(-rates.token * tau) : Math.exp(rates.usdc * tau);
   const olivePremium = bsPrice({
     forward: oliveForward,
     strike: target.strike,
     tauYears: tau,
     vol: market.vol,
-    discountFactor: 1,
+    discountFactor: oliveDf,
     kind: target.kind,
   });
 
@@ -233,7 +237,10 @@ async function main() {
   const total = size != null && size > 0 && netAfterCapital != null ? netAfterCapital * size : null;
   const apy = netAfterCapital / collateral / tau * 100;
   const basis = Math.abs(delta) * spot * deriveIv * Math.sqrt(0.5 / (365 * 24));
-  const xchk = deriveMark - bsPrice({ forward, strike: target.strike, tauYears: tau, vol: market.vol, discountFactor: df, kind: target.kind });
+  // Cross-check: reprice at the CYCLE's olive vol (row.olive.quote.iv) so the
+  // only residual is Derive-mark drift between the cycle and this fetch.
+  const xchkVol = n(row?.olive?.quote?.iv) ?? market.vol;
+  const xchk = deriveMark - bsPrice({ forward, strike: target.strike, tauYears: tau, vol: xchkVol, discountFactor: df, kind: target.kind });
 
   const cmp = (label: string, mine: number | null, theirs: number | null, tol = 0.02) => {
     if (mine == null || theirs == null) return `${label}: mine=${mine} theirs=${theirs} (null mismatch?)`;
@@ -258,7 +265,9 @@ async function main() {
   console.log(cmp('totalNet', total, signal.totalNetUsdc, 1));
   console.log(cmp('roiApyPct', apy, signal.roiApyPct, 0.5));
   console.log(cmp('settlementBasis', basis, signal.settlementBasisUsdc, 0.01));
-  console.log(cmp('syntheticCrossCheck', xchk, signal.syntheticCrossCheckUsdc, 0.03));
+  // 0.1: this field differences the (fresh) Derive mark against a reprice —
+  // mark drift between the cycle and this check lands here wholesale.
+  console.log(cmp('syntheticCrossCheck', xchk, signal.syntheticCrossCheckUsdc, 0.1));
 }
 
 main().catch((e) => {
