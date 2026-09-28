@@ -131,8 +131,11 @@ converge and the price difference locks in. What it does **not** lock in:
   Olive's vol. Should sit near vega × Δσ; large deviations hint at
   quote/settlement distortion rather than pure IV mispricing.
 
-`npm run handcheck -w server` re-verifies the top live opportunity against
-raw venue APIs with independent math — every field must reproduce.
+`npm run handcheck -w server` re-verifies one live signal against raw venue
+APIs with independent math — every field must reproduce. The pair comes from
+`handcheck-target.json` (pairKey only) when present, else the top executable
+opportunity; all inputs are live (market-file vol/spot/custody, config rates),
+never pinned snapshots.
 
 ## Caveats encoded in the app
 
