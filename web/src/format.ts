@@ -11,6 +11,13 @@ export function usd(v: number | null | undefined, dp = 2): string {
   return v == null ? '–' : `$${v.toFixed(dp)}`;
 }
 
+/** Contract count: whole units stay whole, fractional caps (e.g. custody
+ * limits like 0.49 ZEC) keep a decimal instead of rounding to "0". */
+export function fmtSize(v: number | null | undefined): string {
+  if (v == null) return '–';
+  return v >= 10 ? v.toFixed(0) : v.toFixed(1);
+}
+
 export function expiryLabel(expiryDate: string): string {
   return `${expiryDate.slice(0, 4)}-${expiryDate.slice(4, 6)}-${expiryDate.slice(6, 8)}`;
 }

@@ -7,7 +7,7 @@ import { TopClips } from './components/OpportunityFeed';
 import { ProfitTable, rowClass, type ShowPreset } from './components/ProfitTable';
 import { DetailPanel } from './components/DetailPanel';
 import { SmileView, type TermPoint } from './components/SmileView';
-import { pairLabel, usd } from './format';
+import { pairLabel, usd, fmtSize } from './format';
 
 export default function App() {
   const [underlying, setUnderlying] = useState<string>('');
@@ -22,9 +22,12 @@ export default function App() {
   // global KPI digest (header, KPI strip, top clips).
   const { data, connected } = useLiveOverview(underlying);
 
-  const underlyings = useMemo(() => [...new Set(data?.config?.underlyings ?? [])].sort(), [data]);
+  const underlyings = useMemo(() => [...new Set(data?.config?.underlyings ?? [])], [data]);
 
-  const effectiveUnderlying = underlying || underlyings[0] || '';
+  // Default to the subscription the server actually served (it normalizes
+  // '' to the first configured underlying) so the dropdown never disagrees
+  // with the data in the table.
+  const effectiveUnderlying = underlying || data?.underlying || underlyings[0] || '';
 
   const signalsByPair = useMemo(() => {
     const map = new Map<string, Signal>();
@@ -101,7 +104,7 @@ export default function App() {
           <div className="kpi main">
             <span className="k">Best executable clip</span>
             <span className="v total pos">{usd(kpiSummary.best.totalNetUsdc, 0)}</span>
-            <span className="sub">{pairLabel(kpiSummary.best.pairKey)} · {usd(kpiSummary.best.netAfterCapitalUsdc)} × {kpiSummary.best.maxExecutableSize?.toFixed(0)}</span>
+            <span className="sub">{pairLabel(kpiSummary.best.pairKey)} · {usd(kpiSummary.best.netAfterCapitalUsdc)} × {fmtSize(kpiSummary.best.maxExecutableSize)}</span>
           </div>
         ) : (
           <div className="kpi main">

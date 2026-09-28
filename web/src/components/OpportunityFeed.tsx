@@ -1,5 +1,5 @@
 import type { Signal } from '@options-arb/shared';
-import { pairLabel, usd } from '../format';
+import { fmtSize, pairLabel, usd } from '../format';
 
 /** Top profitable clips — TOTAL $ is the headline, one line of context. */
 export function TopClips({
@@ -25,7 +25,7 @@ export function TopClips({
             <div className={`clip-total ${exec ? 'pos' : 'muted-clip'}`}>{exec ? usd(s.totalNetUsdc, 0) : `${usd(s.totalNetUsdc, 0)} ⚠`}</div>
             <div className="opp-pair">{pairLabel(s.pairKey)}</div>
             <div className="opp-meta">
-              {usd(s.netAfterCapitalUsdc)}/ctr × {s.maxExecutableSize?.toFixed(0)} · APY {s.roiApyPct != null ? `${s.roiApyPct > 0 ? '+' : ''}${s.roiApyPct.toFixed(0)}%` : '–'}
+              {usd(s.netAfterCapitalUsdc)}/ctr × {fmtSize(s.maxExecutableSize)} · APY {s.roiApyPct != null ? `${s.roiApyPct > 0 ? '+' : ''}${s.roiApyPct.toFixed(0)}%` : '–'}
             </div>
             <div className={`opp-dir ${exec ? '' : 'warn'}`}>{exec ? 'buy Olive · sell Derive' : 'LP-only direction ⚠'}</div>
           </button>
