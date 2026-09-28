@@ -11,7 +11,7 @@
  * same source the running server uses.
  */
 import { existsSync, readFileSync } from 'node:fs';
-import { bsPrice } from '@options-arb/shared';
+import { bsPrice, oliveStrikeBounds } from '@options-arb/shared';
 import { loadConfig } from '../config';
 
 const API = 'https://api.derive.xyz/v3';
@@ -304,6 +304,15 @@ async function main() {
   // 0.1: this field differences the (fresh) Derive mark against a reprice —
   // mark drift between the cycle and this check lands here wholesale.
   console.log(cmp('syntheticCrossCheck', xchk, signal.syntheticCrossCheckUsdc, 0.1));
+
+  // ── Executability verdicts: would the venue accept this trade? ───────────
+  // Strike band: docs + live-UI verified ±1σ (2026-09-29). Size: quantities
+  // are 1e-6 native (confirmed by a live fill), so sub-tick sizes are dust.
+  const band = oliveStrikeBounds(serverSynthSpot, market.vol, tau, { tokenApr: rates.token, usdcApr: rates.usdc }, 1);
+  const inBand = target.strike >= band.lower && target.strike <= band.upper;
+  const sizeOk = signal.maxExecutableSize == null || signal.maxExecutableSize >= 1e-6;
+  console.log(`executability: strike ${target.strike} in venue band [${band.lower.toFixed(0)}, ${band.upper.toFixed(0)}]: ${inBand ? '✓' : '✗ OUT OF BAND — the venue refuses this strike'}`);
+  console.log(`executability: size ${signal.maxExecutableSize ?? 'null'} vs 1e-6 tick: ${sizeOk ? '✓' : '✗ below minimum quantity'}`);
 }
 
 main().catch((e) => {

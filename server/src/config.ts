@@ -59,9 +59,11 @@ export interface AppConfig {
   matchExpiryToleranceDays: number;
   matchMaxStrikeRelDist: number;
   oliveMaxTenorDays: number;
-  /** Olive strike-band width in sigmas around spot. Docs say ±1σ, but the
-   * live UI quotes strikes to 2.5× spot (verified 2026-09-28) — default 0 =
-   * unbounded. Set 1 to restore the documented behavior. */
+  /** Olive strike-band width in sigmas around spot. Docs: K_L = S·e^(−r_USDC·T
+   * − n·σ√T), K_U = S·e^(r_TOKEN·T + m·σ√T), n=m=1 — and the live UI DOES
+   * enforce it (verified 2026-09-29 against a UI rejection: implied exactly
+   * 1.000σ from the upper bound). The 2026-09-28 "not enforced" probe
+   * conclusion was wrong; do not disable. */
   oliveStrikeBoundSigmas: number;
 
   /** Subscribe to Olive's socket.io ticker stream (~1 s Stork spot, vs ~5 s
@@ -171,7 +173,7 @@ export function loadConfig(): AppConfig {
     matchExpiryToleranceDays: Math.max(0, num('MATCH_EXPIRY_TOLERANCE_DAYS', 1)),
     matchMaxStrikeRelDist: num('MATCH_MAX_STRIKE_REL_DIST', 0.02),
     oliveMaxTenorDays: num('OLIVE_MAX_TENOR_DAYS', 365),
-    oliveStrikeBoundSigmas: Math.max(0, num('OLIVE_STRIKE_BOUND_SIGMAS', 0)),
+    oliveStrikeBoundSigmas: Math.max(1, num('OLIVE_STRIKE_BOUND_SIGMAS', 1)),
 
     oliveRealtimeEnabled: bool('OLIVE_REALTIME', true),
     oliveRealtimeUrl: str('OLIVE_REALTIME_URL', 'wss://olive.exchange/socket.io/?EIO=4&transport=websocket'),
