@@ -57,6 +57,7 @@ const cfg: SignalConfig = {
   solanaFeeUsdc: 0.05,
   capitalBorrowRateApr: 0.08,
   poolLiquidityUsdByAsset: {},
+  poolCustodyByAsset: {},
 };
 
 function deriveQuote(overrides: Partial<OptionQuote> = {}): OptionQuote {
@@ -99,7 +100,12 @@ function oliveQuote(mark = 70, iv = 0.55): OptionQuote {
   };
 }
 
-function row(dq: OptionQuote | null, oq: OptionQuote | null, expiryTs = NOW + 30 * 86_400_000): MatchRow {
+function row(
+  dq: OptionQuote | null,
+  oq: OptionQuote | null,
+  expiryTs = NOW + 30 * 86_400_000,
+  overrides: Partial<MatchRow> = {},
+): MatchRow {
   return {
     pairKey: 'ETH-20261030-2900-C',
     underlying: 'ETH',
@@ -110,6 +116,7 @@ function row(dq: OptionQuote | null, oq: OptionQuote | null, expiryTs = NOW + 30
     matchType: 'exact_match',
     derive: { venue: 'derive', instrumentId: dq?.instrumentId ?? null, quote: dq },
     olive: { venue: 'olive', instrumentId: oq?.instrumentId ?? null, quote: oq },
+    ...overrides,
   };
 }
 
@@ -166,14 +173,74 @@ describe('computeSignals — profit estimates', () => {
     expect(liftAsk.maxExecutableSize).toBe(3);
   });
 
-  it('caps size by Olive pool capacity when it binds (calls lock 1 underlying)', () => {
+  it('caps size by the scalar pool fallback when it binds (estimated)', () => {
     // Pool has $4,195; collateral per call = spot 3000 → capacity 1 contract
-    // vs book size 5 → capped to 1 with the flag.
+    // vs book size 5 → capped to 1 with the flag. No custody data → the
+    // AUM-based estimate is flagged pool_capacity_estimated.
     const capped = { ...cfg, poolLiquidityUsdByAsset: { ETH: 4195 } };
     const [s] = computeSignals([row(deriveQuote({ bidSize: 5, askSize: 5 }), oliveQuote())], capped, NOW);
     expect(s.maxExecutableSize).toBe(1);
     expect(s.flags).toContain('pool_capacity_capped');
+    expect(s.flags).toContain('pool_capacity_estimated');
     expect(s.totalNetUsdc).toBeCloseTo(s.netAfterCapitalUsdc! * 1, 2);
+  });
+
+  it('caps calls by the free underlying custody (live market-file data)', () => {
+    // 2 SOL-equivalents of free underlying custody vs book size 5 → 2 calls,
+    // capped by the exact custody number (not the AUM estimate, no flag).
+    const custody = { ...cfg, poolCustodyByAsset: { ETH: { underlyingFree: 2, usdcFreeUsd: 1_000_000 } } };
+    const [s] = computeSignals([row(deriveQuote({ bidSize: 5, askSize: 5 }), oliveQuote())], custody, NOW);
+    expect(s.maxExecutableSize).toBe(2);
+    expect(s.flags).toContain('pool_capacity_capped');
+    expect(s.flags).not.toContain('pool_capacity_estimated');
+  });
+
+  it('caps puts by the free USDC custody (each put locks K USDC)', () => {
+    // $5,000 free USDC, K = 2900 → 5000/2900 ≈ 1.72 puts vs book size 5.
+    // Fractional, like the call side — the AMM mints fractional options
+    // (their UI quotes e.g. "30.905 Calls").
+    const custody = { ...cfg, poolCustodyByAsset: { ETH: { underlyingFree: 50, usdcFreeUsd: 5000 } } };
+    const [s] = computeSignals(
+      [row(deriveQuote({ bidSize: 5, askSize: 5, iv: 0.6 }), oliveQuote(70, 0.55), NOW + 30 * 86_400_000, { kind: 'put', pairKey: 'ETH-20261030-2900-P' })],
+      custody,
+      NOW,
+    );
+    expect(s.maxExecutableSize).toBeCloseTo(5000 / 2900, 4);
+    expect(s.flags).toContain('pool_capacity_capped');
+  });
+
+  it('prefers the custody cap over the looser scalar fallback', () => {
+    // Custody allows 2 calls; the AUM scalar would allow 33 — custody wins.
+    const both = {
+      ...cfg,
+      poolLiquidityUsdByAsset: { ETH: 100_000 },
+      poolCustodyByAsset: { ETH: { underlyingFree: 2, usdcFreeUsd: 1_000_000 } },
+    };
+    const [s] = computeSignals([row(deriveQuote({ bidSize: 5, askSize: 5 }), oliveQuote())], both, NOW);
+    expect(s.maxExecutableSize).toBe(2);
+    expect(s.flags).not.toContain('pool_capacity_estimated');
+  });
+
+  it('falls back to the scalar only when the custody value for that kind is unknown', () => {
+    // Custody snapshot carries USDC only; a CALL has no underlying cap →
+    // the scalar applies (and is flagged estimated when it binds).
+    const partial = {
+      ...cfg,
+      poolLiquidityUsdByAsset: { ETH: 4195 },
+      poolCustodyByAsset: { ETH: { underlyingFree: null, usdcFreeUsd: 5000 } },
+    };
+    const [call] = computeSignals([row(deriveQuote({ bidSize: 5, askSize: 5 }), oliveQuote())], partial, NOW);
+    expect(call.maxExecutableSize).toBe(1); // floor(4195 / 3000)
+    expect(call.flags).toContain('pool_capacity_estimated');
+    // A PUT in the same pool is capped by the live USDC custody instead:
+    // 5000/2900 ≈ 1.72 puts, exact — not estimated.
+    const [put] = computeSignals(
+      [row(deriveQuote({ bidSize: 5, askSize: 5, iv: 0.6 }), oliveQuote(70, 0.55), NOW + 30 * 86_400_000, { kind: 'put', pairKey: 'ETH-20261030-2900-P' })],
+      partial,
+      NOW,
+    );
+    expect(put.maxExecutableSize).toBeCloseTo(5000 / 2900, 4);
+    expect(put.flags).not.toContain('pool_capacity_estimated');
   });
 
   it('does not cap when the pool liquidity is unknown for the asset', () => {

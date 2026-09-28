@@ -115,7 +115,7 @@ export function DetailPanel({
                   {signal.netAfterCapitalUsdc != null ? usd(signal.netAfterCapitalUsdc) : '–'} {signal.isProfitable ? '✓' : '✗'}
                 </span>
               </div>
-              <div><span className="k">Size cap (Derive touch)</span><span className="v mono">{signal.maxExecutableSize != null ? `${signal.maxExecutableSize.toFixed(1)} ctr` : '– (no two-sided book)'}</span></div>
+              <div><span className="k">Size cap (Derive touch / pool custody)</span><span className="v mono">{signal.maxExecutableSize != null ? `${signal.maxExecutableSize.toFixed(1)} ctr` : '– (no two-sided book)'}</span></div>
               <div><span className="k">Total (size-capped)</span><span className="v mono">{signal.totalNetUsdc != null ? usd(signal.totalNetUsdc, 0) : '–'}</span></div>
               <div><span className="k">ROI APY on collateral</span><span className="v mono">{signal.roiApyPct != null ? `${signal.roiApyPct > 0 ? '+' : ''}${signal.roiApyPct.toFixed(1)}%` : '–'}</span></div>
               <div><span className="k">Settlement basis σ</span><span className="v mono" title="~1σ divergence between Derive's 30-min TWAP settlement and Olive's Stork print">{signal.settlementBasisUsdc != null ? `± ${usd(signal.settlementBasisUsdc)}` : '–'}</span></div>

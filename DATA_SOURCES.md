@@ -231,6 +231,15 @@ Contents (top-level keys): `asOf`, `ticker` (all 7 Stork prices + USDC),
   (→ available-liquidity proxy), utilization, LP pricing; `rawOnChainPoolSnapshot`
   has the E6-scaled equivalents + fixed-rate-wheel state.
 - `state.payload.snapshot.executionOracle` — Stork price freshness/health.
+- `state.payload.snapshot.rawOnChainPoolSnapshot.{underlyingCustody,usdcCustody}` —
+  **per-custody free collateral** (decoded 2026-09-28): each custody carries
+  `tokenOwned`, `tokenLocked` (raw integers) and `decimals` (underlying 9, USDC 6);
+  `free = (owned − locked) / 10^decimals`. Calls lock the underlying custody
+  (1 underlying each), puts the USDC custody (K USDC each) — these are the real
+  per-kind capacity limits, and their UI's "Available Liquidity" card is exactly
+  `freeUnderlying × spot + freeUSDC` (verified live: 23.7 SOL × $118.5 + $1,296 ≈
+  $4,105). Wired into signal sizing 2026-09-28 (`poolCustodyByAsset`; the scalar
+  AUM pin remains a fallback, flagged `pool_capacity_estimated`).
 
 Live pool AUM observed 2026-09-27 ~21:30 UTC: SOL $4,921 · BTC $1,107 ·
 ETH $1,510 — the BTC/ETH pools cannot collateralize a single new option at
@@ -339,4 +348,6 @@ No published SDK or IDL reference.
 | 2026-09-27 | **Pricing accuracy verified vs Derive production**: 57 live SOL options — our BS at their IV/forward/df vs their marks: RMS $0.089, within their 0.1 mark tick rounding | `npm run verify:pricing -w server` |
 | 2026-09-27 | `/api/v1/oracle/stork-fast-pair?poolName=X/USDC` works for all pools (signed Stork packets) | Route documented §2d-bis |
 | 2026-09-28 | **Strike bounds: docs' ±1σ rule NOT enforced in live deployment** — their UI quotes strikes from deep OTM to 2.5× spot (300P on SOL ≈ $118 spot priced at pure intrinsic, no error). Default switched to unbounded (`OLIVE_STRIKE_BOUND_SIGMAS=0`) | Probe via UI strike input |
+| 2026-09-28 | **Per-custody pool capacity decoded** (market file `rawOnChainPoolSnapshot`): SOL pool free = 23.7 SOL + $1,296 USDC vs total AUM $4,839 — their UI rejects a 22.8-put order ($2,739 collateral) with "exceeds available liquidity for USDC" while total AUM would suggest headroom. "Available Liquidity" card = freeUnderlying×spot + freeUSDC | Wired into sizing; see §2d-ter |
+| 2026-09-28 | **Pricing convention re-verified live vs their production UI** (browser session): SOL-05OCT26-120C $3.8317 / δ 0.4740 and 120P $5.1951 / δ −0.5306 — our BS (`F=S·e^(rL·T)` calls, `F=S·e^(−rS·T)` puts, df=1, expiry 08:00 UTC per TV symbol 1791187200000) reproduces call δ exactly, prices within $0.012/$0.003; no AMM spread on top of model premium; put locks exactly K USDC each | Encoded in synth pricer + this doc |
 | | *(append new probe results here)* | |

@@ -25,6 +25,14 @@ export interface OliveMarketFileData {
   liquidityUsd: number | null;
   aumUsd: number | null;
   entryClaimsUsd: number | null;
+  /**
+   * Free per-custody collateral from the raw on-chain snapshot: calls lock
+   * the underlying custody (1 underlying each), puts the USDC custody (K
+   * USDC each). These are the real per-kind capacity limits — the pool's
+   * total AUM overstates both. Null when the snapshot omits them.
+   */
+  underlyingFree: number | null;
+  usdcFreeUsd: number | null;
   /** File generation time (ms). */
   asOfMs: number;
   /** Last on-chain EWMA write (ms) — the projection base. */
@@ -57,8 +65,32 @@ export function parseOliveMarketFile(json: any, underlying: string): OliveMarket
     (num(snap?.poolAccount?.openPositionEntryClaimsUsd) != null
       ? num(snap.poolAccount.openPositionEntryClaimsUsd)! / 1e6
       : null);
+
+  // Per-custody free balances: owned − locked, scaled by the custody's mint
+  // decimals (underlying 9 for SOL, 6 for USDC). Layout verified live
+  // 2026-09-28 — see DATA_SOURCES.md.
+  const custodyFree = (c: unknown): number | null => {
+    if (!c || typeof c !== 'object') return null;
+    const o = c as Record<string, unknown>;
+    const owned = num(o.tokenOwned);
+    const locked = num(o.tokenLocked) ?? 0;
+    const decimals = num(o.decimals);
+    if (owned == null || decimals == null || decimals < 0 || decimals > 18) return null;
+    return Math.max(0, (owned - locked) / Math.pow(10, decimals));
+  };
+  const raw = snap?.rawOnChainPoolSnapshot;
+  const underlyingFree = custodyFree(raw?.underlyingCustody);
+  const usdcFreeUsd = custodyFree(raw?.usdcCustody);
+
+  // Olive's UI "Available Liquidity" is free-underlying × spot + free-USDC
+  // (verified live 2026-09-28: 23.7 SOL × $118.5 + $1,296 ≈ $4,105); the
+  // AUM − entry-claims form is only the fallback when custody data is absent.
   const liquidityUsd =
-    aumUsd != null && entryClaimsUsd != null ? Math.max(0, aumUsd - entryClaimsUsd) : aumUsd;
+    underlyingFree != null && usdcFreeUsd != null && spot != null
+      ? underlyingFree * spot + usdcFreeUsd
+      : aumUsd != null && entryClaimsUsd != null
+        ? Math.max(0, aumUsd - entryClaimsUsd)
+        : aumUsd;
 
   const asOfMs = num(json.asOf ? Date.parse(json.asOf) : NaN) ?? Date.now();
 
@@ -71,6 +103,8 @@ export function parseOliveMarketFile(json: any, underlying: string): OliveMarket
     liquidityUsd,
     aumUsd,
     entryClaimsUsd,
+    underlyingFree,
+    usdcFreeUsd,
     asOfMs,
     volOnChainMs,
     projectionBranch: volObj?.projectionBranch ?? null,

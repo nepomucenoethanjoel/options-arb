@@ -393,6 +393,12 @@ export class Orchestrator extends EventEmitter {
             if (live != null) map[underlying] = live;
             return map;
           })(),
+          // Per-custody free balances (calls: underlying, puts: USDC) — the
+          // real per-kind caps; absent when the market file is unreachable.
+          poolCustodyByAsset: (() => {
+            const cap = oliveState ? this.olive.getCachedCapacity(underlying) : null;
+            return cap ? { [underlying]: cap } : {};
+          })(),
         },
         now,
         { [underlying]: spot },

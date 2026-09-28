@@ -19,10 +19,15 @@ export interface SignalConfig {
   oliveFeePremiumPct: number;
   solanaFeeUsdc: number;
   capitalBorrowRateApr: number;
-  /** Per-pool available liquidity in USD (from Olive's UI). Each call locks
+  /** Per-pool available liquidity in USD (fallback estimate). Each call locks
    * 1 underlying of pool collateral, each put locks K USDC — the pool is the
-   * binding size constraint, not the Derive book. */
+   * binding size constraint, not the Derive book. Superseded per-kind by
+   * `poolCustodyByAsset` when live custody balances are available. */
   poolLiquidityUsdByAsset: Record<string, number>;
+  /** Live per-custody pool capacity from the market file's on-chain snapshot
+   *  (null = unknown for that asset). Calls cap by free underlying custody
+   *  (units — each locks 1 underlying); puts by free USDC (each locks K). */
+  poolCustodyByAsset: Record<string, { underlyingFree: number | null; usdcFreeUsd: number | null }>;
 }
 
 const NON_EXECUTABLE_FLAGS = new Set(['no_book', 'one_sided', 'thin_book', 'wide_book', 'stale']);
@@ -140,8 +145,9 @@ export function computeSignals(
     const netAfterCapitalUsdc = netEdgeUsdc != null ? netEdgeUsdc - capitalCostUsdc : null;
 
     // Size cap: the binding Derive touch for THIS direction (selling into
-    // the bid vs lifting the ask) against the Olive pool's collateral
-    // capacity (calls lock 1 underlying, puts lock K USDC each).
+    // the bid vs lifting the ask) against the Olive pool's per-custody
+    // capacity — calls lock 1 underlying each, puts K USDC each. Live
+    // custody balances win; the scalar AUM fallback is cruder and flagged.
     const bookSize =
       direction === 'buy_olive_sell_derive'
         ? hasBid
@@ -150,13 +156,29 @@ export function computeSignals(
         : hasAsk
           ? dq.askSize ?? 0
           : null;
+    const custody = cfg.poolCustodyByAsset[row.underlying];
+    const custodyCap =
+      custody == null
+        ? null
+        : row.kind === 'call'
+          ? custody.underlyingFree
+          : custody.usdcFreeUsd != null && row.strike > 0
+            ? custody.usdcFreeUsd / row.strike
+            : null;
     const poolLiquidityUsd = cfg.poolLiquidityUsdByAsset[row.underlying];
+    const fallbackCap =
+      poolLiquidityUsd != null && oliveCollateral > 0
+        ? Math.floor(poolLiquidityUsd / oliveCollateral)
+        : null;
     let maxExecutableSize = bookSize;
-    if (bookSize != null && poolLiquidityUsd != null && oliveCollateral > 0) {
-      const capacity = Math.floor(poolLiquidityUsd / oliveCollateral);
-      if (capacity < bookSize) {
+    if (bookSize != null) {
+      const capacity = custodyCap ?? fallbackCap;
+      if (capacity != null && capacity < bookSize) {
         maxExecutableSize = capacity;
         flags.push('pool_capacity_capped');
+        if (custodyCap == null && poolLiquidityUsd != null) {
+          flags.push('pool_capacity_estimated');
+        }
       }
     }
     const totalNetUsdc =
