@@ -1,0 +1,27 @@
+{
+  "name": "options-arb",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "shared",
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "build": "npm run build -w shared -w server -w web",
+    "test": "npm run test -w shared && npm run test -w server",
+    "verify:derive": "npm run verify:derive -w server",
+    "probe:olive": "npm run probe:olive -w server",
+    "dev:server": "npm run dev -w server",
+    "dev:web": "npm run dev -w web"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "esbuild@0.21.5": true,
+    "esbuild@0.25.12": true
+  }
+}

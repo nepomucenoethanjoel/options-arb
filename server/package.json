@@ -1,0 +1,41 @@
+{
+  "name": "@options-arb/server",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "build": "tsc --noEmit",
+    "test": "vitest run",
+    "verify:derive": "tsx src/scripts/verify-derive.ts",
+    "probe:olive": "tsx src/scripts/probe-olive.ts",
+    "verify:pricing": "tsx src/scripts/verify-pricing.ts",
+    "audit:pricing": "tsx src/scripts/audit-derive-marks.ts",
+    "audit:olive-simul": "tsx src/scripts/audit-olive-simul.ts && tsx src/scripts/audit-olive-put.ts",
+    "vol:compare": "tsx src/scripts/vol-compare.ts",
+    "capture:olive-ws": "tsx src/scripts/capture-olive-ws.ts",
+    "probe:realtime2": "tsx src/scripts/probe-realtime2.ts",
+    "handcheck": "tsx src/scripts/handcheck.ts",
+    "compare:live": "tsx src/scripts/compare-live.ts",
+    "compare:sweep": "tsx src/scripts/compare-sweep.ts",
+    "probe:coverage": "tsx src/scripts/probe-coverage.ts",
+    "check:trades": "tsx src/scripts/check-trades.ts"
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.0.1",
+    "@fastify/static": "^8.0.3",
+    "@fastify/websocket": "^11.0.1",
+    "@options-arb/shared": "*",
+    "@solana/web3.js": "^1.95.8",
+    "dotenv": "^16.4.5",
+    "fastify": "^5.2.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/ws": "^8.5.13",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}

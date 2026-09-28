@@ -1,0 +1,11 @@
+node_modules/
+dist/
+data/
+.env
+*.log
+.DS_Store
+
+# local working files (handcheck target is pasted by hand; .tmp-ov is a scratch dump)
+handcheck-target.json
+.tmp-ov.json
+.zcode/
