@@ -201,3 +201,25 @@ export interface VenueHealthSnapshot {
   lastCycleMs: number | null;
   lastCycleDurationMs: number | null;
 }
+
+/**
+ * Cross-asset KPI digest computed server-side once per cycle. Lets the
+ * dashboard render the header, KPI strip and top clips without receiving
+ * every underlying's signals (the WS push is per-underlying subscription).
+ */
+export interface SignalKpis {
+  /** Top profitable clips in the two-leg-executable direction (buy Olive / sell Derive), by total. */
+  topExecutable: Signal[];
+  /** Top profitable clips in any direction (the LP-only fallback headline). */
+  topAny: Signal[];
+  /** Profitable rows in the executable direction. */
+  executableProfitableCount: number;
+  /** Profitable rows in LP-only directions (writing to the Olive pool). */
+  lpOnlyProfitableCount: number;
+  /** Rows currently flagged as threshold opportunities (either direction). */
+  opportunitiesCount: number;
+  /** Σ totalNetUsdc across executable-direction profitable rows. */
+  totalExecutableUsd: number;
+  /** Closest-to-profitable executable-direction row (clean book), best net/contract. */
+  closest: Signal | null;
+}

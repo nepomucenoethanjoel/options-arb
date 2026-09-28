@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { MatchRow, MatchRowLite, Signal, VenueHealthSnapshot } from '@options-arb/shared';
+import type { MatchRow, MatchRowLite, Signal, SignalKpis, VenueHealthSnapshot } from '@options-arb/shared';
 
 export interface OverviewConfig {
   ivSpreadThresholdVols: number;
@@ -17,6 +17,7 @@ export interface RealtimeStatus {
 
 export interface OverviewResponse {
   ts: number | null;
+  /** Rows/signals for the subscribed underlying only (empty before subscribing). */
   rows: MatchRowLite[];
   signals: Signal[];
   health: VenueHealthSnapshot | null;
@@ -25,6 +26,10 @@ export interface OverviewResponse {
   realtime: RealtimeStatus | null;
   oliveCaveats: string[];
   config: OverviewConfig;
+  /** The subscription the rows/signals belong to (null = digest-only). */
+  underlying?: string | null;
+  /** Cross-asset KPI digest (header, KPI strip, top clips). */
+  kpi?: SignalKpis | null;
 }
 
 export interface PairResponse {
@@ -68,84 +73,103 @@ export function fetchSurface(underlying: string, expiry?: string): Promise<Surfa
   return getJson(`/api/surface?underlying=${encodeURIComponent(underlying)}${q}`);
 }
 
+function parseCycle(raw: string): OverviewResponse | null {
+  try {
+    const msg = JSON.parse(raw) as { type: string } & OverviewResponse;
+    if (msg.type !== 'cycle') return null;
+    return {
+      ts: msg.ts,
+      rows: msg.rows,
+      signals: msg.signals,
+      health: msg.health,
+      spots: msg.spots,
+      realtime: msg.realtime,
+      oliveCaveats: msg.oliveCaveats,
+      config: msg.config,
+      underlying: msg.underlying ?? null,
+      kpi: msg.kpi ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Live overview via WS push with REST polling fallback and auto-reconnect.
+ * Live overview for ONE underlying: the server pushes only that underlying's
+ * rows/signals per cycle (~0.4 MB vs 2.1 MB full) plus the global KPI digest.
+ * Switching the underlying re-subscribes over the same socket and refreshes
+ * via REST immediately so the table swaps without waiting for the next cycle.
+ * REST polling is the fallback while the WS is down.
  */
-export function useLiveOverview(): { data: OverviewResponse | null; connected: boolean } {
+export function useLiveOverview(underlying: string): { data: OverviewResponse | null; connected: boolean } {
   const [data, setData] = useState<OverviewResponse | null>(null);
   const [connected, setConnected] = useState(false);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const underlyingRef = useRef(underlying);
+  underlyingRef.current = underlying;
 
+  // One WS connection for the session; re-subscribe when the underlying changes.
   useEffect(() => {
     let ws: WebSocket | null = null;
     let retry: ReturnType<typeof setTimeout> | null = null;
     let closed = false;
 
-    const startPolling = () => {
-      if (pollRef.current) return;
-      const tick = async () => {
-        try {
-          setData(await getJson<OverviewResponse>('/api/overview'));
-        } catch {
-          // server not up yet
-        }
-      };
-      void tick();
-      pollRef.current = setInterval(tick, 10_000);
-    };
-    const stopPolling = () => {
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
-      }
-    };
-
     const connect = () => {
       if (closed) return;
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
       ws = new WebSocket(`${proto}://${location.host}/ws`);
+      wsRef.current = ws;
       ws.onopen = () => {
         setConnected(true);
-        stopPolling();
+        ws?.send(JSON.stringify({ type: 'subscribe', underlying: underlyingRef.current }));
       };
       ws.onmessage = (ev) => {
-        try {
-          const msg = JSON.parse(ev.data as string) as { type: string } & OverviewResponse;
-          if (msg.type === 'cycle') {
-            setData({
-              ts: msg.ts,
-              rows: msg.rows,
-              signals: msg.signals,
-              health: msg.health,
-              spots: msg.spots,
-              realtime: msg.realtime,
-              oliveCaveats: msg.oliveCaveats,
-              config: msg.config,
-            });
-          }
-        } catch {
-          // ignore malformed frames
-        }
+        const parsed = parseCycle(ev.data as string);
+        if (parsed) setData(parsed);
       };
       ws.onclose = () => {
         setConnected(false);
-        startPolling();
         if (!closed) retry = setTimeout(connect, 3000);
       };
       ws.onerror = () => ws?.close();
     };
-
-    // Show something immediately even before the first WS cycle lands.
-    startPolling();
     connect();
 
     return () => {
       closed = true;
       if (retry) clearTimeout(retry);
-      stopPolling();
       ws?.close();
+      wsRef.current = null;
     };
   }, []);
+
+  // Re-subscribe on underlying change (if the socket is already open — the
+  // onopen handler covers the not-yet-open case via the ref).
+  useEffect(() => {
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'subscribe', underlying }));
+    }
+  }, [underlying]);
+
+  // Immediate REST refresh for the new filter + polling fallback while disconnected.
+  useEffect(() => {
+    let live = true;
+    const tick = async () => {
+      try {
+        const d = await getJson<OverviewResponse>(`/api/overview?underlying=${encodeURIComponent(underlying)}`);
+        if (live) setData(d);
+      } catch {
+        // server not up yet
+      }
+    };
+    void tick();
+    const poll = setInterval(tick, 10_000);
+    return () => {
+      live = false;
+      clearInterval(poll);
+    };
+  }, [underlying]);
 
   return { data, connected };
 }

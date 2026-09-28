@@ -1,0 +1,186 @@
+import { EventEmitter } from 'node:events';
+import type { AddressInfo } from 'node:net';
+import WebSocket from 'ws';
+import { afterEach, describe, expect, it } from 'vitest';
+import type { Signal } from '@options-arb/shared';
+import { buildKpis, buildServer } from '../src/api/server';
+import type { AppConfig } from '../src/config';
+import type { Orchestrator } from '../src/scheduler';
+import type { Storage } from '../src/storage';
+
+const cfg = {
+  underlyings: ['SOL', 'ETH'],
+  ivSpreadThresholdVols: 3,
+  pollIntervalMs: 15_000,
+  deriveTakerFeeBps: 3,
+  solanaFeeUsdc: 0.05,
+  capitalBorrowRateApr: 0.08,
+} as unknown as AppConfig;
+
+const storage = { countSignals: () => 0 } as unknown as Storage;
+
+function sig(pairKey: string, underlying: string, overrides: Partial<Signal> = {}): Signal {
+  return {
+    pairKey, underlying, expiryDate: '20261030', expiryTs: 0, strike: 100, kind: 'call',
+    ivSpreadVols: 5, ivSpreadBps: 800, entryPriceUsdc: 1, exitPriceUsdc: 2, edgeUsdc: 1,
+    netEdgeUsdc: 0.9, netAfterCapitalUsdc: 0.5, costsUsdc: 0.1, capitalCostUsdc: 0.4,
+    maxExecutableSize: 5, totalNetUsdc: 2.5, roiApyPct: 10, settlementBasisUsdc: 0.1,
+    syntheticCrossCheckUsdc: 0, crossCheckDeviationUsdc: 0, bookVsMarkUsdc: 0, score: 5,
+    isOpportunity: true, isProfitable: true, direction: 'buy_olive_sell_derive', flags: [], ts: 0,
+    ...overrides,
+  };
+}
+
+const signals = [
+  sig('SOL-20261030-100-C', 'SOL', { totalNetUsdc: 10 }),
+  sig('SOL-20261030-110-C', 'SOL', { direction: 'buy_derive_sell_olive', flags: ['direction_limited'], totalNetUsdc: 50 }),
+  sig('ETH-20261030-2000-C', 'ETH', { totalNetUsdc: 20, isProfitable: false, isOpportunity: false, netAfterCapitalUsdc: -1 }),
+];
+
+function stubOrchestrator(): Orchestrator {
+  const orch = new EventEmitter() as unknown as Orchestrator;
+  (orch as unknown as { latest: unknown }).latest = {
+    ts: 123,
+    durationMs: 5,
+    rows: [
+      { pairKey: 'SOL-20261030-100-C', underlying: 'SOL', expiryTs: 0, expiryDate: '20261030', strike: 100, kind: 'call', matchType: 'exact_match', deriveIv: 0.6, oliveIv: 0.55, deriveBid: 1, deriveAsk: 2, olivePremium: 1.5, note: 'amm_synthetic', unmatchedReason: undefined },
+      { pairKey: 'ETH-20261030-2000-C', underlying: 'ETH', expiryTs: 0, expiryDate: '20261030', strike: 2000, kind: 'call', matchType: 'exact_match', deriveIv: 0.5, oliveIv: 0.55, deriveBid: 1, deriveAsk: 2, olivePremium: 1.5, note: 'amm_synthetic', unmatchedReason: undefined },
+    ],
+    signals,
+    health: { derive: null, olive: null, serverTime: 0, pollIntervalMs: 15000, lastCycleMs: null, lastCycleDurationMs: null },
+    spots: { SOL: 100, ETH: 2000 },
+    realtime: null,
+    oliveCaveats: [],
+    config: { ivSpreadThresholdVols: 3, pollIntervalMs: 15000, underlyings: ['SOL', 'ETH'], fees: {}, volPinnedAt: null },
+  };
+  (orch as unknown as { fullRows: Map<string, unknown> }).fullRows = new Map();
+  (orch as unknown as { getSurface: unknown }).getSurface = async () => ({});
+  return orch;
+}
+
+const servers: Array<{ close: () => Promise<void> }> = [];
+
+afterEach(async () => {
+  await Promise.all(servers.splice(0).map((s) => s.close()));
+});
+
+function nextMessage(ws: WebSocket): Promise<any> {
+  return new Promise((resolve) => ws.once('message', (d) => resolve(JSON.parse(String(d)))));
+}
+
+describe('buildKpis', () => {
+  it('headlines executable clips, counts LP-only rows, and finds the closest non-profitable', () => {
+    const k = buildKpis(signals);
+    expect(k.topExecutable.map((s) => s.pairKey)).toEqual(['SOL-20261030-100-C']);
+    expect(k.topAny.map((s) => s.pairKey)).toEqual(['SOL-20261030-110-C', 'SOL-20261030-100-C']); // by total desc
+    expect(k.executableProfitableCount).toBe(1);
+    expect(k.lpOnlyProfitableCount).toBe(1);
+    expect(k.opportunitiesCount).toBe(2);
+    expect(k.totalExecutableUsd).toBe(10);
+    expect(k.closest?.pairKey).toBe('ETH-20261030-2000-C');
+  });
+
+  it('skips price-distorted rows for the closest signal', () => {
+    const withNoise = [
+      ...signals,
+      sig('SOL-20261030-120-C', 'SOL', { isProfitable: false, isOpportunity: false, netAfterCapitalUsdc: -0.1, flags: ['price_distortion'] }),
+    ];
+    expect(buildKpis(withNoise).closest?.pairKey).toBe('ETH-20261030-2000-C');
+  });
+});
+
+describe('/ws per-underlying subscription', () => {
+  it('sends a digest-only message on connect, then the subscribed underlying only', async () => {
+    const app = await buildServer({ cfg, orchestrator: stubOrchestrator(), storage });
+    await app.listen({ port: 0, host: '127.0.0.1' });
+    servers.push({ close: () => app.close() });
+    const { port } = app.server!.address() as AddressInfo;
+
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    const first = await nextMessage(ws); // digest-only on connect
+    expect(first.type).toBe('cycle');
+    expect(first.rows).toEqual([]);
+    expect(first.signals).toEqual([]);
+    expect(first.underlying).toBeNull();
+    expect(first.kpi.executableProfitableCount).toBe(1);
+
+    ws.send(JSON.stringify({ type: 'subscribe', underlying: 'sol' })); // case-insensitive
+    const second = await nextMessage(ws);
+    expect(second.underlying).toBe('SOL');
+    expect(second.rows).toHaveLength(1);
+    expect(second.rows[0].underlying).toBe('SOL');
+    // both SOL signals (executable + LP-only), never ETH's
+    expect(second.signals).toHaveLength(2);
+    expect(second.signals.map((s: Signal) => s.underlying)).toEqual(['SOL', 'SOL']);
+    expect(second.kpi.totalExecutableUsd).toBe(10); // digest stays global
+    ws.close();
+  });
+
+  it('broadcasts per-cycle messages filtered per subscription and keeps invalid ones on the digest', async () => {
+    const orch = stubOrchestrator();
+    const app = await buildServer({ cfg, orchestrator: orch, storage });
+    await app.listen({ port: 0, host: '127.0.0.1' });
+    servers.push({ close: () => app.close() });
+    const { port } = app.server!.address() as AddressInfo;
+
+    const subbed = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    await nextMessage(subbed); // connect digest
+    subbed.send(JSON.stringify({ type: 'subscribe', underlying: 'ETH' }));
+    await nextMessage(subbed); // subscribe echo
+
+    const idle = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    await nextMessage(idle); // connect digest
+
+    // invalid underlying must not change the subscription
+    subbed.send(JSON.stringify({ type: 'subscribe', underlying: 'DOGE' }));
+
+    // Arm the listeners BEFORE emitting — the broadcast is synchronous and
+    // the messages can arrive before a post-emit once() listener attaches.
+    const subbedNext = nextMessage(subbed);
+    const idleNext = nextMessage(idle);
+    (orch as unknown as EventEmitter).emit('cycle', {
+      ts: 456, durationMs: 6,
+      rows: [
+        { pairKey: 'SOL-20261030-100-C', underlying: 'SOL' },
+        { pairKey: 'ETH-20261030-2000-C', underlying: 'ETH' },
+      ],
+      signals,
+      health: null, spots: {}, realtime: null, oliveCaveats: [],
+      config: { ivSpreadThresholdVols: 3, pollIntervalMs: 15000, underlyings: ['SOL', 'ETH'], fees: {}, volPinnedAt: null },
+    });
+
+    const subbedMsg = await subbedNext;
+    expect(subbedMsg.underlying).toBe('ETH'); // DOGE did not override
+    expect(subbedMsg.rows).toHaveLength(1);
+    expect(subbedMsg.rows[0].underlying).toBe('ETH');
+
+    const idleMsg = await idleNext;
+    expect(idleMsg.underlying).toBeNull();
+    expect(idleMsg.rows).toEqual([]);
+    expect(idleMsg.kpi).toBeDefined();
+
+    subbed.close();
+    idle.close();
+  });
+
+  it('filters /api/overview?underlying= and keeps the no-param form full', async () => {
+    const app = await buildServer({ cfg, orchestrator: stubOrchestrator(), storage });
+    await app.listen({ port: 0, host: '127.0.0.1' });
+    servers.push({ close: () => app.close() });
+    const { port } = app.server!.address() as AddressInfo;
+
+    const filtered = await (await fetch(`http://127.0.0.1:${port}/api/overview?underlying=SOL`)).json();
+    expect(filtered.underlying).toBe('SOL');
+    expect(filtered.rows).toHaveLength(1);
+    expect(filtered.signals).toHaveLength(2); // both SOL signals
+    expect(filtered.kpi.executableProfitableCount).toBe(1);
+
+    const invalid = await (await fetch(`http://127.0.0.1:${port}/api/overview?underlying=DOGE`)).json();
+    expect(invalid.underlying).toBe('SOL'); // normalized to the first configured
+
+    const full = await (await fetch(`http://127.0.0.1:${port}/api/overview`)).json();
+    expect(full.underlying).toBeNull();
+    expect(full.rows).toHaveLength(2);
+    expect(full.signals).toHaveLength(3);
+  });
+});

@@ -10,8 +10,6 @@ import { SmileView, type TermPoint } from './components/SmileView';
 import { pairLabel, usd } from './format';
 
 export default function App() {
-  const { data, connected } = useLiveOverview();
-
   const [underlying, setUnderlying] = useState<string>('');
   const [expiry, setExpiry] = useState<string>('all');
   const [preset, setPreset] = useState<ShowPreset>('profitable');
@@ -19,19 +17,20 @@ export default function App() {
   const [selectedPair, setSelectedPair] = useState<string | null>(null);
   const [tab, setTab] = useState<'profit' | 'analysis'>('profit');
 
+  // The hook fetches/subscribes to ONE underlying ('' → the server picks the
+  // first configured); it ships only that underlying's rows/signals plus the
+  // global KPI digest (header, KPI strip, top clips).
+  const { data, connected } = useLiveOverview(underlying);
+
+  const underlyings = useMemo(() => [...new Set(data?.config?.underlyings ?? [])].sort(), [data]);
+
+  const effectiveUnderlying = underlying || underlyings[0] || '';
+
   const signalsByPair = useMemo(() => {
     const map = new Map<string, Signal>();
     for (const s of data?.signals ?? []) map.set(s.pairKey, s);
     return map;
   }, [data]);
-
-  const underlyings = useMemo(() => {
-    const set = new Set<string>(data?.config?.underlyings ?? []);
-    for (const r of data?.rows ?? []) set.add(r.underlying);
-    return [...set].sort();
-  }, [data]);
-
-  const effectiveUnderlying = underlying || underlyings[0] || '';
 
   const expiries = useMemo(() => {
     const set = new Set<string>();
@@ -39,28 +38,21 @@ export default function App() {
     return [...set].sort();
   }, [data, effectiveUnderlying]);
 
-  // GLOBAL profit search: executable clips first; LP-only rows can't be
-  // captured by a user, so they only headline when nothing executable exists.
-  const allProfitable = useMemo(
-    () =>
-      (data?.signals ?? [])
-        .filter((s) => s.isProfitable && s.totalNetUsdc != null && s.netAfterCapitalUsdc != null)
-        .sort((a, b) => (b.totalNetUsdc ?? 0) - (a.totalNetUsdc ?? 0)),
-    [data],
+  // GLOBAL profit view from the server-side KPI digest: executable clips
+  // first; LP-only rows can't be captured by a user, so they only headline
+  // when nothing executable exists.
+  const kpi = data?.kpi ?? null;
+  const clips = kpi ? (kpi.topExecutable.length > 0 ? kpi.topExecutable : kpi.topAny) : [];
+  const clipsAreLpOnly = !!kpi && kpi.topExecutable.length === 0 && kpi.lpOnlyProfitableCount > 0;
+  const kpiSummary = useMemo(
+    () => ({
+      best: clips[0] ?? null,
+      totalDollars: kpi?.totalExecutableUsd ?? 0,
+      closest: kpi?.closest ?? null,
+      profitableCount: kpi?.executableProfitableCount ?? 0,
+    }),
+    [kpi, clips],
   );
-  const executableClips = useMemo(() => allProfitable.filter((s) => s.direction === 'buy_olive_sell_derive'), [allProfitable]);
-  const clips = executableClips.length > 0 ? executableClips : allProfitable;
-  const clipsAreLpOnly = executableClips.length === 0 && allProfitable.length > 0;
-
-  const kpi = useMemo(() => {
-    const best = clips[0] ?? null;
-    const totalDollars = executableClips.reduce((a, s) => a + (s.totalNetUsdc ?? 0), 0);
-    // Closest to profitable anywhere (executable direction, clean books).
-    const closest = (data?.signals ?? [])
-      .filter((s) => s.direction === 'buy_olive_sell_derive' && !s.flags.includes('price_distortion') && s.netAfterCapitalUsdc != null && !s.isProfitable)
-      .sort((a, b) => (b.netAfterCapitalUsdc ?? -Infinity) - (a.netAfterCapitalUsdc ?? -Infinity))[0] ?? null;
-    return { best, totalDollars, closest, profitableCount: executableClips.length };
-  }, [clips, executableClips, data]);
 
   const rows = useMemo(() => {
     let list: MatchRowLite[] = (data?.rows ?? []).filter((r) => r.underlying === effectiveUnderlying);
@@ -105,26 +97,26 @@ export default function App() {
       <CaveatBanner caveats={data.oliveCaveats} />
 
       <div className="kpi-strip">
-        {kpi.best && !clipsAreLpOnly ? (
+        {kpiSummary.best && !clipsAreLpOnly ? (
           <div className="kpi main">
             <span className="k">Best executable clip</span>
-            <span className="v total pos">{usd(kpi.best.totalNetUsdc, 0)}</span>
-            <span className="sub">{pairLabel(kpi.best.pairKey)} · {usd(kpi.best.netAfterCapitalUsdc)}/ctr × {kpi.best.maxExecutableSize?.toFixed(0)}</span>
+            <span className="v total pos">{usd(kpiSummary.best.totalNetUsdc, 0)}</span>
+            <span className="sub">{pairLabel(kpiSummary.best.pairKey)} · {usd(kpiSummary.best.netAfterCapitalUsdc)} × {kpiSummary.best.maxExecutableSize?.toFixed(0)}</span>
           </div>
         ) : (
           <div className="kpi main">
             <span className="k">Best executable clip</span>
             <span className="v muted">none</span>
             <span className="sub">
-              {kpi.closest?.pairKey
-                ? `closest: ${pairLabel(kpi.closest.pairKey)} at ${usd(kpi.closest.netAfterCapitalUsdc)}/ctr`
+              {kpiSummary.closest?.pairKey
+                ? `closest: ${pairLabel(kpiSummary.closest.pairKey)} at ${usd(kpiSummary.closest.netAfterCapitalUsdc)}/ctr`
                 : 'no executable rows'}
-              {clipsAreLpOnly ? ` · ${allProfitable.length} LP-only rows exist (need pool access to capture)` : ''}
+              {clipsAreLpOnly ? ` · ${kpi?.lpOnlyProfitableCount ?? 0} LP-only rows exist (need pool access to capture)` : ''}
             </span>
           </div>
         )}
-        <div className="kpi"><span className="k">Executable profitable rows</span><span className="v">{kpi.profitableCount}</span></div>
-        <div className="kpi"><span className="k">Σ total $ (all assets)</span><span className="v">{usd(kpi.totalDollars, 0)}</span></div>
+        <div className="kpi"><span className="k">Executable profitable rows</span><span className="v">{kpiSummary.profitableCount}</span></div>
+        <div className="kpi"><span className="k">Σ total $ (all assets)</span><span className="v">{usd(kpiSummary.totalDollars, 0)}</span></div>
         <div className="tabs">
           <button className={tab === 'profit' ? 'active' : ''} onClick={() => setTab('profit')}>Profit</button>
           <button className={tab === 'analysis' ? 'active' : ''} onClick={() => setTab('analysis')}>Analysis</button>

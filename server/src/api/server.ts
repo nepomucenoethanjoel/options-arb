@@ -6,6 +6,7 @@ import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 import type WebSocket from 'ws';
 import Fastify, { type FastifyInstance } from 'fastify';
+import type { Signal, SignalKpis } from '@options-arb/shared';
 import type { AppConfig } from '../config';
 import type { Orchestrator } from '../scheduler';
 import type { Storage } from '../storage';
@@ -16,6 +17,38 @@ export interface ApiDeps {
   storage: Storage;
   olive?: {
     getRealtimeHealth(): { status: string; lastFrameAgeMs: number | null; assets: string[] } | null;
+  };
+}
+
+/**
+ * Cross-asset KPI digest — the header, KPI strip and top clips rendered
+ * without shipping every underlying's signals over the WS. Mirrors the
+ * client-side logic this replaces: executable-direction clips headline,
+ * LP-only rows are the fallback headline, closest = best non-profitable
+ * executable-direction row on a clean book.
+ */
+export function buildKpis(signals: Signal[]): SignalKpis {
+  const profitable = signals
+    .filter((s) => s.isProfitable && s.totalNetUsdc != null && s.netAfterCapitalUsdc != null)
+    .sort((a, b) => (b.totalNetUsdc ?? 0) - (a.totalNetUsdc ?? 0));
+  const executable = profitable.filter((s) => s.direction === 'buy_olive_sell_derive');
+  const closest = signals
+    .filter(
+      (s) =>
+        s.direction === 'buy_olive_sell_derive' &&
+        !s.flags.includes('price_distortion') &&
+        s.netAfterCapitalUsdc != null &&
+        !s.isProfitable,
+    )
+    .sort((a, b) => (b.netAfterCapitalUsdc ?? -Infinity) - (a.netAfterCapitalUsdc ?? -Infinity))[0] ?? null;
+  return {
+    topExecutable: executable.slice(0, 3),
+    topAny: profitable.slice(0, 3),
+    executableProfitableCount: executable.length,
+    lpOnlyProfitableCount: profitable.length - executable.length,
+    opportunitiesCount: signals.filter((s) => s.isOpportunity).length,
+    totalExecutableUsd: executable.reduce((a, s) => a + (s.totalNetUsdc ?? 0), 0),
+    closest,
   };
 }
 
@@ -37,23 +70,48 @@ export async function buildServer(deps: ApiDeps): Promise<FastifyInstance> {
     },
   };
 
-  app.get('/api/overview', async () => {
+  const normalizeUnderlying = (u: unknown): string => {
+    const s = typeof u === 'string' ? u.trim().toUpperCase() : '';
+    return cfg.underlyings.includes(s) ? s : (cfg.underlyings[0] ?? '');
+  };
+
+  // Fields every cycle message carries regardless of subscription.
+  const metaOf = (latest: NonNullable<Orchestrator['latest']>) => ({
+    ts: latest.ts,
+    durationMs: latest.durationMs,
+    health: latest.health,
+    spots: latest.spots,
+    realtime: latest.realtime,
+    oliveCaveats: latest.oliveCaveats,
+    config: latest.config,
+  });
+
+  app.get('/api/overview', async (req) => {
+    const q = req.query as { underlying?: string };
     const latest = orchestrator.latest;
+    if (!latest) {
+      return {
+        ts: null,
+        rows: [],
+        signals: [],
+        health: null,
+        spots: {},
+        realtime: null,
+        oliveCaveats: [],
+        config: { ivSpreadThresholdVols: cfg.ivSpreadThresholdVols, pollIntervalMs: cfg.pollIntervalMs, underlyings: cfg.underlyings, fees: {} },
+        underlying: null,
+        kpi: buildKpis([]),
+      };
+    }
+    // No param → full snapshot (scripts/compat); ?underlying=X → filtered.
+    const filtered = q.underlying !== undefined;
+    const underlying = filtered ? normalizeUnderlying(q.underlying) : null;
     return {
-      ts: latest?.ts ?? null,
-      rows: latest?.rows ?? [],
-      signals: latest?.signals ?? [],
-      health: latest?.health ?? null,
-      spots: latest?.spots ?? {},
-      realtime: latest?.realtime ?? null,
-      oliveCaveats: latest?.oliveCaveats ?? [],
-      config:
-        latest?.config ?? {
-          ivSpreadThresholdVols: cfg.ivSpreadThresholdVols,
-          pollIntervalMs: cfg.pollIntervalMs,
-          underlyings: cfg.underlyings,
-          fees: {},
-        },
+      ...metaOf(latest),
+      rows: filtered ? latest.rows.filter((r) => r.underlying === underlying) : latest.rows,
+      signals: filtered ? latest.signals.filter((s) => s.underlying === underlying) : latest.signals,
+      underlying,
+      kpi: buildKpis(latest.signals),
     };
   });
 
@@ -96,18 +154,72 @@ export async function buildServer(deps: ApiDeps): Promise<FastifyInstance> {
     };
   });
 
-  const clients = new Set<WebSocket>();
+  // ── WS: per-underlying subscription ─────────────────────────────────────
+  // The full snapshot is ~2 MB per cycle; the dashboard only renders one
+  // underlying at a time, so clients subscribe and receive that underlying's
+  // rows/signals plus the global KPI digest (header/KPI strip/top clips).
+  // Browsers don't support WebSocket compression, so sending less is the
+  // only effective fix.
+  const clients = new Map<WebSocket, { underlying: string | null }>();
+
+  const cycleMessage = (latest: NonNullable<Orchestrator['latest']>, underlying: string): string =>
+    JSON.stringify({
+      type: 'cycle',
+      ...metaOf(latest),
+      kpi: buildKpis(latest.signals),
+      underlying,
+      rows: latest.rows.filter((r) => r.underlying === underlying),
+      signals: latest.signals.filter((s) => s.underlying === underlying),
+    });
+
+  const digestMessage = (latest: NonNullable<Orchestrator['latest']>): string =>
+    JSON.stringify({
+      type: 'cycle',
+      ...metaOf(latest),
+      kpi: buildKpis(latest.signals),
+      underlying: null,
+      rows: [],
+      signals: [],
+    });
+
   app.get('/ws', { websocket: true }, (socket: WebSocket) => {
-    clients.add(socket);
+    clients.set(socket, { underlying: null });
     const latest = orchestrator.latest;
-    if (latest) socket.send(JSON.stringify({ type: 'cycle', ...latest }));
+    if (latest) socket.send(digestMessage(latest));
+    socket.on('message', (data) => {
+      const sub = clients.get(socket);
+      if (!sub) return;
+      try {
+        const msg = JSON.parse(String(data)) as { type?: string; underlying?: string };
+        if (msg?.type !== 'subscribe') return;
+        const u = typeof msg.underlying === 'string' ? msg.underlying.trim().toUpperCase() : '';
+        if (!cfg.underlyings.includes(u)) return; // ignore invalid; keep the previous subscription
+        sub.underlying = u;
+        const cur = orchestrator.latest;
+        if (cur) socket.send(cycleMessage(cur, u));
+      } catch {
+        // ignore malformed frames
+      }
+    });
     socket.on('close', () => clients.delete(socket));
     socket.on('error', () => clients.delete(socket));
   });
+
   orchestrator.on('cycle', (payload) => {
-    const msg = JSON.stringify({ type: 'cycle', ...payload });
-    for (const socket of clients) {
-      if (socket.readyState === socket.OPEN) socket.send(msg);
+    const digest = digestMessage(payload);
+    const byUnderlying = new Map<string, string>();
+    for (const [socket, sub] of clients) {
+      if (socket.readyState !== socket.OPEN) continue;
+      if (!sub.underlying) {
+        socket.send(digest);
+        continue;
+      }
+      let msg = byUnderlying.get(sub.underlying);
+      if (msg == null) {
+        msg = cycleMessage(payload, sub.underlying);
+        byUnderlying.set(sub.underlying, msg);
+      }
+      socket.send(msg);
     }
   });
 
