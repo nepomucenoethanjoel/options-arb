@@ -51,6 +51,16 @@ px/size), `M` (mark), `I` (index), `stats` (`oi`, volume, …), and
 Total variance `w(k) = a + b·(ρ(k−m) + √((k−m)² + σ²))`, `k = ln(K/F)`,
 `IV = √(w / refTau)`.
 
+**Accuracy vs per-strike quoted IVs (measured 2026-09-28, 187 live SOL
+options): near-money agreement is ~1 vol pt, but the full chain deviates —
+RMS by expiry 2.8–17.9 vol pts, worst on near-dated deep wings** (e.g.
+20261002: RMS 17.98, max 61 pts at K=60 vs spot 118). The per-strike
+`option_pricing.i` values are mark/tick-derived and jump on the wings; SVI
+is the smoothed curve. Use: chart overlay ONLY — signals use per-instrument
+quoted IVs. Also note Derive's own deep-wing mark/IV inconsistency: e.g.
+SOL-20261225-500-P mark vs BS-at-their-IV differs $1.98 on a $377 mark
+(the app flags this via `iv_mark_inconsistent`).
+
 ### WebSocket
 
 `ticker.<name>.<interval>` is **deprecated and rejected**; use
@@ -336,7 +346,7 @@ No published SDK or IDL reference.
 |---|---|---|
 | 2026-09-27 | Derive v3 methods listed above | All verified live (see §1) |
 | 2026-09-27 | Derive v3 books zeroed; legacy populated | Observed, ETH options |
-| 2026-09-27 | Derive numerics arrive as **strings**; `get_latest_signed_feeds` nests `vol_data.{CCY}.{expirySec}.vol_data.SVI_*`; SVI normalized by `SVI_refTau` (IV=√(w/refTau) reproduces quote IVs) | Encoded in DeriveAdapter |
+| 2026-09-27 | Derive numerics arrive as **strings**; `get_latest_signed_feeds` nests `vol_data.{CCY}.{expirySec}.vol_data.SVI_*`; SVI normalized by `SVI_refTau` (IV=√(w/refTau)) — accuracy vs quoted IVs later measured, see the 2026-09-28 rows | Encoded in DeriveAdapter |
 | 2026-09-27 | Olive `/api/v1/health`, `/status` | OK; full deployment manifest in payload (Mongo/Redis/Helius/Stork; `keeperAutoStart: false`) |
 | 2026-09-27 | Olive `/api/v1/pools` | Route OK, data empty (indexer cold start) |
 | 2026-09-27 | Olive `/api/v1/options/chain` | **Not a market route** — matches a wildcard `:user` param (validation error names field `user`, value `chain`); other candidate routes 404 |
@@ -350,4 +360,7 @@ No published SDK or IDL reference.
 | 2026-09-28 | **Strike bounds: docs' ±1σ rule NOT enforced in live deployment** — their UI quotes strikes from deep OTM to 2.5× spot (300P on SOL ≈ $118 spot priced at pure intrinsic, no error). Default switched to unbounded (`OLIVE_STRIKE_BOUND_SIGMAS=0`) | Probe via UI strike input |
 | 2026-09-28 | **Per-custody pool capacity decoded** (market file `rawOnChainPoolSnapshot`): SOL pool free = 23.7 SOL + $1,296 USDC vs total AUM $4,839 — their UI rejects a 22.8-put order ($2,739 collateral) with "exceeds available liquidity for USDC" while total AUM would suggest headroom. "Available Liquidity" card = freeUnderlying×spot + freeUSDC | Wired into sizing; see §2d-ter |
 | 2026-09-28 | **Pricing convention re-verified live vs their production UI** (browser session): SOL-05OCT26-120C $3.8317 / δ 0.4740 and 120P $5.1951 / δ −0.5306 — our BS (`F=S·e^(rL·T)` calls, `F=S·e^(−rS·T)` puts, df=1, expiry 08:00 UTC per TV symbol 1791187200000) reproduces call δ exactly, prices within $0.012/$0.003; no AMM spread on top of model premium; put locks exactly K USDC each | Encoded in synth pricer + this doc |
+| 2026-09-28 | **SVI feed vs per-strike quoted IVs measured** (187 SOL options, 4 expiries): near-money ~1 vol pt, full-chain RMS 2.8–17.9 vpts by expiry, worst near-dated deep wings (20261002 RMS 17.98, max 61 pts); earlier "reproduces quote IVs" claim corrected — SVI is chart-overlay only, signals use quoted IVs | See §1 SVI surface |
+| 2026-09-28 | **Derive deep-wing mark/IV inconsistency observed**: SOL-20261225-500-P mark vs BS-at-their-IV off $1.98 on a $377 mark (other 20261225 wings $0.4–1.4); standard expiries RMS $0.05–0.09. Inverting their marks gives IVs up to 166 vpts off their quoted IV on far-OTM rows (tick-rounded marks) | App flags via `iv_mark_inconsistent` |
+| 2026-09-28 | **Independent review verification**: our BS at Derive's IV/fwd/df reproduces 187 live marks (RMS $0.05–0.09 per expiry); Olive synth premiums match market-file-input recomputation across 39 near-money pairs on all 4 assets; venue spot basis (Derive index vs Stork) ≤ 0.08% | Review session, scripts not retained |
 | | *(append new probe results here)* | |
