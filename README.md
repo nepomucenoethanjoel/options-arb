@@ -150,5 +150,8 @@ never pinned snapshots.
    sellers). "Sell vol on Olive" directions are flagged `direction_limited`.
 4. **Data freshness**: on-chain/indexer data can lag; per-source freshness is
    tracked and stale feeds downgrade signals and show a warning badge.
-5. **Signal generation and manual review only** — no execution logic exists in
+5. **Settlement depends on Olive's keeper**: payoffs settle on a single oracle
+   print submitted by their backend keeper — which has been observed inactive
+   (2026-09-19+ redeploy). ITM positions may settle late if it stays down.
+6. **Signal generation and manual review only** — no execution logic exists in
    this codebase by design.

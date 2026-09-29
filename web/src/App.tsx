@@ -175,6 +175,7 @@ export default function App() {
 
       <footer>
         Read-only signal tool — no execution. Estimates held-to-expiry after fees, capital drag, and pool-capacity sizing.
+        {' '}Olive settlement relies on their keeper being alive (observed inactive at times).
         {' '}Full-chain scan every cycle ({Math.round((data.config?.pollIntervalMs ?? 0) / 1000)}s+).
       </footer>
     </div>

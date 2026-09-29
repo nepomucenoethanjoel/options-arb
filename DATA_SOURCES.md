@@ -358,6 +358,33 @@ No published SDK or IDL reference.
 
 ## 3. Probe log
 
+### 3.0 Verification matrix — every load-bearing assumption (audit 2026-09-29)
+
+| # | Assumption | Where in code | Status | Evidence |
+|---|---|---|---|---|
+| 1 | Olive call pricing: `F=S·e^(rL·T)`, `df=e^(−rL·T)` | `synth.ts` | **VERIFIED-LIVE** | UI quotes 7d + 269d, fit $0.002 (synth.test.ts fixtures) |
+| 2 | Olive put pricing: `F=S·e^(−rS·T)`, `df=e^(+rS·T)` (strike accretes) | `synth.ts` | **VERIFIED-LIVE** | UI 269d $0.008 + a REAL ZEC fill 2026-09-28 (implied $345.01/put vs synth $346.70 at 32d, 0.5%) |
+| 3 | Expiry 08:00 UTC both venues | adapters | **VERIFIED-LIVE** | TV symbols 1791100800000 / 1813910400000 |
+| 4 | Pricing rates = borrow curve at `locked/owned` | `marketFile.ts` | **VERIFIED-LIVE** | 4 pools; the user's fill moved ZEC rS 30%→69.5% exactly as the curve predicts |
+| 5 | Custody locks: call = 1 underlying, put = K USDC | `marketFile.ts` | **VERIFIED-LIVE** | Fill locked $53.20 = K×qty exact; UI Lock display |
+| 6 | Strike band ±1σ incl. rate drift, n=m=1, tenor 1–365d | `olive.ts`, config | **VERIFIED-LIVE** | UI rejection 2026-09-29, implied 1.000σ from upper bound; docs open-option |
+| 7 | Olive fee `min(2.5bps × qty × ORACLE SPOT, 10% × premium)` | `signals/engine.ts` | **VERIFIED-LIVE** | Fill fee $0.011628 exact; docs option-fees (pool-admin-configurable) |
+| 8 | Quantity tick 1e-6 | handcheck | **VERIFIED-LIVE** | Fill `quantityNative: 31854`, decimals 6 |
+| 9 | Premium flows back into custody (buying partially refills) | — (understanding) | **VERIFIED-LIVE** | Fill: `tokenOwned` +$11.00 = premium |
+| 10 | Own-fill moves the pricing rate (convex >90% util) | `execution_moves_rate` flag | **VERIFIED-LIVE** | Fill: rS 30→69.5% on ~$50 |
+| 11 | Derive marks = BS at quoted IV/forward/df | review scripts | **VERIFIED-LIVE** | RMS $0.05–0.09 near-dated (wings diverge — their data, flagged `iv_mark_inconsistent`) |
+| 12 | Derive v3 books zeroed; legacy merge required | `derive.ts` | **VERIFIED-LIVE** | Re-checked 2026-09-29: 78/78 zeroed, 70 live on legacy |
+| 13 | Derive taker fee `$0.50/order + min(3bps × notional, 12.5% × premium)` | `signals/engine.ts` | **DOCS-CONFIRMED** | docs.derive.xyz trading-fees 2026-09-29; not yet trade-verified; notional base "max(limit, index)" approximated by index |
+| 14 | Close = sell owned back to pool at BS value + close fee | `direction_limited` rationale | **DOCS-CONFIRMED** | docs close-option 2026-09-29; held-to-expiry model charges open fee only |
+| 15 | Settlement: payoff = oracle print at exercise; keeper auto-exercises ITM | README caveat | **DOCS-CONFIRMED + OPERATIONAL RISK** | docs exercise-option; Olive keepers observed inactive since the 2026-09-19 redeploy — settlement may lag if the keeper stays down |
+| 16 | EWMA vol: 15-min/5% refresh gates, τ=15d, NO variance floor; UI/market file uses a backend-projected blend while chain is stale | adapter vol priority | **DOCS + LIVE** | docs volatility-algorithm; on-chain word 0x88 is a seed not a floor; `blended_update` branch |
+| 17 | Sell-back ≠ writing fresh options (LP role) | `direction_limited` | **DOCS-CONFIRMED** | docs close/open option pages |
+| 18 | Derive settles a 30-min TWAP (vs Olive's print) | `settlementBasisUsdc` | **DOCUMENTED-ASSUMPTION** | Derive docs; not independently verified; shown as risk not cost |
+| 19 | AMM depth/slippage beyond collateral | `amm_pool_depth_unknown` | **UNVERIFIED** | No size-ladder data; collateral caps bound it |
+| 20 | Collateral borrow APR 8% (capital drag) | config | **ASSUMPTION** | Deliberately conservative (over-charged in the executable direction) |
+| 21 | Derive margin/funding on the short leg | — | **NOT MODELED** | Documented caveat |
+| 22 | SVI feed = smoothed curve; per-strike quoted IVs differ on wings | chart only | **VERIFIED-LIVE** | 187 options, RMS 2.8–17.9 vpts by expiry (2026-09-28) |
+
 | Date | Route / check | Result |
 |---|---|---|
 | 2026-09-27 | Derive v3 methods listed above | All verified live (see §1) |
