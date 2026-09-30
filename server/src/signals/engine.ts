@@ -1,7 +1,9 @@
 import {
   bsPrice,
+  expectedFillVwap,
   yearsBetween,
   type MatchRow,
+  type OliveRateCurvePoint,
   type OptionQuote,
   type Signal,
   type SignalDirection,
@@ -28,12 +30,16 @@ export interface SignalConfig {
    *  (null = unknown for that asset). Calls cap by free underlying custody
    *  (units — each locks 1 underlying); puts by free USDC (each locks K).
    *  `owned` values flag rows whose execution would push the custody past
-   *  90% utilization, where the convex borrow curve moves the pricing rate. */
+   *  90% utilization, where the convex borrow curve moves the pricing rate;
+   *  `tokenCurve`/`usdcCurve` (the published borrowRateCurve nodes) let the
+   *  engine PRICE that movement instead of only warning about it. */
   poolCustodyByAsset: Record<string, {
     underlyingFree: number | null;
     usdcFreeUsd: number | null;
     underlyingOwned?: number | null;
     usdcOwnedUsd?: number | null;
+    tokenCurve?: OliveRateCurvePoint[] | null;
+    usdcCurve?: OliveRateCurvePoint[] | null;
   }>;
 }
 
@@ -231,7 +237,16 @@ export function computeSignals(
     // Own-impact: a fill moves its custody's utilization, and the borrow curve
     // (hence the AMM's pricing rate) is convex above ~90% — flag rows whose
     // full execution would push past it (observed live 2026-09-29: a ~$50
-    // fill moved the ZEC short rate 30% → 69.5%).
+    // fill moved the ZEC short rate 30% → 69.5%). With the curve nodes in
+    // hand, go further and PRICE the movement: the expected average fill
+    // (expectedFillVwap integrates the AMM premium along the curve, 32
+    // tranches) is the honest entry — the quoted one assumes the rate stays
+    // put. Model conventions match synth.ts; guarded by requiring the model's
+    // rate-at-current-util premium to reproduce the cycle's quoted premium
+    // (≤2% deviation), else inputs are inconsistent and the model is skipped.
+    let expectedEntryUsdc: number | null = null;
+    let expectedNetAfterCapitalUsdc: number | null = null;
+    let expectedTotalNetUsdc: number | null = null;
     if (custody != null && maxExecutableSize != null && maxExecutableSize > 0) {
       const owned = row.kind === 'call' ? custody.underlyingOwned : custody.usdcOwnedUsd;
       const free = row.kind === 'call' ? custody.underlyingFree : custody.usdcFreeUsd;
@@ -239,6 +254,38 @@ export function computeSignals(
       if (owned != null && owned > 0 && free != null) {
         const endUtil = (owned - free + maxExecutableSize * perUnit) / owned;
         if (endUtil > 0.9) flags.push('execution_moves_rate');
+        const curve = row.kind === 'call' ? custody.tokenCurve : custody.usdcCurve;
+        if (
+          direction === 'buy_olive_sell_derive' &&
+          !mismatchedLegs &&
+          entryPrice != null &&
+          curve != null &&
+          curve.length > 0 &&
+          spot != null &&
+          oq.iv > 0 &&
+          tau > 0
+        ) {
+          const fill = expectedFillVwap({
+            kind: row.kind,
+            strike: row.strike,
+            spot,
+            vol: oq.iv,
+            tauYears: tau,
+            size: maxExecutableSize,
+            curve,
+            free,
+            owned,
+            perUnitLocked: perUnit,
+          });
+          if (fill && oq.mark > 0 && Math.abs(fill.quoteEntry - oq.mark) <= 0.02 * oq.mark) {
+            expectedEntryUsdc = fill.vwapEntry;
+            if (netAfterCapitalUsdc != null) {
+              expectedNetAfterCapitalUsdc = netAfterCapitalUsdc - (fill.vwapEntry - entryPrice);
+              expectedTotalNetUsdc =
+                expectedNetAfterCapitalUsdc * maxExecutableSize - DERIVE_TAKER_ORDER_FEE_USDC;
+            }
+          }
+        }
       }
     }
     const totalNetUsdc =
@@ -331,6 +378,9 @@ export function computeSignals(
       capitalCostUsdc: round(capitalCostUsdc, 4) ?? 0,
       maxExecutableSize: maxExecutableSize != null ? round(maxExecutableSize, 4) : null,
       totalNetUsdc: round(totalNetUsdc, 2),
+      expectedEntryUsdc: round(expectedEntryUsdc, 4),
+      expectedNetAfterCapitalUsdc: round(expectedNetAfterCapitalUsdc, 4),
+      expectedTotalNetUsdc: round(expectedTotalNetUsdc, 2),
       roiApyPct: round(roiApyPct, 2),
       settlementBasisUsdc: round(settlementBasisUsdc, 4),
       syntheticCrossCheckUsdc: round(syntheticCrossCheckUsdc, 4),

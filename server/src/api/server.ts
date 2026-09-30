@@ -28,9 +28,16 @@ export interface ApiDeps {
  * executable-direction row on a clean book.
  */
 export function buildKpis(signals: Signal[]): SignalKpis {
+  // Headline honesty: when the marginal-fill model prices a clip's own rate
+  // impact (expectedTotalNetUsdc), that — not the quote-based total — is what
+  // the fill would actually net, so the KPI takes the lower of the two.
+  // Fills can only hurt the buyer of the cheap leg; the quoted number stays
+  // on the row for comparison.
+  const honestTotal = (s: Signal): number =>
+    s.expectedTotalNetUsdc != null ? Math.min(s.totalNetUsdc ?? s.expectedTotalNetUsdc, s.expectedTotalNetUsdc) : (s.totalNetUsdc ?? 0);
   const profitable = signals
     .filter((s) => s.isProfitable && s.totalNetUsdc != null && s.netAfterCapitalUsdc != null)
-    .sort((a, b) => (b.totalNetUsdc ?? 0) - (a.totalNetUsdc ?? 0));
+    .sort((a, b) => honestTotal(b) - honestTotal(a));
   const executable = profitable.filter((s) => s.direction === 'buy_olive_sell_derive');
   const closest = signals
     .filter(
@@ -46,7 +53,7 @@ export function buildKpis(signals: Signal[]): SignalKpis {
   // summing per-row totals double-counts shared capacity.
   const bestPerUnderlying = new Map<string, number>();
   for (const s of executable) {
-    const t = s.totalNetUsdc ?? 0;
+    const t = honestTotal(s);
     if (t > (bestPerUnderlying.get(s.underlying) ?? -Infinity)) bestPerUnderlying.set(s.underlying, t);
   }
   return {

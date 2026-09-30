@@ -119,7 +119,7 @@ export default function App() {
           </div>
         )}
         <div className="kpi"><span className="k">Executable profitable rows</span><span className="v">{kpiSummary.profitableCount}</span></div>
-        <div className="kpi"><span className="k">Σ best clip $ (per pool)</span><span className="v">{usd(kpiSummary.totalDollars, 0)}</span></div>
+        <div className="kpi"><span className="k">Σ best clip $ (per pool)</span><span className="v" title="Best single executable clip per underlying, summed across pools. When the clip's own fill moves the pool's borrow rate, the marginal-fill (expected) total is used — see Expected total in the row detail.">{usd(kpiSummary.totalDollars, 0)}</span></div>
         <div className="tabs">
           <button className={tab === 'profit' ? 'active' : ''} onClick={() => setTab('profit')}>Profit</button>
           <button className={tab === 'analysis' ? 'active' : ''} onClick={() => setTab('analysis')}>Analysis</button>

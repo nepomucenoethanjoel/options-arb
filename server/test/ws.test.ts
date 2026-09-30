@@ -25,6 +25,7 @@ function sig(pairKey: string, underlying: string, overrides: Partial<Signal> = {
     ivSpreadVols: 5, ivSpreadBps: 800, entryPriceUsdc: 1, exitPriceUsdc: 2, edgeUsdc: 1,
     netEdgeUsdc: 0.9, netAfterCapitalUsdc: 0.5, costsUsdc: 0.1, capitalCostUsdc: 0.4,
     maxExecutableSize: 5, totalNetUsdc: 2.5, roiApyPct: 10, settlementBasisUsdc: 0.1,
+    expectedEntryUsdc: null, expectedNetAfterCapitalUsdc: null, expectedTotalNetUsdc: null,
     syntheticCrossCheckUsdc: 0, crossCheckDeviationUsdc: 0, bookVsMarkUsdc: 0, score: 5,
     isOpportunity: true, isProfitable: true, direction: 'buy_olive_sell_derive', flags: [], ts: 0,
     ...overrides,
@@ -78,6 +79,21 @@ describe('buildKpis', () => {
     expect(k.opportunitiesCount).toBe(2);
     expect(k.totalExecutableUsd).toBe(10);
     expect(k.closest?.pairKey).toBe('ETH-20261030-2000-C');
+  });
+
+  it('headlines the expected (marginal-fill) total when it is lower than the quote', () => {
+    // The quote says $10 but the fill's own rate impact prices it at $4 —
+    // the KPI must headline the honest number and rank by it.
+    const withExpected = [
+      sig('SOL-20261030-100-C', 'SOL', { totalNetUsdc: 10, expectedTotalNetUsdc: 4 }),
+      sig('SOL-20261030-110-C', 'SOL', { totalNetUsdc: 3, expectedTotalNetUsdc: null }),
+    ];
+    const k = buildKpis(withExpected);
+    expect(k.totalExecutableUsd).toBe(4); // not 10, not 13
+    expect(k.topExecutable.map((s) => s.pairKey)).toEqual(['SOL-20261030-100-C', 'SOL-20261030-110-C']); // 4 > 3
+    // Expected ABOVE the quote (model says the fill is fine) changes nothing.
+    const withBetter = [sig('SOL-20261030-100-C', 'SOL', { totalNetUsdc: 10, expectedTotalNetUsdc: 12 })];
+    expect(buildKpis(withBetter).totalExecutableUsd).toBe(10);
   });
 
   it('skips price-distorted rows for the closest signal', () => {

@@ -176,6 +176,15 @@ export interface Signal {
   maxExecutableSize: number | null;
   /** netAfterCapitalUsdc × maxExecutableSize — size-capped total estimate. */
   totalNetUsdc: number | null;
+  /** Expected AVERAGE fill price when the clip's own size moves the pricing
+   * rate along the pool's borrow curve (execution_moves_rate) — the quote
+   * above understates what a full fill actually costs. Null when the model
+   * doesn't apply (no curve/custody data, LP-only direction, mismatch). */
+  expectedEntryUsdc: number | null;
+  /** netAfterCapitalUsdc re-derived at expectedEntryUsdc, per unit. */
+  expectedNetAfterCapitalUsdc: number | null;
+  /** expectedNetAfterCapitalUsdc × size − order fee — the honest clip total. */
+  expectedTotalNetUsdc: number | null;
   /** Net-after-capital ROI on Olive's locked collateral, annualized %. */
   roiApyPct: number | null;
   /** ~1σ settlement basis risk (Derive 30-min TWAP vs Olive Stork print) per unit, USDC. A risk figure, not a cost. */

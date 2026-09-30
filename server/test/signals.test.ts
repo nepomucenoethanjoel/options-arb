@@ -380,6 +380,7 @@ describe('isPersistWorthy — 1/min burst-persistence gate', () => {
     kind: 'call', ivSpreadVols: 5, ivSpreadBps: 800, entryPriceUsdc: 1, exitPriceUsdc: 2,
     edgeUsdc: 1, netEdgeUsdc: 0.9, netAfterCapitalUsdc: 0.5, costsUsdc: 0.1, capitalCostUsdc: 0.4,
     maxExecutableSize: 10, totalNetUsdc: 5, roiApyPct: 10, settlementBasisUsdc: 0.1,
+    expectedEntryUsdc: null, expectedNetAfterCapitalUsdc: null, expectedTotalNetUsdc: null,
     syntheticCrossCheckUsdc: 0, crossCheckDeviationUsdc: 0, bookVsMarkUsdc: 0, score: 5,
     isOpportunity: true, isProfitable: true, direction: 'buy_olive_sell_derive', flags: [], ts: 0,
     ...overrides,
@@ -496,5 +497,69 @@ describe('execution own-impact + pool-aware totals (2026-09-29)', () => {
     );
     expect(s.maxExecutableSize).toBeCloseTo(500 / 2900, 4);
     expect(s.flags).toContain('execution_moves_rate');
+  });
+});
+
+describe('marginal-fill pricing — expected VWAP when the fill moves the rate (2026-09-30)', () => {
+  // Curve flat at 500bps to 50% util, then convex to 5000bps at 100% —
+  // shaped like the live ZEC/SOL token curves above the 90% knee.
+  const curve = [
+    { utilizationBps: 0, rateBps: 500 },
+    { utilizationBps: 5_000, rateBps: 500 },
+    { utilizationBps: 9_000, rateBps: 800 },
+    { utilizationBps: 10_000, rateBps: 5_000 },
+  ];
+  const tau = 30 / 365;
+  // Premium at the CURRENT (50%) utilization with the verified call
+  // convention — this is what the cycle's synthetic quote would be.
+  const quote = bsPrice({
+    forward: 3000 * Math.exp(0.05 * tau),
+    strike: 2900,
+    tauYears: tau,
+    vol: 0.55,
+    discountFactor: Math.exp(-0.05 * tau),
+    kind: 'call',
+  });
+  const custody = {
+    ...cfg,
+    poolCustodyByAsset: {
+      ETH: { underlyingFree: 5, underlyingOwned: 10, usdcFreeUsd: 1e6, tokenCurve: curve },
+    },
+  };
+
+  it('prices the expected average fill above the quote and nets it into the totals', () => {
+    const [s] = computeSignals([row(deriveQuote({ bidSize: 20, askSize: 20 }), oliveQuote(quote, 0.55))], custody, NOW);
+    expect(s.maxExecutableSize).toBe(5);
+    expect(s.flags).toContain('execution_moves_rate');
+    expect(s.expectedEntryUsdc).not.toBeNull();
+    expect(s.expectedEntryUsdc!).toBeGreaterThan(s.entryPriceUsdc!); // quote assumes the rate stays put
+    expect(s.expectedNetAfterCapitalUsdc!).toBeLessThan(s.netAfterCapitalUsdc!);
+    expect(s.expectedNetAfterCapitalUsdc).toBeCloseTo(s.netAfterCapitalUsdc! - (s.expectedEntryUsdc! - s.entryPriceUsdc!), 3);
+    expect(s.expectedTotalNetUsdc!).toBeLessThan(s.totalNetUsdc!);
+    expect(s.expectedTotalNetUsdc).toBeCloseTo(s.expectedNetAfterCapitalUsdc! * 5 - 0.5, 1);
+  });
+
+  it('leaves the expected fields null without curve data (flag-only, as before)', () => {
+    const noCurve = {
+      ...cfg,
+      poolCustodyByAsset: { ETH: { underlyingFree: 5, underlyingOwned: 10, usdcFreeUsd: 1e6 } },
+    };
+    const [s] = computeSignals([row(deriveQuote({ bidSize: 20, askSize: 20 }), oliveQuote(quote, 0.55))], noCurve, NOW);
+    expect(s.flags).toContain('execution_moves_rate');
+    expect(s.expectedEntryUsdc).toBeNull();
+    expect(s.expectedTotalNetUsdc).toBeNull();
+  });
+
+  it('skips the model when the quoted premium is inconsistent with the curve inputs', () => {
+    // mark 70 ≠ BS at 5% rate (~$189) → inputs disagree; flag-only fallback.
+    const [s] = computeSignals([row(deriveQuote({ bidSize: 20, askSize: 20 }), oliveQuote(70, 0.55))], custody, NOW);
+    expect(s.flags).toContain('execution_moves_rate');
+    expect(s.expectedEntryUsdc).toBeNull();
+  });
+
+  it('does not model LP-only directions (the user never pays the AMM premium)', () => {
+    const [s] = computeSignals([row(deriveQuote({ bidSize: 20, askSize: 20, iv: 0.5 }), oliveQuote(quote, 0.55))], custody, NOW);
+    expect(s.direction).toBe('buy_derive_sell_olive');
+    expect(s.expectedEntryUsdc).toBeNull();
   });
 });

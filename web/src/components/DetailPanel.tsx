@@ -117,6 +117,18 @@ export function DetailPanel({
               </div>
               <div><span className="k">Size cap (Derive touch / pool custody)</span><span className="v mono">{signal.maxExecutableSize != null ? `${signal.maxExecutableSize.toFixed(1)} ctr` : '– (no two-sided book)'}</span></div>
               <div><span className="k">Total (size-capped)</span><span className="v mono">{signal.totalNetUsdc != null ? usd(signal.totalNetUsdc, 0) : '–'}</span></div>
+              {signal.expectedEntryUsdc != null && signal.expectedTotalNetUsdc != null && (
+                <>
+                  <div><span className="k">Expected avg fill</span><span className="v mono" title="The clip's own size pushes the pool's borrow curve, repricing the AMM as you fill — this is the utilization-integrated average entry, not the first quote">{usd(signal.expectedEntryUsdc)} vs {usd(signal.entryPriceUsdc)} quoted</span></div>
+                  <div>
+                    <span className="k">= Expected total</span>
+                    <span className={`v mono ${signal.expectedTotalNetUsdc >= 0 ? 'pos-val' : 'neg-val'}`}>
+                      {usd(signal.expectedTotalNetUsdc, 0)}
+                      {signal.expectedTotalNetUsdc < (signal.totalNetUsdc ?? 0) ? ' (rate impact priced in)' : ''}
+                    </span>
+                  </div>
+                </>
+              )}
               <div><span className="k">ROI APY on collateral</span><span className="v mono">{signal.roiApyPct != null ? `${signal.roiApyPct > 0 ? '+' : ''}${signal.roiApyPct.toFixed(1)}%` : '–'}</span></div>
               <div><span className="k">Settlement basis σ</span><span className="v mono" title="~1σ divergence between Derive's 30-min TWAP settlement and Olive's Stork print">{signal.settlementBasisUsdc != null ? `± ${usd(signal.settlementBasisUsdc)}` : '–'}</span></div>
               <div className="kv-wide">

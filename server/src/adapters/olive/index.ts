@@ -1,5 +1,6 @@
 import {
   type IVSurfacePoint,
+  type OliveRateCurvePoint,
   type OptionInstrument,
   type OptionKind,
   type OptionQuote,
@@ -102,6 +103,8 @@ export class OliveAdapter {
     usdcFreeUsd: number | null;
     underlyingOwned?: number | null;
     usdcOwnedUsd?: number | null;
+    tokenCurve?: OliveRateCurvePoint[] | null;
+    usdcCurve?: OliveRateCurvePoint[] | null;
   } | null {
     const cached = this.marketFileCache.get(underlying.toUpperCase());
     if (!cached?.ts || Date.now() - cached.ts > 60_000) return null;
@@ -112,6 +115,8 @@ export class OliveAdapter {
       usdcFreeUsd: d.usdcFreeUsd,
       underlyingOwned: d.underlyingOwned,
       usdcOwnedUsd: d.usdcOwnedUsd,
+      tokenCurve: d.curves?.token ?? null,
+      usdcCurve: d.curves?.usdc ?? null,
     };
   }
 

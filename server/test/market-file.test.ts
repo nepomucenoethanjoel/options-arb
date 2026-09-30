@@ -169,4 +169,25 @@ describe('parseOliveMarketFile — live borrow-curve rates', () => {
     const d = parseOliveMarketFile(fixture, 'SOL')!;
     expect(d.rates).toBeNull();
   });
+
+  it('exposes the raw curve nodes (deduped, sorted) for marginal-fill pricing', () => {
+    const d = parseOliveMarketFile(
+      rateFixture({ tokenOwned: '29933457843', tokenLocked: '6226564999' }, { tokenOwned: '1296319507', tokenLocked: '0' }),
+      'SOL',
+    )!;
+    expect(d.curves.token).toEqual([
+      { utilizationBps: 0, rateBps: 800 },
+      { utilizationBps: 8000, rateBps: 3500 },
+      { utilizationBps: 10000, rateBps: 16000 },
+    ]);
+    expect(d.curves.usdc).toEqual([
+      { utilizationBps: 0, rateBps: 200 },
+      { utilizationBps: 8000, rateBps: 1500 },
+      { utilizationBps: 10000, rateBps: 8000 },
+    ]);
+    // No snapshot → no curves, without breaking the rest of the parse.
+    const bare = parseOliveMarketFile(fixture, 'SOL')!;
+    expect(bare.curves.token).toBeNull();
+    expect(bare.curves.usdc).toBeNull();
+  });
 });
