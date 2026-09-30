@@ -13,11 +13,17 @@ import type { SignalRecord, SpreadHistoryPoint, Storage } from './index';
 export class SqliteStorage implements Storage {
   private readonly db: DatabaseSync;
   private readonly insertSignal;
+  private countCache: { n: number; at: number } | null = null;
 
   constructor(dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true });
     this.db = new DatabaseSync(dbPath);
     this.db.exec('PRAGMA journal_mode = WAL;');
+    // Left alone, the WAL grows without bound (observed 2026-09-30: 199 MB
+    // beside a 369 MB main file) — passive autocheckpoint wasn't reclaiming.
+    // Force eager checkpoints and cap the file; prune() also truncates.
+    this.db.exec('PRAGMA wal_autocheckpoint = 512;');
+    this.db.exec('PRAGMA journal_size_limit = 33554432;'); // 32 MB
     // auto_vacuum must be INCREMENTAL for prune() to ever return disk space.
     // The pragma takes effect immediately on a fresh DB; on an existing DB it
     // reports the old value (0) until a VACUUM converts the file.
@@ -126,17 +132,24 @@ export class SqliteStorage implements Storage {
     }));
   }
 
-  /** Row count of the signals table (health/debug display). */
+  /** Row count of the signals table (health/debug display). COUNT(*) scans
+   * the whole table (~1.4M rows), so serve a ≤60s-stale cache instead. */
   countSignals(): number {
+    if (this.countCache && Date.now() - this.countCache.at < 60_000) return this.countCache.n;
     const row = this.db.prepare('SELECT COUNT(*) AS n FROM signals').get() as { n: number };
+    this.countCache = { n: row.n, at: Date.now() };
     return row.n;
   }
 
   prune(olderThanTs: number): void {
     this.db.prepare('DELETE FROM signals WHERE ts < ?').run(olderThanTs);
+    this.countCache = null;
     // Return the freed pages to the filesystem instead of holding them
     // forever (requires auto_vacuum=INCREMENTAL — see enableAutoVacuum).
     this.db.exec('PRAGMA incremental_vacuum;');
+    // Fold the WAL back into the main file and cut it to zero — see the
+    // journal_size_limit note in the constructor.
+    this.db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
   }
 
   close(): void {

@@ -188,7 +188,7 @@ export function loadConfig(): AppConfig {
     capitalBorrowRateApr: num('CAPITAL_BORROW_RATE_APR', 0.08),
 
     dataDir: str('DATA_DIR', './data'),
-    historyRetentionDays: Math.max(1, num('HISTORY_RETENTION_DAYS', 30)),
+    historyRetentionDays: Math.max(1, num('HISTORY_RETENTION_DAYS', 7)),
     alertsEnabled: bool('ALERTS_ENABLED', false),
     alertWebhookUrl: str('ALERT_WEBHOOK_URL', ''),
     alertCooldownMs: num('ALERT_COOLDOWN_MS', 300000),

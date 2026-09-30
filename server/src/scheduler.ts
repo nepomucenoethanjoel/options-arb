@@ -75,10 +75,33 @@ interface UnderlyingResult {
 
 /** At most one realtime-triggered early cycle per 30 s (Derive rate budget). */
 const EARLY_CYCLE_COOLDOWN_MS = 30_000;
-/** Full-sweep persistence cadence — see the sampling note in runOnce(). */
+/** Full-sweep cadence: unchanged rows get re-persisted at least this often. */
 const PERSIST_FULL_INTERVAL_MS = 10 * 60_000;
 /** Min spacing between "interesting row" persistence bursts. */
 const PERSIST_INTERESTING_INTERVAL_MS = 60_000;
+/** Hard floor for UNCHANGED non-worthy rows (every pair keeps ≥1 point/hour
+ * even when its 0.05-vol signature never moves — enough for trend context,
+ * while the 10-min sweep × ~900 rows alone was 131k writes/day). */
+const PERSIST_HARD_FLOOR_MS = 60 * 60_000;
+
+/**
+ * Burst-change signature: chart-visible resolution of the spread plus the
+ * profitability/opportunity regime, flags and clip total. Rows whose
+ * signature is unchanged since their last persist skip the write (they
+ * would be duplicate flat points — persistence was writing ~100-160k
+ * rows/day, most of them identical). Retention default is 7 days: the
+ * history charts max out at a 7-day window, so anything older is dead
+ * weight nothing reads.
+ */
+function burstSignature(s: Signal): string {
+  return [
+    Math.round((s.ivSpreadVols ?? 0) * 5), // 0.2-vol chart resolution
+    s.isOpportunity ? 1 : 0,
+    s.isProfitable ? 1 : 0,
+    Math.round((s.totalNetUsdc ?? 0) * 5),
+    s.flags.join(','),
+  ].join('|');
+}
 
 /**
  * Orchestrates one polling cycle:
@@ -161,6 +184,7 @@ export class Orchestrator extends EventEmitter {
   private lastEarlyCycleMs = 0;
   private lastFullPersistMs = 0;
   private lastInterestingPersistMs = 0;
+  private lastBurstByPair = new Map<string, { sig: string; ts: number }>();
 
   async runOnce(): Promise<void> {
     if (this.busy) return;
@@ -207,12 +231,14 @@ export class Orchestrator extends EventEmitter {
       try {
         // Persistence sampling: a full-chain cycle carries ~2.3k signals and
         // cycles run every ~15-20s — writing everything every cycle is ~9M
-        // rows/day, far more than SQLite (or the history charts) need.
-        // Rows worth charting at high resolution (executable-direction
-        // opportunity/profitable with non-zero size — see isPersistWorthy)
-        // persist at most once per minute; the full sweep persists every
-        // PERSIST_FULL_INTERVAL_MS. History charts keep ≥1 point/10min for
-        // every pair and ~1/min for live executable candidates.
+        // rows/day, far more than SQLite (or the history charts) need. Every
+        // write is change-gated on the burst signature (0.2-vol chart
+        // resolution + regime/flags/total): changed persist-worthy rows
+        // (executable-direction opportunity/profitable with size —
+        // isPersistWorthy) write at up to 1/min; changed non-worthy rows at
+        // the 10-min sweep; UNCHANGED rows fall to 10-min (worthy) / 1-hour
+        // (rest) staleness floors. Charts keep full resolution exactly where
+        // the spread is moving and ≥1 point/hour everywhere else.
         const persistAll = now - this.lastFullPersistMs >= PERSIST_FULL_INTERVAL_MS;
         if (persistAll) this.lastFullPersistMs = now;
         const persistInteresting = persistAll || now - this.lastInterestingPersistMs >= PERSIST_INTERESTING_INTERVAL_MS;
@@ -220,29 +246,50 @@ export class Orchestrator extends EventEmitter {
         const ivsByPair = new Map(
           allRows.map((r) => [r.pairKey, { d: r.derive.quote?.iv ?? null, o: r.olive.quote?.iv ?? null }]),
         );
-        this.storage.recordSignals(
-          allSignals
-            .filter((s) => persistAll || (persistInteresting && isPersistWorthy(s)))
-            .map((s) => ({
-              ts: s.ts,
-              pairKey: s.pairKey,
-              underlying: s.underlying,
-              spreadVols: s.ivSpreadVols,
-              spreadBps: s.ivSpreadBps,
-              deriveIv: ivsByPair.get(s.pairKey)?.d ?? null,
-              oliveIv: ivsByPair.get(s.pairKey)?.o ?? null,
-              edgeUsdc: s.edgeUsdc,
-              netAfterCapitalUsdc: s.netAfterCapitalUsdc,
-              totalNetUsdc: s.totalNetUsdc,
-              roiApyPct: s.roiApyPct,
-              maxSize: s.maxExecutableSize,
-              costsUsdc: s.costsUsdc,
-              score: s.score,
-              isOpportunity: s.isOpportunity,
-              isProfitable: s.isProfitable,
-              flags: s.flags.join(','),
-            })),
-        );
+        const toRecord = (s: Signal) => ({
+          ts: s.ts,
+          pairKey: s.pairKey,
+          underlying: s.underlying,
+          spreadVols: s.ivSpreadVols,
+          spreadBps: s.ivSpreadBps,
+          deriveIv: ivsByPair.get(s.pairKey)?.d ?? null,
+          oliveIv: ivsByPair.get(s.pairKey)?.o ?? null,
+          edgeUsdc: s.edgeUsdc,
+          netAfterCapitalUsdc: s.netAfterCapitalUsdc,
+          totalNetUsdc: s.totalNetUsdc,
+          roiApyPct: s.roiApyPct,
+          maxSize: s.maxExecutableSize,
+          costsUsdc: s.costsUsdc,
+          score: s.score,
+          isOpportunity: s.isOpportunity,
+          isProfitable: s.isProfitable,
+          flags: s.flags.join(','),
+        });
+        const toPersist: Signal[] = [];
+        for (const s of allSignals) {
+          const worthy = isPersistWorthy(s);
+          if (!persistInteresting && !persistAll) continue; // worthy rows are considered 1×/min
+          if (!worthy && !persistAll) continue; // the rest only on the 10-min sweep
+          // Opportunity-but-unprofitable rows (the LP-only/unprofitable mass
+          // on SOL/BTC/ETH) are context, not trade candidates — half cadence.
+          if (worthy && !s.isProfitable && now - (this.lastBurstByPair.get(s.pairKey)?.ts ?? 0) < 2 * PERSIST_INTERESTING_INTERVAL_MS) {
+            continue;
+          }
+          const sig = burstSignature(s);
+          const prev = this.lastBurstByPair.get(s.pairKey);
+          if (prev && prev.sig === sig && now - prev.ts < (worthy ? PERSIST_FULL_INTERVAL_MS : PERSIST_HARD_FLOOR_MS)) {
+            continue;
+          }
+          this.lastBurstByPair.set(s.pairKey, { sig, ts: now });
+          toPersist.push(s);
+        }
+        if (persistAll) {
+          // Expired pairs must not linger in the gate map forever.
+          for (const [key, entry] of this.lastBurstByPair) {
+            if (now - entry.ts > 2 * PERSIST_HARD_FLOOR_MS) this.lastBurstByPair.delete(key);
+          }
+        }
+        this.storage.recordSignals(toPersist.map(toRecord));
         this.storage.upsertHealth(health.derive);
         this.storage.upsertHealth(health.olive);
       } catch (err) {

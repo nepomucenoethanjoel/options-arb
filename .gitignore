@@ -9,3 +9,5 @@ data/
 handcheck-target.json
 .tmp-ov.json
 .zcode/
+*.tsbuildinfo
+.ov.tmp.json
