@@ -11,6 +11,9 @@ WorkingDirectory=/opt/options-arb/server
 ExecStart=/usr/bin/npm run start
 Restart=always
 RestartSec=5
+# Cap the V8 heap so a cycle spike can't balloon the box (measured steady
+# use is ~120 MB; 256 MB is the ceiling, not the expectation).
+Environment=NODE_OPTIONS=--max-old-space-size=256
 # App reads its own config from server/.env via dotenv.
 StandardOutput=journal
 StandardError=journal
