@@ -1,4 +1,21 @@
-# Deploying options-arb to a Hetzner VPS
+# Deploying options-arb to a VPS (any provider — Hetzner, Rocknerd, …)
+
+The kit is provider-agnostic: it needs any Ubuntu/Debian box with root SSH.
+Provider notes:
+
+- **Rocknerd (budget KVM/OpenVZ):** pick a **KVM** plan, Ubuntu 22.04/24.04.
+  OpenVZ plans mostly work too (setup tolerates missing swap), but KVM gives
+  you a real kernel, swap, and systemd niceties. There is no cloud firewall —
+  restrict access on the box itself:
+  ```bash
+  ufw allow OpenSSH && ufw allow 8799/tcp   # or skip 8799 and use SSH tunneling
+  ufw enable
+  ```
+  Initial access is usually a root password from their panel — convert to
+  the deploy key (step 2) on first login, then disable password auth
+  (`PasswordAuthentication no` in `/etc/ssh/sshd_config`).
+- **Hetzner:** CX22 (x86) / CAX11 (ARM), Ubuntu 24.04, and use a Cloud
+  Firewall instead of ufw (allow 22 + 8799 from your IP only).
 
 Single Node process: the API server serves the built dashboard itself
 (`web/dist`), so there is no second web server to run. SQLite lives in
@@ -30,7 +47,7 @@ box shared with another app. To go back to build-on-the-box (fatter:
   - keep port 8799 closed and use an SSH tunnel from your machine:
     `ssh -N -L 8799:127.0.0.1:8799 root@<VPS_IP>` → open http://127.0.0.1:8799
 
-## 2. Deploy key (from the workstation, once)
+## 2. Deploy key (from the workstation, once — for Rocknerd: append via panel VNC console or first password login)
 
 ```bash
 ssh-keygen -t ed25519 -f ~/.ssh/options-arb-hetzner -N '' -C options-arb-deploy

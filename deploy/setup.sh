@@ -34,9 +34,15 @@ echo "==> service user '$SERVICE_USER'"
 id -u "$SERVICE_USER" >/dev/null 2>&1 || useradd --create-home --shell /usr/sbin/nologin "$SERVICE_USER"
 
 echo "==> swap (1 GB headroom)"
+# Best-effort: OpenVZ containers (common on budget hosts like Rocknerd) don't
+# allow swap — tolerate and continue. Prefer KVM plans when provisioning.
 if ! swapon --show 2>/dev/null | grep -q .; then
-  fallocate -l 1G /swapfile && chmod 600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile
-  grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  if fallocate -l 1G /swapfile 2>/dev/null && chmod 600 /swapfile && mkswap /swapfile >/dev/null 2>&1 && swapon /swapfile 2>/dev/null; then
+    grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  else
+    rm -f /swapfile
+    echo "    (no swap support — likely OpenVZ; consider a KVM plan)"
+  fi
 fi
 
 echo "==> production dependencies only (no build on this box)"
