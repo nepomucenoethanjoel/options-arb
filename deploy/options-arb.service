@@ -1,0 +1,19 @@
+[Unit]
+Description=options-arb — Olive x Derive options arbitrage monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=optionsarb
+Group=optionsarb
+WorkingDirectory=/opt/options-arb/server
+ExecStart=/usr/bin/npm run start
+Restart=always
+RestartSec=5
+# App reads its own config from server/.env via dotenv.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
