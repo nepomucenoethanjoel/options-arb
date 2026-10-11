@@ -11,7 +11,7 @@ set -euo pipefail
 ENV_FILE=/opt/options-arb/server/.env
 STATE=/var/lib/options-arb-watchdog
 mkdir -p "$(dirname "$STATE")"
-kv() { grep -E "^$1=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2-; }
+kv() { { grep -E "^$1=" "$ENV_FILE" 2>/dev/null || true; } | head -1 | cut -d= -f2-; }
 TOKEN=$(kv TELEGRAM_BOT_TOKEN)
 CHAT=$(kv TELEGRAM_CHAT_ID)
 notify() {
