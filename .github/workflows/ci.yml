@@ -19,5 +19,30 @@ jobs:
         run: npm test
       - name: Typecheck (all workspaces)
         run: npx tsc -b shared server web
-      - name: Build (shared dist + web dashboard)
+      - name: Build (web dashboard)
         run: npm run build -w shared -w web
+
+  # After green tests on main: publish the `deploy` branch = main + the built
+  # dashboard (web/dist is gitignored on main). The VPS cron pulls this branch
+  # every minute — merged PRs go live hands-off. The box itself never compiles.
+  deploy-branch:
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: npm run build -w shared -w web
+      - name: Publish deploy branch
+        run: |
+          git config user.name "ci"
+          git config user.email "ci@users.noreply.github.com"
+          git checkout -B deploy
+          git add -f web/dist
+          git commit -q -m "dist: build from ${GITHUB_SHA::7}" || echo "no changes"
+          git push -f origin deploy
