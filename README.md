@@ -155,3 +155,5 @@ never pinned snapshots.
    (2026-09-19+ redeploy). ITM positions may settle late if it stays down.
 6. **Signal generation and manual review only** — no execution logic exists in
    this codebase by design.
+
+> Live at http://192.236.184.31:8799 — auto-deploys from `main` via CI + the box cron.
