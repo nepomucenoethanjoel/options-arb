@@ -53,7 +53,9 @@ fi
 prev=$(cat "$STATE" 2>/dev/null || echo unknown)
 if [ "$status" != "$prev" ]; then
   case "$status" in
-    ok) [ "$prev" != unknown ] && notify "✅ options-arb recovered (was: $prev)" ;;
+    ok)
+      if [ "$prev" != unknown ]; then notify "✅ options-arb recovered (was: $prev)"; fi
+      ;;
     *) notify "⚠️ options-arb $status — $detail" ;;
   esac
   echo "$status" > "$STATE"
