@@ -91,6 +91,14 @@ export interface AppConfig {
   alertCooldownMs: number;
   /** Only alert on the two-leg-executable direction (buy Olive / sell Derive). */
   alertsExecutableOnly: boolean;
+  /** Telegram Bot API transport (preferred for phone use): both set →
+   *  messages post as {chat_id, text}. Create the bot via @BotFather. */
+  telegramBotToken: string;
+  telegramChatId: string;
+  /** Minimum HONEST clip total (USDC — expected/marginal-fill aware, the
+   *  same basis the KPI Σ uses) before an opportunity alert fires.
+   *  0 = alert on any isOpportunity row (legacy behavior). */
+  alertMinTotalUsdc: number;
 }
 
 export function loadConfig(): AppConfig {
@@ -193,5 +201,8 @@ export function loadConfig(): AppConfig {
     alertWebhookUrl: str('ALERT_WEBHOOK_URL', ''),
     alertCooldownMs: num('ALERT_COOLDOWN_MS', 300000),
     alertsExecutableOnly: bool('ALERTS_EXECUTABLE_ONLY', true),
+    telegramBotToken: str('TELEGRAM_BOT_TOKEN', ''),
+    telegramChatId: str('TELEGRAM_CHAT_ID', ''),
+    alertMinTotalUsdc: num('ALERT_MIN_TOTAL_USDC', 0),
   };
 }

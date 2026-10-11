@@ -2,40 +2,80 @@ import type { Signal } from '@options-arb/shared';
 import type { AppConfig } from './config';
 
 /**
- * Threshold-crossing webhook alerts (generic JSON POST — works with Discord/
- * Slack webhook relays or any receiver). Deduped per pair with a cooldown so
- * a persistently crossed pair doesn't spam. Disabled by default.
+ * Threshold-crossing alerts. Two transports:
+ *  - Telegram Bot API (TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID) — phone-native
+ *  - generic JSON webhook (ALERT_WEBHOOK_URL) — Discord/Slack relays etc.
+ *
+ * Gating: isOpportunity rows only, executable direction only (writing to
+ * Olive's pool is an LP role), price-distortion noise skipped, and — when
+ * ALERT_MIN_TOTAL_USDC > 0 — the clip's HONEST total (expected/marginal-fill
+ * aware: min(quoted, expected), the same basis as the KPI Σ) must clear the
+ * threshold. Deduped per pair with a cooldown so a persistently crossed pair
+ * doesn't spam. Disabled by default.
  */
 export class Alerter {
   private lastAlertPerPair = new Map<string, number>();
 
   constructor(private readonly cfg: AppConfig) {}
 
+  /** Honest clip total: the fill model's number when it prices one lower. */
+  private honestTotal(s: Signal): number {
+    const quoted = s.totalNetUsdc ?? 0;
+    return s.expectedTotalNetUsdc != null ? Math.min(quoted, s.expectedTotalNetUsdc) : quoted;
+  }
+
   async process(signals: Signal[]): Promise<void> {
-    if (!this.cfg.alertsEnabled || !this.cfg.alertWebhookUrl) return;
+    if (!this.cfg.alertsEnabled) return;
+    const telegram = this.cfg.telegramBotToken && this.cfg.telegramChatId;
+    const webhook = this.cfg.alertWebhookUrl;
+    if (!telegram && !webhook) return;
     const now = Date.now();
     for (const s of signals) {
       if (!s.isOpportunity) continue;
-      // The buy-Olive/sell-Derive direction is the only one executable on
-      // both legs (writing to Olive's pool is an LP role) — default filter.
       if (this.cfg.alertsExecutableOnly && s.direction !== 'buy_olive_sell_derive') continue;
       if (s.flags.includes('price_distortion')) continue;
+      const honest = this.honestTotal(s);
+      if (this.cfg.alertMinTotalUsdc > 0 && honest < this.cfg.alertMinTotalUsdc) continue;
       const last = this.lastAlertPerPair.get(s.pairKey) ?? 0;
       if (now - last < this.cfg.alertCooldownMs) continue;
       this.lastAlertPerPair.set(s.pairKey, now);
+
+      const expectedNote =
+        s.expectedTotalNetUsdc != null && s.expectedTotalNetUsdc < (s.totalNetUsdc ?? 0)
+          ? ` (fill model: ${s.expectedTotalNetUsdc.toFixed(2)} after rate impact)`
+          : '';
+      const text = [
+        `🎯 ${s.pairKey}`,
+        `spread ${s.ivSpreadVols} vol pts (${s.ivSpreadBps} bps) · ${s.kind.toUpperCase()}`,
+        `net ${s.netAfterCapitalUsdc} USDC/ctr · size ${s.maxExecutableSize} · APY ${s.roiApyPct}%`,
+        `total ${s.totalNetUsdc} USDC${expectedNote}`,
+        s.flags.length > 0 ? `flags: ${s.flags.join(',')}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n');
+
       try {
-        await fetch(this.cfg.alertWebhookUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            type: 'iv_spread_opportunity',
-            text: `IV spread ${s.ivSpreadVols} vol pts | ${s.pairKey} | net ${s.netAfterCapitalUsdc} USDC/ctr after fees+capital | total ${s.totalNetUsdc} USDC × ${s.maxExecutableSize} | APY ${s.roiApyPct}% | flags: ${s.flags.join(',')}`,
-            signal: s,
-            ts: new Date(now).toISOString(),
-          }),
-        });
+        if (telegram) {
+          await fetch(`https://api.telegram.org/bot${this.cfg.telegramBotToken}/sendMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: this.cfg.telegramChatId, text }),
+          });
+        } else {
+          await fetch(webhook, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              type: 'iv_spread_opportunity',
+              text,
+              honestTotalUsdc: honest,
+              signal: s,
+              ts: new Date(now).toISOString(),
+            }),
+          });
+        }
       } catch (err) {
-        console.warn('[alerter] webhook failed:', err instanceof Error ? err.message : err);
+        console.warn('[alerter] alert failed:', err instanceof Error ? err.message : err);
       }
     }
   }

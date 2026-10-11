@@ -82,6 +82,28 @@ signals. Open `http://<VPS_IP>:8799/` (or via tunnel/proxy).
 | Update code | push/merge to `main` — CI tests, publishes `deploy`, the box pulls within a minute |
 | DB location | `/opt/options-arb/server/data/options-arb.db` |
 
+### Alerts (phone) + watchdog
+
+The app alerts executable opportunities via **Telegram** when armed:
+
+1. `@BotFather` → `/newbot` → copy the token.
+2. Send your new bot any message, open `https://api.telegram.org/bot<TOKEN>/getUpdates`, copy `chat.id`.
+3. On the VPS, set in `/opt/options-arb/server/.env`:
+   `ALERTS_ENABLED=true`, `TELEGRAM_BOT_TOKEN=…`, `TELEGRAM_CHAT_ID=…`
+   (and optionally `ALERT_MIN_TOTAL_USDC=5` — alerts only fire when the
+   clip's HONEST total, fill-model aware, clears it), then
+   `systemctl restart options-arb`.
+
+The **watchdog** (`deploy/options-arb-watchdog.sh` + `.cron`) checks the
+health endpoint every 5 min: unreachable → restart + alert; venue down or
+cycle stale >10 min → alert; recovery → alert. Only on state change, so no
+spam. Install on the box:
+
+```bash
+install -m 755 /opt/options-arb/deploy/options-arb-watchdog.sh /usr/local/bin/
+cp /opt/options-arb/deploy/options-arb-watchdog.cron /etc/cron.d/options-arb-watchdog
+```
+
 ### Auto-deploy loop (phone-driven)
 
 ```

@@ -1,0 +1,4 @@
+# options-arb health watchdog: every 5 minutes.
+# Install: cp deploy/options-arb-watchdog.cron /etc/cron.d/options-arb-watchdog
+# (with deploy/options-arb-watchdog.sh installed to /usr/local/bin/)
+*/5 * * * * root /usr/local/bin/options-arb-watchdog.sh
