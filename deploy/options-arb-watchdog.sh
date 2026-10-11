@@ -28,8 +28,15 @@ out=$(curl -fsS --max-time 10 http://127.0.0.1:8799/api/health 2>/dev/null) || {
   detail="health endpoint unreachable"
 }
 if [ "$status" = ok ]; then
+  # Post-restart warm-up: health is null until the first cycle completes
+  # (~30s). That's "starting", not broken — alert only if it persists.
+  up_since=$(systemctl show options-arb -p ActiveEnterTimestampMonotonic --value 2>/dev/null || echo 0)
   verdict=$(node -e '
     const h = JSON.parse(process.argv[1]);
+    if (!h.health) {
+      console.log(Number(process.argv[2]) > 15 * 60_000_000 ? "bad: no cycle after 15min uptime" : "starting");
+      process.exit(0);
+    }
     const bad = [];
     for (const v of ["derive", "olive"]) {
       if (h.health?.[v]?.status !== "ok") bad.push(v + "=" + (h.health?.[v]?.status ?? "?"));
@@ -39,10 +46,13 @@ if [ "$status" = ok ]; then
       bad.push("cycle stale " + Math.round((Date.now() - cyc) / 60000) + "min");
     }
     console.log(bad.length ? "bad: " + bad.join(" ") : "ok");
-  ' "$out" 2>/dev/null) || verdict="bad: health response unparseable"
-  if [ "$verdict" != ok ]; then
+  ' "$out" "$up_since" 2>/dev/null) || verdict="bad: health response unparseable"
+  if [[ "$verdict" == bad:* ]]; then
     status=degraded
     detail="$verdict"
+  elif [ "$verdict" = starting ]; then
+    status=starting
+    detail="warming up after restart"
   fi
 fi
 
@@ -54,8 +64,9 @@ prev=$(cat "$STATE" 2>/dev/null || echo unknown)
 if [ "$status" != "$prev" ]; then
   case "$status" in
     ok)
-      if [ "$prev" != unknown ]; then notify "✅ options-arb recovered (was: $prev)"; fi
+      if [ "$prev" != unknown ] && [ "$prev" != starting ]; then notify "✅ options-arb recovered (was: $prev)"; fi
       ;;
+    starting) ;; # transient — no alert
     *) notify "⚠️ options-arb $status — $detail" ;;
   esac
   echo "$status" > "$STATE"
