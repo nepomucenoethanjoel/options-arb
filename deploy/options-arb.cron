@@ -1,0 +1,3 @@
+# options-arb auto-deploy: pull CI's deploy branch every minute.
+# Install: cp deploy/options-arb.cron /etc/cron.d/options-arb
+* * * * * root /usr/local/bin/options-arb-update.sh

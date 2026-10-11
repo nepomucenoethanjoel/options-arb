@@ -76,13 +76,31 @@ signals. Open `http://<VPS_IP>:8799/` (or via tunnel/proxy).
 | Task | Command (on the VPS, as root) |
 |---|---|
 | Logs (live) | `journalctl -u options-arb -f` |
+| Auto-deploy log | `journalctl -t options-arb` (or `/var/log/syslog`) |
 | Restart | `systemctl restart options-arb` |
 | Status | `systemctl status options-arb` |
-| Update code | `bash deploy/deploy.sh root@<VPS_IP>` again |
+| Update code | push/merge to `main` — CI tests, publishes `deploy`, the box pulls within a minute |
 | DB location | `/opt/options-arb/server/data/options-arb.db` |
 
-Updating re-runs the same pipeline; the box's `server/.env` and
-`server/data/` survive untouched.
+### Auto-deploy loop (phone-driven)
+
+```
+issue (phone) → agent PR → CI tests → your review → merge to main
+   → CI publishes `deploy` branch (main + built web/dist)
+   → VPS cron pulls every minute, npm ci --omit=dev, systemctl restart
+   → dashboard updated; watch with `journalctl -t options-arb`
+```
+
+One-time install on the box (after it's a git checkout of `deploy`):
+
+```bash
+install -m 755 /opt/options-arb/deploy/options-arb-update.sh /usr/local/bin/
+cp /opt/options-arb/deploy/options-arb.cron /etc/cron.d/options-arb
+```
+
+`bash deploy/deploy.sh root@<host>` from a workstation remains the manual
+override path (same content, immediate). The box's `server/.env` and
+`server/data/` survive every update path.
 
 ## Notes
 
