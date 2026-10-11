@@ -47,8 +47,7 @@ fi
 
 echo "==> production dependencies only (no build on this box)"
 cd "$APP_DIR"
-test -d shared/dist || { echo "FATAL: shared/dist missing — run deploy.sh (builds locally), not a bare git archive"; exit 1; }
-test -d web/dist   || { echo "FATAL: web/dist missing — run deploy.sh (builds locally), not a bare git archive"; exit 1; }
+test -d web/dist || { echo "FATAL: web/dist missing — run deploy.sh (builds locally), not a bare git archive"; exit 1; }
 npm ci --omit=dev --no-audit --no-fund || npm install --omit=dev --no-audit --no-fund
 npm cache clean --force >/dev/null 2>&1 || true
 

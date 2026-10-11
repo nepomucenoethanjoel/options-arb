@@ -21,8 +21,10 @@ npm run build -w shared -w web
 test -d shared/dist && test -d web/dist
 
 echo "==> shipping code + dists to $HOST:$REMOTE_DIR"
+# NB: shared builds with tsc --noEmit — tsx runs it from source (its package
+# main is src/index.ts), so only the web dashboard has a dist to ship.
 git archive --format=tar HEAD | ssh -i "$KEY" "$HOST" "mkdir -p $REMOTE_DIR && tar -x -C $REMOTE_DIR"
-tar -C . -cf - shared/dist web/dist | ssh -i "$KEY" "$HOST" "tar -x -C $REMOTE_DIR"
+tar -C . -cf - web/dist | ssh -i "$KEY" "$HOST" "tar -x -C $REMOTE_DIR"
 
 echo "==> bootstrap/update on the box (idempotent)"
 ssh -i "$KEY" "$HOST" "bash $REMOTE_DIR/deploy/setup.sh"
