@@ -2,9 +2,10 @@ import type { Signal } from '@options-arb/shared';
 import type { AppConfig } from './config';
 
 /**
- * Threshold-crossing alerts. Two transports:
- *  - Telegram Bot API (TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID) — phone-native
- *  - generic JSON webhook (ALERT_WEBHOOK_URL) — Discord/Slack relays etc.
+ * Threshold-crossing alerts. Transports (first configured wins):
+ *  - Discord channel webhook (DISCORD_WEBHOOK_URL) — one credential, no bot
+ *  - Telegram Bot API (TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID)
+ *  - generic JSON webhook (ALERT_WEBHOOK_URL) — Slack/relays etc.
  *
  * Gating: isOpportunity rows only, executable direction only (writing to
  * Olive's pool is an LP role), price-distortion noise skipped, and — when
@@ -26,9 +27,10 @@ export class Alerter {
 
   async process(signals: Signal[]): Promise<void> {
     if (!this.cfg.alertsEnabled) return;
+    const discord = this.cfg.discordWebhookUrl;
     const telegram = this.cfg.telegramBotToken && this.cfg.telegramChatId;
     const webhook = this.cfg.alertWebhookUrl;
-    if (!telegram && !webhook) return;
+    if (!discord && !telegram && !webhook) return;
     const now = Date.now();
     for (const s of signals) {
       if (!s.isOpportunity) continue;
@@ -55,7 +57,13 @@ export class Alerter {
         .join('\n');
 
       try {
-        if (telegram) {
+        if (discord) {
+          await fetch(discord, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: 'options-arb', content: text }),
+          });
+        } else if (telegram) {
           await fetch(`https://api.telegram.org/bot${this.cfg.telegramBotToken}/sendMessage`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

@@ -95,6 +95,9 @@ export interface AppConfig {
    *  messages post as {chat_id, text}. Create the bot via @BotFather. */
   telegramBotToken: string;
   telegramChatId: string;
+  /** Discord channel webhook (Integrations → Webhooks → Copy URL) —
+   *  one credential, no bot setup. Preferred transport when set. */
+  discordWebhookUrl: string;
   /** Minimum HONEST clip total (USDC — expected/marginal-fill aware, the
    *  same basis the KPI Σ uses) before an opportunity alert fires.
    *  0 = alert on any isOpportunity row (legacy behavior). */
@@ -203,6 +206,7 @@ export function loadConfig(): AppConfig {
     alertsExecutableOnly: bool('ALERTS_EXECUTABLE_ONLY', true),
     telegramBotToken: str('TELEGRAM_BOT_TOKEN', ''),
     telegramChatId: str('TELEGRAM_CHAT_ID', ''),
+    discordWebhookUrl: str('DISCORD_WEBHOOK_URL', ''),
     alertMinTotalUsdc: num('ALERT_MIN_TOTAL_USDC', 0),
   };
 }

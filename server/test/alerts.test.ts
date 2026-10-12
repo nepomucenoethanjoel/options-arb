@@ -25,6 +25,7 @@ const base = {
   alertsExecutableOnly: true,
   telegramBotToken: '',
   telegramChatId: '',
+  discordWebhookUrl: '',
   alertMinTotalUsdc: 0,
 } as Partial<AppConfig> as AppConfig;
 
@@ -85,6 +86,24 @@ describe('Alerter — transports and gating', () => {
     // honest clears the threshold → fires.
     await alerter.process([sig({ pairKey: 'B', totalNetUsdc: 9.9, expectedTotalNetUsdc: 7.2, expectedNetAfterCapitalUsdc: 1.4 })]);
     expect(fetchMock.mock.calls).toHaveLength(1);
+  });
+
+  it('posts to Discord as {username, content} — and wins over other transports', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal('fetch', fetchMock);
+    await new Alerter({
+      ...base,
+      discordWebhookUrl: 'https://discord.com/api/webhooks/1/abc',
+      telegramBotToken: 'T0K',
+      telegramChatId: '1',
+      alertWebhookUrl: 'https://hooks.example/x',
+    }).process([sig()]);
+    expect(fetchMock.mock.calls).toHaveLength(1);
+    const { url, body } = lastPost();
+    expect(url).toBe('https://discord.com/api/webhooks/1/abc');
+    expect(body.username).toBe('options-arb');
+    expect(String(body.content)).toContain('ZEC-20261225-1700-C');
+    expect(String(body.content)).toContain('fill model: -0.4');
   });
 
   it('keeps webhook transport for non-Telegram setups', async () => {

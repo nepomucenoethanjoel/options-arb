@@ -82,17 +82,19 @@ signals. Open `http://<VPS_IP>:8799/` (or via tunnel/proxy).
 | Update code | push/merge to `main` — CI tests, publishes `deploy`, the box pulls within a minute |
 | DB location | `/opt/options-arb/server/data/options-arb.db` |
 
-### Alerts (phone) + watchdog
+### Alerts (Discord) + watchdog
 
-The app alerts executable opportunities via **Telegram** when armed:
+The app alerts executable opportunities to a **Discord channel** when armed:
 
-1. `@BotFather` → `/newbot` → copy the token.
-2. Send your new bot any message, open `https://api.telegram.org/bot<TOKEN>/getUpdates`, copy `chat.id`.
-3. On the VPS, set in `/opt/options-arb/server/.env`:
-   `ALERTS_ENABLED=true`, `TELEGRAM_BOT_TOKEN=…`, `TELEGRAM_CHAT_ID=…`
-   (and optionally `ALERT_MIN_TOTAL_USDC=5` — alerts only fire when the
-   clip's HONEST total, fill-model aware, clears it), then
-   `systemctl restart options-arb`.
+1. In your server: channel ⚙️ → **Integrations → Webhooks → New Webhook** → Copy URL.
+2. On the VPS, set in `/opt/options-arb/server/.env`:
+   `ALERTS_ENABLED=true`, `DISCORD_WEBHOOK_URL=…`
+   (optionally `ALERT_MIN_TOTAL_USDC=5` — alerts only fire when the clip's
+   HONEST total, fill-model aware, clears it), then `systemctl restart options-arb`.
+
+Telegram (`TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`) and a generic webhook
+(`ALERT_WEBHOOK_URL`) remain supported alternatives; Discord wins when
+multiple are configured.
 
 The **watchdog** (`deploy/options-arb-watchdog.sh` + `.cron`) checks the
 health endpoint every 5 min: unreachable → restart + alert; venue down or

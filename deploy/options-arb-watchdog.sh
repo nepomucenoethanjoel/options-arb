@@ -14,8 +14,12 @@ mkdir -p "$(dirname "$STATE")"
 kv() { { grep -E "^$1=" "$ENV_FILE" 2>/dev/null || true; } | head -1 | cut -d= -f2-; }
 TOKEN=$(kv TELEGRAM_BOT_TOKEN)
 CHAT=$(kv TELEGRAM_CHAT_ID)
+DISCORD=$(kv DISCORD_WEBHOOK_URL)
 notify() {
-  if [ -n "$TOKEN" ] && [ -n "$CHAT" ]; then
+  if [ -n "$DISCORD" ]; then
+    curl -fsS --max-time 10 -X POST "$DISCORD" -H 'Content-Type: application/json' \
+      -d "$(node -e 'console.log(JSON.stringify({username:"options-arb",content:process.argv[1]}))' "$1")" >/dev/null 2>&1 || true
+  elif [ -n "$TOKEN" ] && [ -n "$CHAT" ]; then
     curl -fsS --max-time 10 -X POST "https://api.telegram.org/bot$TOKEN/sendMessage" \
       -d chat_id="$CHAT" --data-urlencode text="$1" >/dev/null 2>&1 || true
   fi
