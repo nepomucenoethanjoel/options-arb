@@ -1,6 +1,7 @@
 import {
   bsPrice,
   expectedFillVwap,
+  NON_EXECUTABLE_FLAGS,
   yearsBetween,
   type MatchRow,
   type OliveRateCurvePoint,
@@ -43,7 +44,6 @@ export interface SignalConfig {
   }>;
 }
 
-const NON_EXECUTABLE_FLAGS = new Set(['no_book', 'one_sided', 'thin_book', 'wide_book', 'stale', 'mismatched_legs']);
 /** Derive settles a 30-minute TWAP of the underlying; Olive settles a Stork oracle print. */
 const SETTLEMENT_TWAP_HOURS = 0.5;
 /** Derive taker base fee, per ORDER regardless of size (docs trading-fees,

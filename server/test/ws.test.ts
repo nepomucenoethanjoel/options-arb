@@ -213,4 +213,32 @@ describe('buildKpis — pool-aware Σ', () => {
     expect(k.totalExecutableUsd).toBe(14); // SOL best 10 + ETH best 4
     expect(k.executableProfitableCount).toBe(3);
   });
+
+  it('a pool whose best clip loses at the expected fill contributes nothing (live 2026-10-27 regression)', () => {
+    // Live: every BTC/ZEC row was quote-profitable but priced at a loss by
+    // the marginal-fill model; Σ headlined −$16.87 and the count read 28.
+    const rows = [
+      sig('BTC-20261106-80000-C', 'BTC', { totalNetUsdc: 3, expectedTotalNetUsdc: -16.12 }),
+      sig('ZEC-20261106-1300-C', 'ZEC', { totalNetUsdc: 1, expectedTotalNetUsdc: -2.21 }),
+      sig('ETH-20261106-2200-P', 'ETH', { totalNetUsdc: 2.19, expectedTotalNetUsdc: 1.46 }),
+      sig('ETH-20261106-2200-C', 'ETH', { totalNetUsdc: 2.98, expectedTotalNetUsdc: -5.21 }),
+    ];
+    const k = buildKpis(rows);
+    expect(k.totalExecutableUsd).toBe(1.46);
+    expect(k.executableProfitableCount).toBe(1);
+    expect(k.topExecutable.map((s) => s.pairKey)).toEqual(['ETH-20261106-2200-P']);
+  });
+
+  it('keeps untradeable and price-distorted rows out of the headline', () => {
+    const rows = [
+      sig('SOL-20261030-100-C', 'SOL', { totalNetUsdc: 50, flags: ['stale'] }),
+      sig('SOL-20261030-110-C', 'SOL', { totalNetUsdc: 40, flags: ['wide_book'] }),
+      sig('SOL-20261030-120-C', 'SOL', { totalNetUsdc: 30, flags: ['price_distortion'] }),
+      sig('SOL-20261030-130-C', 'SOL', { totalNetUsdc: 2 }),
+    ];
+    const k = buildKpis(rows);
+    expect(k.totalExecutableUsd).toBe(2);
+    expect(k.executableProfitableCount).toBe(1);
+    expect(k.topAny.map((s) => s.pairKey)).toEqual(['SOL-20261030-130-C']);
+  });
 });

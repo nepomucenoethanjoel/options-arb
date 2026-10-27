@@ -6,7 +6,7 @@ import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 import type WebSocket from 'ws';
 import Fastify, { type FastifyInstance } from 'fastify';
-import type { Signal, SignalKpis } from '@options-arb/shared';
+import { honestTotalNetUsdc, isHeadlineProfitable, type Signal, type SignalKpis } from '@options-arb/shared';
 import type { AppConfig } from '../config';
 import type { Orchestrator } from '../scheduler';
 import type { Storage } from '../storage';
@@ -28,15 +28,13 @@ export interface ApiDeps {
  * executable-direction row on a clean book.
  */
 export function buildKpis(signals: Signal[]): SignalKpis {
-  // Headline honesty: when the marginal-fill model prices a clip's own rate
-  // impact (expectedTotalNetUsdc), that — not the quote-based total — is what
-  // the fill would actually net, so the KPI takes the lower of the two.
-  // Fills can only hurt the buyer of the cheap leg; the quoted number stays
-  // on the row for comparison.
-  const honestTotal = (s: Signal): number =>
-    s.expectedTotalNetUsdc != null ? Math.min(s.totalNetUsdc ?? s.expectedTotalNetUsdc, s.expectedTotalNetUsdc) : (s.totalNetUsdc ?? 0);
+  // Headline honesty: only rows whose honest clip total (marginal-fill
+  // expected when priced, else quote) is positive on a clean book count —
+  // a quote-profitable row the fill model prices at a loss, or one with
+  // untradeable/distorted prices, stays in the table but out of the headline.
+  const honestTotal = (s: Signal): number => honestTotalNetUsdc(s) ?? 0;
   const profitable = signals
-    .filter((s) => s.isProfitable && s.totalNetUsdc != null && s.netAfterCapitalUsdc != null)
+    .filter(isHeadlineProfitable)
     .sort((a, b) => honestTotal(b) - honestTotal(a));
   const executable = profitable.filter((s) => s.direction === 'buy_olive_sell_derive');
   const closest = signals

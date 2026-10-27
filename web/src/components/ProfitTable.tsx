@@ -7,7 +7,7 @@ import {
   useReactTable,
   type SortingState,
 } from '@tanstack/react-table';
-import type { MatchRowLite, Signal } from '@options-arb/shared';
+import { isHeadlineProfitable, type MatchRowLite, type Signal } from '@options-arb/shared';
 import { daysTo, expiryLabel } from '../format';
 
 const col = createColumnHelper<MatchRowLite & { signal?: Signal }>();
@@ -18,7 +18,7 @@ export type ShowPreset = 'profitable' | 'opportunities' | 'all';
 export function rowClass(row: { signal?: Signal }): 'profitable' | 'opportunity' | 'noise' {
   const s = row.signal;
   if (!s) return 'noise';
-  if (s.isProfitable && s.netAfterCapitalUsdc != null && s.totalNetUsdc != null) return 'profitable';
+  if (isHeadlineProfitable(s)) return 'profitable';
   if (s.isOpportunity) return 'opportunity';
   return 'noise';
 }

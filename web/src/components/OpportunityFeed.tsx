@@ -1,4 +1,4 @@
-import type { Signal } from '@options-arb/shared';
+import { honestTotalNetUsdc, type Signal } from '@options-arb/shared';
 import { fmtSize, pairLabel, usd } from '../format';
 
 /** Top profitable clips — TOTAL $ is the headline, one line of context. */
@@ -22,7 +22,7 @@ export function TopClips({
         const exec = s.direction === 'buy_olive_sell_derive';
         return (
           <button key={s.pairKey} className="clip-card" onClick={() => onSelect(s.pairKey)}>
-            <div className={`clip-total ${exec ? 'pos' : 'muted-clip'}`}>{exec ? usd(s.totalNetUsdc, 0) : `${usd(s.totalNetUsdc, 0)} ⚠`}</div>
+            <div className={`clip-total ${exec ? 'pos' : 'muted-clip'}`}>{exec ? usd(honestTotalNetUsdc(s), 0) : `${usd(honestTotalNetUsdc(s), 0)} ⚠`}</div>
             <div className="opp-pair">{pairLabel(s.pairKey)}</div>
             <div className="opp-meta">
               {usd(s.netAfterCapitalUsdc)}/ctr × {fmtSize(s.maxExecutableSize)} · APY {s.roiApyPct != null ? `${s.roiApyPct > 0 ? '+' : ''}${s.roiApyPct.toFixed(0)}%` : '–'}

@@ -223,11 +223,12 @@ export interface VenueHealthSnapshot {
  * every underlying's signals (the WS push is per-underlying subscription).
  */
 export interface SignalKpis {
-  /** Top profitable clips in the two-leg-executable direction (buy Olive / sell Derive), by total. */
+  /** Top headline-profitable clips (see isHeadlineProfitable) in the
+   *  two-leg-executable direction (buy Olive / sell Derive), by honest total. */
   topExecutable: Signal[];
-  /** Top profitable clips in any direction (the LP-only fallback headline). */
+  /** Top headline-profitable clips in any direction (the LP-only fallback headline). */
   topAny: Signal[];
-  /** Profitable rows in the executable direction. */
+  /** Headline-profitable rows in the executable direction. */
   executableProfitableCount: number;
   /** Profitable rows in LP-only directions (writing to the Olive pool). */
   lpOnlyProfitableCount: number;
