@@ -129,4 +129,33 @@ describe('Alerter — transports and gating', () => {
     await alerter.process([sig({ pairKey: 'X4', expectedTotalNetUsdc: null })]); // within cooldown
     expect(fetchMock.mock.calls).toHaveLength(1);
   });
+
+  it('a rejected send (HTTP 429) does not start the cooldown — the next cycle retries', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({ ok: false, status: 429 }).mockResolvedValue({ ok: true });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const alerter = new Alerter({ ...base, telegramBotToken: 'T0K', telegramChatId: '1' });
+    await alerter.process([sig({ expectedTotalNetUsdc: null })]);
+    await alerter.process([sig({ expectedTotalNetUsdc: null })]);
+    await alerter.process([sig({ expectedTotalNetUsdc: null })]); // delivered last time → cooled down
+    expect(fetchMock.mock.calls).toHaveLength(2);
+  });
+
+  it('sends a cycle’s alerts concurrently, and a send in flight is not duplicated', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const fetchMock = vi.fn(async () => {
+      await gate;
+      return { ok: true };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const alerter = new Alerter({ ...base, telegramBotToken: 'T0K', telegramChatId: '1' });
+    const first = alerter.process([sig({ pairKey: 'A', expectedTotalNetUsdc: null }), sig({ pairKey: 'B', expectedTotalNetUsdc: null })]);
+    await Promise.resolve();
+    expect(fetchMock.mock.calls).toHaveLength(2); // both started before either finished
+    const second = alerter.process([sig({ pairKey: 'A', expectedTotalNetUsdc: null })]); // A still in flight
+    release();
+    await Promise.all([first, second]);
+    expect(fetchMock.mock.calls).toHaveLength(2);
+  });
 });

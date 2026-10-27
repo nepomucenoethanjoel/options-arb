@@ -1,4 +1,4 @@
-import type { Signal } from '@options-arb/shared';
+import { honestTotalNetUsdc, type Signal } from '@options-arb/shared';
 import type { AppConfig } from './config';
 import { fetchWithTimeout } from './util';
 
@@ -17,14 +17,10 @@ import { fetchWithTimeout } from './util';
  */
 export class Alerter {
   private lastAlertPerPair = new Map<string, number>();
+  /** Pairs with a send in flight — a cycle landing mid-send must not double-post. */
+  private inFlight = new Set<string>();
 
   constructor(private readonly cfg: AppConfig) {}
-
-  /** Honest clip total: the fill model's number when it prices one lower. */
-  private honestTotal(s: Signal): number {
-    const quoted = s.totalNetUsdc ?? 0;
-    return s.expectedTotalNetUsdc != null ? Math.min(quoted, s.expectedTotalNetUsdc) : quoted;
-  }
 
   async process(signals: Signal[]): Promise<void> {
     if (!this.cfg.alertsEnabled) return;
@@ -33,15 +29,17 @@ export class Alerter {
     const webhook = this.cfg.alertWebhookUrl;
     if (!discord && !telegram && !webhook) return;
     const now = Date.now();
+    for (const [pair, ts] of this.lastAlertPerPair) {
+      if (now - ts >= this.cfg.alertCooldownMs) this.lastAlertPerPair.delete(pair);
+    }
+    const sends: Array<Promise<void>> = [];
     for (const s of signals) {
       if (!s.isOpportunity) continue;
       if (this.cfg.alertsExecutableOnly && s.direction !== 'buy_olive_sell_derive') continue;
       if (s.flags.includes('price_distortion')) continue;
-      const honest = this.honestTotal(s);
+      const honest = honestTotalNetUsdc(s) ?? 0;
       if (this.cfg.alertMinTotalUsdc > 0 && honest < this.cfg.alertMinTotalUsdc) continue;
-      const last = this.lastAlertPerPair.get(s.pairKey) ?? 0;
-      if (now - last < this.cfg.alertCooldownMs) continue;
-      this.lastAlertPerPair.set(s.pairKey, now);
+      if (this.lastAlertPerPair.has(s.pairKey) || this.inFlight.has(s.pairKey)) continue;
 
       const expectedNote =
         s.expectedTotalNetUsdc != null && s.expectedTotalNetUsdc < (s.totalNetUsdc ?? 0)
@@ -57,35 +55,35 @@ export class Alerter {
         .filter(Boolean)
         .join('\n');
 
-      try {
-        if (discord) {
-          await fetchWithTimeout(discord, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username: 'options-arb', content: text }),
-          });
-        } else if (telegram) {
-          await fetchWithTimeout(`https://api.telegram.org/bot${this.cfg.telegramBotToken}/sendMessage`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ chat_id: this.cfg.telegramChatId, text }),
-          });
-        } else {
-          await fetchWithTimeout(webhook, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              type: 'iv_spread_opportunity',
-              text,
-              honestTotalUsdc: honest,
-              signal: s,
-              ts: new Date(now).toISOString(),
-            }),
-          });
-        }
-      } catch (err) {
-        console.warn('[alerter] alert failed:', err instanceof Error ? err.message : err);
-      }
+      const [url, payload] = discord
+        ? [discord, { username: 'options-arb', content: text }]
+        : telegram
+          ? [`https://api.telegram.org/bot${this.cfg.telegramBotToken}/sendMessage`, { chat_id: this.cfg.telegramChatId, text }]
+          : [webhook, { type: 'iv_spread_opportunity', text, honestTotalUsdc: honest, signal: s, ts: new Date(now).toISOString() }];
+
+      this.inFlight.add(s.pairKey);
+      sends.push(
+        this.post(url, payload)
+          .then(() => {
+            // Cooldown only after a confirmed delivery: a 429/4xx or network
+            // failure must not silence the pair for the whole cooldown.
+            this.lastAlertPerPair.set(s.pairKey, now);
+          })
+          .catch((err) => {
+            console.warn(`[alerter] alert for ${s.pairKey} failed:`, err instanceof Error ? err.message : err);
+          })
+          .finally(() => this.inFlight.delete(s.pairKey)),
+      );
     }
+    await Promise.allSettled(sends);
+  }
+
+  private async post(url: string, payload: unknown): Promise<void> {
+    const res = await fetchWithTimeout(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
   }
 }
