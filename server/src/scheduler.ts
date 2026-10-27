@@ -115,6 +115,7 @@ export class Orchestrator extends EventEmitter {
   fullRows = new Map<string, MatchRow>();
   private busy = false;
   private timer: NodeJS.Timeout | null = null;
+  private running = false;
   private pruneTimer: NodeJS.Timeout | null = null;
 
   constructor(
@@ -132,8 +133,8 @@ export class Orchestrator extends EventEmitter {
   private readonly volPinnedAt: number | null;
 
   start(): void {
-    void this.runOnce();
-    this.timer = setInterval(() => void this.runOnce(), this.cfg.pollIntervalMs);
+    this.running = true;
+    void this.loop();
     const pruneMs = this.cfg.historyRetentionDays * 86_400_000;
     this.pruneTimer = setInterval(() => {
       try {
@@ -145,8 +146,28 @@ export class Orchestrator extends EventEmitter {
     this.watchRealtime();
   }
 
+  /**
+   * Self-chaining cadence: the next cycle is scheduled from when this one
+   * STARTED, never overlapping. setInterval dropped every tick that landed
+   * while a cycle was still busy — a 15.2 s cycle on a 15 s interval ran
+   * every 30 s.
+   */
+  private async loop(): Promise<void> {
+    const t0 = Date.now();
+    try {
+      await this.runOnce();
+    } catch (err) {
+      // A throwing cycle must not end the chain (setInterval never did).
+      console.warn('[scheduler] cycle failed:', err instanceof Error ? err.message : err);
+    }
+    if (!this.running) return;
+    const delay = Math.max(0, this.cfg.pollIntervalMs - (Date.now() - t0));
+    this.timer = setTimeout(() => void this.loop(), delay);
+  }
+
   stop(): void {
-    if (this.timer) clearInterval(this.timer);
+    this.running = false;
+    if (this.timer) clearTimeout(this.timer);
     if (this.pruneTimer) clearInterval(this.pruneTimer);
     this.timer = null;
     this.pruneTimer = null;
