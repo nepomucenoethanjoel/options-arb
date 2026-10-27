@@ -6,7 +6,7 @@ import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 import type WebSocket from 'ws';
 import Fastify, { type FastifyInstance } from 'fastify';
-import { honestTotalNetUsdc, isHeadlineProfitable, type Signal, type SignalKpis } from '@options-arb/shared';
+import { honestTotalNetUsdc, isHeadlineProfitable, type Signal, type SignalKpis, type VenueHealthSnapshot } from '@options-arb/shared';
 import type { AppConfig } from '../config';
 import type { Orchestrator } from '../scheduler';
 import type { Storage } from '../storage';
@@ -16,8 +16,50 @@ export interface ApiDeps {
   orchestrator: Orchestrator;
   storage: Storage;
   olive?: {
-    getRealtimeHealth(): { status: string; lastFrameAgeMs: number | null; assets: string[] } | null;
+    getRealtimeHealth(): RealtimeHealthLike | null;
   };
+}
+
+type RealtimeHealthLike = { status: string; statusSinceMs?: number; lastFrameAgeMs: number | null; assets: string[] };
+
+/** A realtime stream not live for this long degrades health. */
+const REALTIME_DEGRADED_AFTER_MS = 120_000;
+
+export interface HealthRollup {
+  status: 'ok' | 'starting' | 'degraded';
+  reasons: string[];
+}
+
+/**
+ * One verdict over everything that silently erodes the numbers: venue
+ * health, cycle age, the realtime stream, and a frozen market file. A
+ * 200 from /api/health alone said nothing about any of these.
+ */
+export function buildHealthRollup(input: {
+  health: VenueHealthSnapshot | null;
+  realtime: RealtimeHealthLike | null;
+  oliveCaveats: string[];
+  pollIntervalMs: number;
+  now: number;
+}): HealthRollup {
+  const { health, realtime, now } = input;
+  if (!health) return { status: 'starting', reasons: ['no_cycle_yet'] };
+  const reasons: string[] = [];
+  for (const v of ['derive', 'olive'] as const) {
+    const st = health[v]?.status;
+    if (st !== 'ok') reasons.push(`${v}_${st ?? 'unknown'}`);
+  }
+  if (health.lastCycleMs != null && now - health.lastCycleMs > 3 * input.pollIntervalMs) {
+    reasons.push(`cycle_stale_${Math.round((now - health.lastCycleMs) / 1000)}s`);
+  }
+  if (realtime && realtime.status !== 'live' && realtime.status !== 'stopped') {
+    const since = realtime.statusSinceMs;
+    if (since == null || now - since > REALTIME_DEGRADED_AFTER_MS) {
+      reasons.push(`realtime_${realtime.status}${since != null ? `_${Math.round((now - since) / 1000)}s` : ''}`);
+    }
+  }
+  if (input.oliveCaveats.includes('market_file_stale')) reasons.push('market_file_stale');
+  return { status: reasons.length ? 'degraded' : 'ok', reasons };
 }
 
 /**
@@ -158,10 +200,19 @@ export async function buildServer(deps: ApiDeps): Promise<FastifyInstance> {
 
   app.get('/api/health', async () => {
     const latest = orchestrator.latest;
+    const oliveRealtime = olive?.getRealtimeHealth() ?? latest?.realtime ?? null;
+    const rollup = buildHealthRollup({
+      health: latest?.health ?? null,
+      realtime: oliveRealtime,
+      oliveCaveats: latest?.oliveCaveats ?? [],
+      pollIntervalMs: cfg.pollIntervalMs,
+      now: Date.now(),
+    });
     return {
+      ...rollup,
       health: latest?.health ?? null,
       oliveDetail: null,
-      oliveRealtime: olive?.getRealtimeHealth() ?? latest?.realtime ?? null,
+      oliveRealtime,
       signalsStored: storage.countSignals(),
       config: overviewConfig,
     };

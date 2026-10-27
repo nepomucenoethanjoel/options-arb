@@ -2,7 +2,9 @@
 # options-arb health watchdog — run from cron every 5 min
 # (deploy/options-arb-watchdog.cron). Checks the local health endpoint:
 #   - unreachable  → restart the service, alert
-#   - venue down / cycle stale >10min → alert
+#   - degraded (server rollup: venue not ok, cycle stale, realtime stream
+#     not live >2min, frozen market file) → alert; still degraded on the
+#     NEXT run → restart once per episode (stopgap for wedged state)
 #   - recovered   → alert
 # Alerts go via Telegram (TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID in
 # server/.env) and only on state CHANGE, so it never spams. No Telegram
@@ -41,6 +43,9 @@ if [ "$status" = ok ]; then
       console.log(Number(process.argv[2]) > 15 * 60_000_000 ? "bad: no cycle after 15min uptime" : "starting");
       process.exit(0);
     }
+    // Server-side rollup (status/reasons) when the build has it.
+    if (h.status === "ok") { console.log("ok"); process.exit(0); }
+    if (h.status === "degraded") { console.log("bad: " + (h.reasons ?? []).join(" ")); process.exit(0); }
     const bad = [];
     for (const v of ["derive", "olive"]) {
       if (h.health?.[v]?.status !== "ok") bad.push(v + "=" + (h.health?.[v]?.status ?? "?"));
@@ -60,11 +65,19 @@ if [ "$status" = ok ]; then
   fi
 fi
 
+prev=$(cat "$STATE" 2>/dev/null || echo unknown)
+
 if [ "$status" = down ]; then
   systemctl restart options-arb || true
+elif [ "$status" = degraded ] && [ "$prev" = degraded ] && [ ! -e "$STATE.restarted" ]; then
+  # Persisted across two checks (≥5 min) — one restart per episode.
+  touch "$STATE.restarted"
+  systemctl restart options-arb || true
+  notify "🔁 options-arb restarted — degraded for 2 checks: $detail"
+elif [ "$status" = ok ]; then
+  rm -f "$STATE.restarted"
 fi
 
-prev=$(cat "$STATE" 2>/dev/null || echo unknown)
 if [ "$status" != "$prev" ]; then
   case "$status" in
     ok)

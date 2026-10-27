@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net';
 import WebSocket from 'ws';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Signal } from '@options-arb/shared';
-import { buildKpis, buildServer } from '../src/api/server';
+import { buildHealthRollup, buildKpis, buildServer } from '../src/api/server';
 import type { AppConfig } from '../src/config';
 import type { Orchestrator } from '../src/scheduler';
 import type { Storage } from '../src/storage';
@@ -241,5 +241,42 @@ describe('buildKpis — pool-aware Σ', () => {
     expect(k.totalExecutableUsd).toBe(2);
     expect(k.executableProfitableCount).toBe(1);
     expect(k.topAny.map((s) => s.pairKey)).toEqual(['SOL-20261030-130-C']);
+  });
+});
+
+describe('buildHealthRollup', () => {
+  const NOW = 10_000_000;
+  const venue = (status: string) => ({ venue: 'x', source: 'x', status, lastSuccessTs: NOW, lastError: null });
+  const health = (over: Record<string, unknown> = {}) => ({
+    derive: venue('ok'), olive: venue('ok'), serverTime: NOW, pollIntervalMs: 15_000,
+    lastCycleMs: NOW - 5_000, lastCycleDurationMs: 15_000, ...over,
+  }) as never;
+  const base = { oliveCaveats: [] as string[], pollIntervalMs: 15_000, now: NOW };
+
+  it('is ok when venues, cycle and stream are all fresh', () => {
+    const r = buildHealthRollup({ ...base, health: health(), realtime: { status: 'live', statusSinceMs: NOW - 1e6, lastFrameAgeMs: 100, assets: [] } });
+    expect(r).toEqual({ status: 'ok', reasons: [] });
+  });
+
+  it('degrades on a realtime stream stuck reconnecting (the 7.6-day live case)', () => {
+    const r = buildHealthRollup({ ...base, health: health(), realtime: { status: 'reconnecting', statusSinceMs: NOW - 659_926_729, lastFrameAgeMs: 659_926_729, assets: [] } });
+    expect(r.status).toBe('degraded');
+    expect(r.reasons[0]).toMatch(/^realtime_reconnecting_/);
+  });
+
+  it('tolerates a brief reconnect', () => {
+    const r = buildHealthRollup({ ...base, health: health(), realtime: { status: 'reconnecting', statusSinceMs: NOW - 10_000, lastFrameAgeMs: 10_000, assets: [] } });
+    expect(r.status).toBe('ok');
+  });
+
+  it('degrades on a stale cycle, a non-ok venue, or a frozen market file', () => {
+    const r = buildHealthRollup({ ...base, oliveCaveats: ['market_file_stale'], realtime: null,
+      health: health({ lastCycleMs: NOW - 60_000, derive: venue('stale') }) });
+    expect(r.status).toBe('degraded');
+    expect(r.reasons).toEqual(['derive_stale', 'cycle_stale_60s', 'market_file_stale']);
+  });
+
+  it('reports starting before the first cycle', () => {
+    expect(buildHealthRollup({ ...base, health: null, realtime: null }).status).toBe('starting');
   });
 });

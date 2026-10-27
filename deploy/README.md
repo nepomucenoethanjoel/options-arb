@@ -97,9 +97,11 @@ Telegram (`TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`) and a generic webhook
 multiple are configured.
 
 The **watchdog** (`deploy/options-arb-watchdog.sh` + `.cron`) checks the
-health endpoint every 5 min: unreachable → restart + alert; venue down or
-cycle stale >10 min → alert; recovery → alert. Only on state change, so no
-spam. Install on the box:
+health endpoint every 5 min: unreachable → restart + alert; degraded (the
+server rollup in `/api/health` `status`/`reasons`: venue not ok, cycle stale,
+realtime stream not live >2 min, frozen market file) → alert, and if still
+degraded on the next run → one restart per episode; recovery → alert. Only on
+state change, so no spam. Install on the box:
 
 ```bash
 install -m 755 /opt/options-arb/deploy/options-arb-watchdog.sh /usr/local/bin/
