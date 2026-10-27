@@ -548,6 +548,13 @@ describe('marginal-fill pricing — expected VWAP when the fill moves the rate (
     expect(s.flags).toContain('execution_moves_rate');
     expect(s.expectedEntryUsdc).toBeNull();
     expect(s.expectedTotalNetUsdc).toBeNull();
+    expect(s.flags).toContain('fill_model_skipped');
+  });
+
+  it('does not flag fill_model_skipped when the model priced the clip', () => {
+    const [s] = computeSignals([row(deriveQuote({ bidSize: 20, askSize: 20 }), oliveQuote(quote, 0.55))], custody, NOW);
+    expect(s.expectedTotalNetUsdc).not.toBeNull();
+    expect(s.flags).not.toContain('fill_model_skipped');
   });
 
   it('skips the model when the quoted premium is inconsistent with the curve inputs', () => {
@@ -555,11 +562,13 @@ describe('marginal-fill pricing — expected VWAP when the fill moves the rate (
     const [s] = computeSignals([row(deriveQuote({ bidSize: 20, askSize: 20 }), oliveQuote(70, 0.55))], custody, NOW);
     expect(s.flags).toContain('execution_moves_rate');
     expect(s.expectedEntryUsdc).toBeNull();
+    expect(s.flags).toContain('fill_model_skipped');
   });
 
   it('does not model LP-only directions (the user never pays the AMM premium)', () => {
     const [s] = computeSignals([row(deriveQuote({ bidSize: 20, askSize: 20, iv: 0.5 }), oliveQuote(quote, 0.55))], custody, NOW);
     expect(s.direction).toBe('buy_derive_sell_olive');
     expect(s.expectedEntryUsdc).toBeNull();
+    expect(s.flags).not.toContain('fill_model_skipped');
   });
 });

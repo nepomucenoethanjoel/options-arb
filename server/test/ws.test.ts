@@ -234,6 +234,7 @@ describe('buildKpis — pool-aware Σ', () => {
       sig('SOL-20261030-100-C', 'SOL', { totalNetUsdc: 50, flags: ['stale'] }),
       sig('SOL-20261030-110-C', 'SOL', { totalNetUsdc: 40, flags: ['wide_book'] }),
       sig('SOL-20261030-120-C', 'SOL', { totalNetUsdc: 30, flags: ['price_distortion'] }),
+      sig('SOL-20261030-125-C', 'SOL', { totalNetUsdc: 20, flags: ['fill_model_skipped'] }),
       sig('SOL-20261030-130-C', 'SOL', { totalNetUsdc: 2 }),
     ];
     const k = buildKpis(rows);

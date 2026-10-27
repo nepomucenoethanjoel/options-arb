@@ -288,6 +288,18 @@ export function computeSignals(
         }
       }
     }
+    // An executable-direction clip the fill model couldn't price (no custody/
+    // curve, or inconsistent inputs) only has the quote-based total, which
+    // assumes the rate stays put — mark it so headlines don't trust it.
+    if (
+      direction === 'buy_olive_sell_derive' &&
+      expectedTotalNetUsdc == null &&
+      maxExecutableSize != null &&
+      maxExecutableSize > 0 &&
+      netAfterCapitalUsdc != null
+    ) {
+      flags.push('fill_model_skipped');
+    }
     const totalNetUsdc =
       maxExecutableSize != null && maxExecutableSize > 0 && netAfterCapitalUsdc != null
         ? netAfterCapitalUsdc * maxExecutableSize - DERIVE_TAKER_ORDER_FEE_USDC
