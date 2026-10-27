@@ -176,9 +176,14 @@ export async function buildServer(deps: ApiDeps): Promise<FastifyInstance> {
     return { ts: latest?.ts ?? null, signals, config: latest?.config ?? null };
   });
 
-  app.get('/api/surface', async (req) => {
+  app.get('/api/surface', async (req, reply) => {
     const q = req.query as { underlying?: string; expiry?: string };
-    const underlying = (q.underlying ?? cfg.underlyings[0] ?? 'SOL').toUpperCase();
+    // Each distinct underlying is an upstream Derive call on the shared
+    // rate budget (and a feed-cache entry) — only configured ones are served.
+    const underlying = (q.underlying ?? cfg.underlyings[0] ?? 'SOL').trim().toUpperCase();
+    if (!cfg.underlyings.includes(underlying)) {
+      return reply.code(400).send({ error: `unknown underlying; expected one of ${cfg.underlyings.join(',')}` });
+    }
     return orchestrator.getSurface(underlying, q.expiry);
   });
 

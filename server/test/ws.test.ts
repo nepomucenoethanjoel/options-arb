@@ -199,6 +199,20 @@ describe('/ws per-underlying subscription', () => {
     expect(full.rows).toHaveLength(2);
     expect(full.signals).toHaveLength(3);
   });
+
+  it('rejects /api/surface for unconfigured underlyings (no upstream call per junk value)', async () => {
+    const orch = stubOrchestrator();
+    const asked: string[] = [];
+    (orch as unknown as { getSurface: unknown }).getSurface = async (u: string) => (asked.push(u), {});
+    const app = await buildServer({ cfg, orchestrator: orch, storage });
+    await app.listen({ port: 0, host: '127.0.0.1' });
+    servers.push({ close: () => app.close() });
+    const { port } = app.server!.address() as AddressInfo;
+
+    expect((await fetch(`http://127.0.0.1:${port}/api/surface?underlying=junk123`)).status).toBe(400);
+    expect((await fetch(`http://127.0.0.1:${port}/api/surface?underlying=eth`)).status).toBe(200);
+    expect(asked).toEqual(['ETH']);
+  });
 });
 
 describe('buildKpis — pool-aware Σ', () => {
