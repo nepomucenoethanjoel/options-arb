@@ -96,12 +96,26 @@ export interface RealtimeSpot {
 
 export type RealtimeStatus = 'stopped' | 'connecting' | 'live' | 'reconnecting';
 
+export interface RealtimeHealth {
+  status: RealtimeStatus;
+  /** When the current status was entered (epoch ms). */
+  statusSinceMs: number;
+  lastFrameAgeMs: number | null;
+  lastTickerAgeMs: number | null;
+  /** Connect attempts since start. */
+  attempts: number;
+  lastError: string | null;
+  assets: string[];
+}
+
 export interface OliveRealtimeOptions {
   url?: string;
   /** Ticks older than this are not served (getSpot returns null). */
   maxSpotAgeMs?: number;
-  /** No frame for this long while live → force reconnect. */
+  /** No ticker for this long while live → force reconnect. */
   staleReconnectMs?: number;
+  /** A connect attempt that hasn't gone live within this → recycle it. */
+  connectTimeoutMs?: number;
   backoffBaseMs?: number;
   backoffMaxMs?: number;
   /** Injection point for tests. */
@@ -120,6 +134,7 @@ export class OliveRealtimeClient extends EventEmitter {
   private readonly url: string;
   private readonly maxSpotAgeMs: number;
   private readonly staleReconnectMs: number;
+  private readonly connectTimeoutMs: number;
   private readonly backoffBaseMs: number;
   private readonly backoffMaxMs: number;
   private readonly socketFactory: (url: string) => SocketLike;
@@ -132,6 +147,12 @@ export class OliveRealtimeClient extends EventEmitter {
   private watchdogTimer: NodeJS.Timeout | null = null;
   private backoffAttempt = 0;
   private lastFrameMs: number | null = null;
+  private lastTickerMs: number | null = null;
+  private connectStartedMs: number | null = null;
+  private liveSinceMs: number | null = null;
+  private statusSinceMs: number;
+  private lastError: string | null = null;
+  private attempts = 0;
   private lastServerInfo: unknown = null;
   private readonly spots = new Map<string, { price: number; publishMs: number; recvMs: number }>();
 
@@ -140,10 +161,13 @@ export class OliveRealtimeClient extends EventEmitter {
     this.url = opts.url ?? OLIVE_REALTIME_URL;
     this.maxSpotAgeMs = opts.maxSpotAgeMs ?? 10_000;
     this.staleReconnectMs = opts.staleReconnectMs ?? 20_000;
+    this.connectTimeoutMs = opts.connectTimeoutMs ?? 15_000;
     this.backoffBaseMs = opts.backoffBaseMs ?? 1_000;
     this.backoffMaxMs = opts.backoffMaxMs ?? 60_000;
-    this.socketFactory = opts.socketFactory ?? ((url) => new WebSocket(url) as unknown as SocketLike);
+    this.socketFactory =
+      opts.socketFactory ?? ((url) => new WebSocket(url, { handshakeTimeout: 10_000 }) as unknown as SocketLike);
     this.now = opts.now ?? (() => Date.now());
+    this.statusSinceMs = this.now();
     this.log = opts.log ?? ((m) => console.log(`[olive-realtime] ${m}`));
   }
 
@@ -164,10 +188,15 @@ export class OliveRealtimeClient extends EventEmitter {
     return { asset: asset.toUpperCase(), ...t, ageMs };
   }
 
-  healthSummary(): { status: RealtimeStatus; lastFrameAgeMs: number | null; assets: string[] } {
+  healthSummary(): RealtimeHealth {
+    const now = this.now();
     return {
       status: this.statusValue,
+      statusSinceMs: this.statusSinceMs,
       lastFrameAgeMs: this.lastFrameAgeMs,
+      lastTickerAgeMs: this.lastTickerMs == null ? null : now - this.lastTickerMs,
+      attempts: this.attempts,
+      lastError: this.lastError,
       assets: [...this.spots.keys()].sort(),
     };
   }
@@ -175,17 +204,11 @@ export class OliveRealtimeClient extends EventEmitter {
   start(): void {
     if (this.socket || this.statusValue === 'live' || this.statusValue === 'connecting') return;
     this.connect();
-    // Staleness watchdog: a silently-dead TCP connection must not masquerade
-    // as "live" — force a reconnect when frames stop arriving.
-    this.watchdogTimer = setInterval(() => {
-      if (this.statusValue !== 'live') return;
-      const age = this.lastFrameAgeMs;
-      if (age != null && age > this.staleReconnectMs) {
-        this.log(`no frames for ${Math.round(age / 1000)}s — forcing reconnect`);
-        this.teardownSocket();
-        this.scheduleReconnect();
-      }
-    }, 5_000);
+    // Supervisor, in every non-stopped state: a silently-dead live socket
+    // (tickers stopped) and a connect attempt that never completes (TCP/TLS/
+    // upgrade stall, or no namespace ack — no 'close' ever fires) must both
+    // be recycled, or the client sits in 'reconnecting' forever.
+    this.watchdogTimer = setInterval(() => this.supervise(), 5_000);
     if (typeof this.watchdogTimer.unref === 'function') this.watchdogTimer.unref();
   }
 
@@ -199,39 +222,81 @@ export class OliveRealtimeClient extends EventEmitter {
     this.spots.clear();
   }
 
+  private supervise(): void {
+    if (this.statusValue === 'stopped' || this.reconnectTimer) return;
+    const now = this.now();
+    if (!this.socket) {
+      this.scheduleReconnect();
+      return;
+    }
+    if (this.statusValue === 'live') {
+      const since = this.lastTickerMs ?? this.liveSinceMs ?? now;
+      if (now - since > this.staleReconnectMs) {
+        this.recycle(`no ticker for ${Math.round((now - since) / 1000)}s`);
+      }
+      return;
+    }
+    if (this.connectStartedMs != null && now - this.connectStartedMs > this.connectTimeoutMs) {
+      this.recycle(`connect attempt not live after ${Math.round((now - this.connectStartedMs) / 1000)}s`);
+    }
+  }
+
+  private recycle(reason: string): void {
+    this.lastError = reason;
+    this.log(`${reason} — forcing reconnect`);
+    this.teardownSocket();
+    this.scheduleReconnect();
+  }
+
   private connect(): void {
     this.setStatus(this.backoffAttempt > 0 ? 'reconnecting' : 'connecting');
-    const socket = this.socketFactory(this.url);
+    this.attempts += 1;
+    this.connectStartedMs = this.now();
+    let socket: SocketLike;
+    try {
+      socket = this.socketFactory(this.url);
+    } catch (e) {
+      this.lastError = `socket create failed: ${(e as Error).message}`;
+      this.log(this.lastError);
+      this.scheduleReconnect();
+      return;
+    }
     this.socket = socket;
+    // Every handler checks identity: a torn-down socket's late events must
+    // not touch (or close) its replacement.
     socket.on('open', () => {
-      socket.send('40{"realtimeVersion":2}');
+      if (this.socket === socket) socket.send('40{"realtimeVersion":2}');
     });
-    socket.on('message', (data) => this.onFrame(String(data)));
-    socket.on('close', () => this.onClose());
+    socket.on('message', (data) => {
+      if (this.socket === socket) this.onFrame(socket, String(data));
+    });
+    socket.on('close', () => {
+      if (this.socket === socket) this.onClose();
+    });
     socket.on('error', (err) => {
-      this.log(`socket error: ${err.message}`);
+      if (this.socket !== socket) return;
+      this.lastError = `socket error: ${err.message}`;
+      this.log(this.lastError);
     });
   }
 
-  private onFrame(msg: string): void {
+  private onFrame(socket: SocketLike, msg: string): void {
     const frame = parseEngineFrame(msg);
     switch (frame.kind) {
       case 'open':
         // Handshake sent on 'open' — nothing further here.
         break;
       case 'ping':
-        this.socket?.send('3');
+        socket.send('3');
         this.touch();
         break;
       case 'connected':
         // Namespace connected — join the market-data room.
-        this.socket?.send('42["subscribe_ticker",{}]');
+        socket.send('42["subscribe_ticker",{}]');
         this.touch();
         break;
       case 'connect_error':
-        this.log(`connect error: ${frame.data.slice(0, 120)}`);
-        this.teardownSocket();
-        this.scheduleReconnect();
+        this.recycle(`connect error: ${frame.data.slice(0, 120)}`);
         break;
       case 'event':
         this.touch();
@@ -245,6 +310,8 @@ export class OliveRealtimeClient extends EventEmitter {
   private onEvent(event: string, payload: unknown): void {
     if (event === 'tickerPriceSnapshot') {
       const recvMs = this.now();
+      this.lastTickerMs = recvMs;
+      this.goLive();
       for (const tick of mapTickerSnapshot(payload, recvMs)) {
         const prev = this.spots.get(tick.asset);
         this.spots.set(tick.asset, { price: tick.price, publishMs: tick.publishMs, recvMs: tick.recvMs });
@@ -256,12 +323,12 @@ export class OliveRealtimeClient extends EventEmitter {
     }
     if (event === 'connected') {
       this.lastServerInfo = payload;
-      this.backoffAttempt = 0;
-      this.setStatus('live');
+      this.goLive();
       return;
     }
     if (event === 'realtime_upgrade_required' || event === 'subscription_error') {
-      this.log(`server rejected: ${event} ${JSON.stringify(payload).slice(0, 120)}`);
+      this.lastError = `server rejected: ${event} ${JSON.stringify(payload).slice(0, 120)}`;
+      this.log(this.lastError);
       return;
     }
     // Unknown broadcast — log once per event name to catch protocol changes.
@@ -273,14 +340,18 @@ export class OliveRealtimeClient extends EventEmitter {
 
   private readonly seenEvents = new Set<string>();
 
+  /** Any frame — pings included — proves the socket is up, not subscribed. */
   private touch(): void {
     this.lastFrameMs = this.now();
-    if (this.statusValue !== 'live' && this.statusValue !== 'stopped') {
-      // First data frame implies the subscription took (the explicit `connected`
-      // event flips status too; this covers servers that skip it).
-      this.backoffAttempt = 0;
-      this.setStatus('live');
-    }
+  }
+
+  /** Live only on the explicit `connected` event or an actual ticker. */
+  private goLive(): void {
+    if (this.statusValue === 'live' || this.statusValue === 'stopped') return;
+    this.backoffAttempt = 0;
+    this.liveSinceMs = this.now();
+    this.lastError = null;
+    this.setStatus('live');
   }
 
   private onClose(): void {
@@ -319,6 +390,7 @@ export class OliveRealtimeClient extends EventEmitter {
   private setStatus(s: RealtimeStatus): void {
     if (this.statusValue === s) return;
     this.statusValue = s;
+    this.statusSinceMs = this.now();
     this.emit('status', s);
   }
 }

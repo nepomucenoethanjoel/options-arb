@@ -214,6 +214,57 @@ describe('OliveRealtimeClient', () => {
     client.stop();
   });
 
+  it('recycles a connect attempt that never opens (live 2026-10-27: wedged 7.6 days)', () => {
+    const { client, sockets, tick } = makeClient({ connectTimeoutMs: 15_000 });
+    client.start(); // socket never fires open/close/error
+    tick(20_000);
+    vi.advanceTimersByTime(6000);
+    expect(sockets[0]!.terminated).toBe(true);
+    vi.advanceTimersByTime(50);
+    expect(sockets.length).toBe(2);
+    expect(client.healthSummary().lastError).toMatch(/not live after/);
+    client.stop();
+  });
+
+  it('recycles a socket that opens and pings but never acks the namespace', () => {
+    const { client, sockets, tick } = makeClient({ connectTimeoutMs: 15_000 });
+    client.start();
+    sockets[0]!.open();
+    sockets[0]!.message('2'); // engine ping alone is not "live"
+    expect(client.status).toBe('connecting');
+    tick(20_000);
+    vi.advanceTimersByTime(6000);
+    vi.advanceTimersByTime(50);
+    expect(sockets.length).toBe(2);
+    client.stop();
+  });
+
+  it('ignores a late close from a torn-down socket', () => {
+    const { client, sockets, tick } = makeClient({ connectTimeoutMs: 15_000 });
+    client.start();
+    tick(20_000);
+    vi.advanceTimersByTime(6000);
+    vi.advanceTimersByTime(50);
+    expect(sockets.length).toBe(2);
+    sockets[1]!.open();
+    sockets[1]!.message('42["connected",{}]');
+    expect(client.status).toBe('live');
+    sockets[0]!.fire('close', 1006, null); // stale socket's late event
+    expect(client.status).toBe('live');
+    expect(sockets[1]!.terminated).toBe(false);
+    client.stop();
+  });
+
+  it('reports attempts and status age in the health summary', () => {
+    const { client, sockets } = makeClient();
+    client.start();
+    sockets[0]!.open();
+    sockets[0]!.message('42["tickerPriceSnapshot",[{"symbol":"SOL/USD","price":1,"publishTime":1}]]');
+    const h = client.healthSummary();
+    expect(h).toMatchObject({ status: 'live', attempts: 1, lastTickerAgeMs: 0, lastError: null });
+    client.stop();
+  });
+
   it('stop() prevents any further reconnects', () => {
     const { client, sockets } = makeClient({ backoffBaseMs: 10 });
     client.start();

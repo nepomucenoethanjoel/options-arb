@@ -14,7 +14,7 @@ import { OliveOnChainReader, getPythSpot, oliveStrikeBounds } from './onchain';
 import { OliveRestClient } from './rest';
 import { buildSyntheticAmmQuote } from './synth';
 import { OLIVE_MARKET_FILE_BASE, fetchOliveMarketFile, isMarketFileFresh, type OliveMarketFileData } from './marketFile';
-import type { OliveRealtimeClient } from './realtime';
+import type { OliveRealtimeClient, RealtimeHealth } from './realtime';
 export type AmmQuoteResult =
   | { quote: OptionQuote }
   | { rejected: 'strike_out_of_olive_bounds' | 'beyond_max_tenor' | 'no_market_state' | 'no_vol' };
@@ -133,7 +133,7 @@ export class OliveAdapter {
   }
 
   /** Realtime socket status for health reporting (null when disabled). */
-  getRealtimeHealth(): { status: string; lastFrameAgeMs: number | null; assets: string[] } | null {
+  getRealtimeHealth(): RealtimeHealth | null {
     return this.opts.realtime?.healthSummary() ?? null;
   }
 
