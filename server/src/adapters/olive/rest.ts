@@ -5,6 +5,7 @@
  * value) + X-Request-ID headers, else 400 "Missing required security headers".
  * Known routes: /health, /status, /pools. Keep request rates polite (≤1 rps).
  */
+import { fetchWithTimeout } from '../../util';
 
 export class OliveRestClient {
   constructor(
@@ -13,7 +14,7 @@ export class OliveRestClient {
   ) {}
 
   private async request<T>(path: string): Promise<T> {
-    const res = await fetch(`${this.base}${path}`, {
+    const res = await fetchWithTimeout(`${this.base}${path}`, {
       headers: {
         'X-API-Key': this.apiKey,
         'X-Request-ID': crypto.randomUUID(),

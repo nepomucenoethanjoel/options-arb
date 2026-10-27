@@ -12,6 +12,7 @@
  * recent trades, and the full on-chain pool snapshot.
  */
 import type { OliveRateCurvePoint, Venue } from '@options-arb/shared';
+import { fetchWithTimeout } from '../../util';
 
 export const OLIVE_MARKET_FILE_BASE = 'https://olive.exchange/public/market';
 
@@ -187,18 +188,15 @@ export async function fetchOliveMarketFile(
   underlying: string,
   timeoutMs = 8000,
 ): Promise<OliveMarketFileData | null> {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(`${base}/${underlying.toUpperCase()}%2FUSDC.json`, {
-      signal: ctrl.signal,
-      headers: { Accept: 'application/json' },
-    });
+    const res = await fetchWithTimeout(
+      `${base}/${underlying.toUpperCase()}%2FUSDC.json`,
+      { headers: { Accept: 'application/json' } },
+      timeoutMs,
+    );
     if (!res.ok) return null;
     return parseOliveMarketFile(await res.json(), underlying);
   } catch {
     return null;
-  } finally {
-    clearTimeout(t);
   }
 }

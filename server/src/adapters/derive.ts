@@ -8,7 +8,7 @@ import {
   type VenueMarketState,
   sampleSviSlice,
 } from '@options-arb/shared';
-import { HealthTracker, RateLimiter } from '../util';
+import { HealthTracker, RateLimiter, fetchWithTimeout } from '../util';
 
 /**
  * Derive.xyz public API client (v3) + legacy-host fallback.
@@ -177,7 +177,7 @@ class DeriveHttpClient {
     await this.limiter.acquire();
     let res: Response;
     try {
-      res = await fetch(`${this.baseUrl}/${method}`, {
+      res = await fetchWithTimeout(`${this.baseUrl}/${method}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(params),

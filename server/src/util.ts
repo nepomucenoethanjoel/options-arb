@@ -75,3 +75,21 @@ export class HealthTracker {
     };
   }
 }
+
+/** Default per-request deadline for outbound HTTP (headers AND body). */
+export const FETCH_TIMEOUT_MS = 8_000;
+
+/**
+ * fetch with a hard deadline. Node's default is ~300 s, during which a hung
+ * venue call holds the whole cycle (and /api/health still says ok). The
+ * signal also bounds the body read, not just the headers.
+ */
+export function fetchWithTimeout(
+  input: string | URL | Request,
+  init: RequestInit = {},
+  timeoutMs = FETCH_TIMEOUT_MS,
+): Promise<Response> {
+  const deadline = AbortSignal.timeout(timeoutMs);
+  const signal = init.signal ? AbortSignal.any([init.signal, deadline]) : deadline;
+  return fetch(input, { ...init, signal });
+}

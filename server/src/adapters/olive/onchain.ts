@@ -1,5 +1,6 @@
 import { Connection, PublicKey, type AccountInfo } from '@solana/web3.js';
 import { oliveStrikeBounds } from '@options-arb/shared';
+import { fetchWithTimeout } from '../../util';
 
 export { oliveStrikeBounds };
 
@@ -78,7 +79,10 @@ export class OliveOnChainReader {
   private idlProbed: IdlProbeResult | null = null;
 
   constructor(rpcUrl: string) {
-    this.conn = new Connection(rpcUrl, 'confirmed');
+    this.conn = new Connection(rpcUrl, {
+      commitment: 'confirmed',
+      fetch: (input, init) => fetchWithTimeout(input as string, init as RequestInit),
+    });
   }
 
   async getAccountInfo(address: string): Promise<AccountInfo<Buffer> | null> {
@@ -190,7 +194,7 @@ export async function getPythSpot(symbol: string): Promise<number | null> {
   if (!feedId) return null;
   for (const base of HERMES_BASES) {
     try {
-      const res = await fetch(`${base}/v2/updates/price/latest?ids[]=${feedId}`);
+      const res = await fetchWithTimeout(`${base}/v2/updates/price/latest?ids[]=${feedId}`);
       if (!res.ok) continue;
       const json = (await res.json()) as {
         parsed?: Array<{ price?: { price?: string | number; expo?: number } }>;

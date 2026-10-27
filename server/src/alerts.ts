@@ -1,5 +1,6 @@
 import type { Signal } from '@options-arb/shared';
 import type { AppConfig } from './config';
+import { fetchWithTimeout } from './util';
 
 /**
  * Threshold-crossing alerts. Transports (first configured wins):
@@ -58,19 +59,19 @@ export class Alerter {
 
       try {
         if (discord) {
-          await fetch(discord, {
+          await fetchWithTimeout(discord, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username: 'options-arb', content: text }),
           });
         } else if (telegram) {
-          await fetch(`https://api.telegram.org/bot${this.cfg.telegramBotToken}/sendMessage`, {
+          await fetchWithTimeout(`https://api.telegram.org/bot${this.cfg.telegramBotToken}/sendMessage`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ chat_id: this.cfg.telegramChatId, text }),
           });
         } else {
-          await fetch(webhook, {
+          await fetchWithTimeout(webhook, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
