@@ -131,7 +131,7 @@ describe('computeSignals — profit estimates', () => {
 
   it('nets fees and collateral drag into the per-contract profit', () => {
     const [s] = computeSignals([row(deriveQuote(), oliveQuote())], cfg, NOW);
-    const costs = 3000 * 0.0003 + Math.min(3000 * 0.00025, 70 * 0.1) + 0.05; // 0.9 + 0.75 + 0.05
+    const costs = 3000 * 0.0003 + Math.min(3000 * 0.00025, 70 * 0.1); // 0.9 + 0.75 (Solana tx fee is per clip)
     expect(s.costsUsdc).toBeCloseTo(costs, 4);
     const capital = 3000 * 0.08 * (30 / 365);
     expect(s.capitalCostUsdc).toBeCloseTo(capital, 4);
@@ -152,7 +152,7 @@ describe('computeSignals — profit estimates', () => {
   it('caps the size at the Derive touch and totals the profit', () => {
     const [s] = computeSignals([row(deriveQuote({ bidSize: 3, askSize: 7 }), oliveQuote())], cfg, NOW);
     expect(s.maxExecutableSize).toBe(3);
-    expect(s.totalNetUsdc).toBeCloseTo(s.netAfterCapitalUsdc! * 3 - 0.5, 2); // − $0.50 Derive order fee
+    expect(s.totalNetUsdc).toBeCloseTo(s.netAfterCapitalUsdc! * 3 - 0.5 - 0.05, 2); // − $0.50 Derive order fee − Solana tx
     // score is USDC-native: the size-capped total ranks first
     expect(s.score).toBeCloseTo(s.totalNetUsdc!, 2);
   });
@@ -182,7 +182,7 @@ describe('computeSignals — profit estimates', () => {
     expect(s.maxExecutableSize).toBe(1);
     expect(s.flags).toContain('pool_capacity_capped');
     expect(s.flags).toContain('pool_capacity_estimated');
-    expect(s.totalNetUsdc).toBeCloseTo(s.netAfterCapitalUsdc! * 1 - 0.5, 2);
+    expect(s.totalNetUsdc).toBeCloseTo(s.netAfterCapitalUsdc! * 1 - 0.5 - 0.05, 2);
   });
 
   it('caps calls by the free underlying custody (live market-file data)', () => {
@@ -451,7 +451,7 @@ describe('fee models — verified against venue docs + a live fill (2026-09-29)'
     const [s] = computeSignals([row(q, oliveQuote(3, 0.55))], cfg, NOW);
     const deriveFee = Math.min(3000 * 0.0003, 2.1 * 0.125);
     const oliveFee = Math.min(3000 * 0.00025, 3 * 0.1); // 10% premium cap binds
-    expect(s.costsUsdc).toBeCloseTo(deriveFee + oliveFee + 0.05, 6);
+    expect(s.costsUsdc).toBeCloseTo(deriveFee + oliveFee, 6); // Solana tx fee is per clip
   });
 
   it('Olive fee uses ORACLE-SPOT notional for both kinds (live-fill fixture)', () => {
@@ -462,9 +462,9 @@ describe('fee models — verified against venue docs + a live fill (2026-09-29)'
     expect(Math.min(qty * spot * 0.00025, qty * premium * 0.1)).toBeCloseTo(0.011628, 5);
   });
 
-  it('charges the $0.50 Derive order fee once per clip, not per contract', () => {
+  it('charges the $0.50 Derive order fee and the Solana tx fee once per clip, not per contract', () => {
     const [s] = computeSignals([row(deriveQuote({ bidSize: 3, askSize: 7 }), oliveQuote())], cfg, NOW);
-    expect(s.totalNetUsdc).toBeCloseTo(s.netAfterCapitalUsdc! * 3 - 0.5, 1); // totals round to 2dp
+    expect(s.totalNetUsdc).toBeCloseTo(s.netAfterCapitalUsdc! * 3 - 0.5 - 0.05, 1); // totals round to 2dp
   });
 });
 
@@ -536,7 +536,7 @@ describe('marginal-fill pricing — expected VWAP when the fill moves the rate (
     expect(s.expectedNetAfterCapitalUsdc!).toBeLessThan(s.netAfterCapitalUsdc!);
     expect(s.expectedNetAfterCapitalUsdc).toBeCloseTo(s.netAfterCapitalUsdc! - (s.expectedEntryUsdc! - s.entryPriceUsdc!), 3);
     expect(s.expectedTotalNetUsdc!).toBeLessThan(s.totalNetUsdc!);
-    expect(s.expectedTotalNetUsdc).toBeCloseTo(s.expectedNetAfterCapitalUsdc! * 5 - 0.5, 1);
+    expect(s.expectedTotalNetUsdc).toBeCloseTo(s.expectedNetAfterCapitalUsdc! * 5 - 0.5 - 0.05, 1);
   });
 
   it('leaves the expected fields null without curve data (flag-only, as before)', () => {

@@ -258,7 +258,7 @@ async function main() {
     deriveFee = Math.min(deriveFee, deriveLegPremium * 0.125);
   }
   const oliveFee = olivePremium > 0 ? Math.min(spot * 0.00025, olivePremium * 0.1) : 0;
-  const costs = deriveFee + oliveFee + cfg.solanaFeeUsdc;
+  const costs = deriveFee + oliveFee; // Solana tx fee is per clip — in total below
   const collateral = target.kind === 'call' ? spot : target.strike;
   const capital = collateral * cfg.capitalBorrowRateApr * tau;
   const net = gross - costs;
@@ -277,7 +277,7 @@ async function main() {
     const capacity = custodyCap ?? fallbackCap;
     if (capacity != null && capacity < bookSize) size = capacity;
   }
-  const total = size != null && size > 0 && netAfterCapital != null ? netAfterCapital * size - 0.5 : null; // $0.50 Derive order fee
+  const total = size != null && size > 0 && netAfterCapital != null ? netAfterCapital * size - 0.5 - cfg.solanaFeeUsdc : null; // $0.50 Derive order fee + one Solana tx
   const apy = netAfterCapital / collateral / tau * 100;
   const basis = Math.abs(delta) * spot * deriveIv * Math.sqrt(0.5 / (365 * 24));
   // Cross-check: reprice at the CYCLE's olive vol (row.olive.quote.iv) so the

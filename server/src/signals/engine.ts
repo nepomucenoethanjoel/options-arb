@@ -159,7 +159,9 @@ export function computeSignals(
             oq.mark * (cfg.oliveFeePremiumPct / 100),
           )
         : 0;
-    const costsUsdc = deriveFee + oliveFee + cfg.solanaFeeUsdc;
+    // Per-contract venue fees only; the Solana tx fee is per clip (one tx
+    // buys the whole size) and is charged with the order fee below.
+    const costsUsdc = deriveFee + oliveFee;
 
     // Olive locks full collateral (call: 1 underlying, put: K USDC) for the
     // whole tenor vs Derive's margin — the carry drag is a real cost.
@@ -282,7 +284,7 @@ export function computeSignals(
             if (netAfterCapitalUsdc != null) {
               expectedNetAfterCapitalUsdc = netAfterCapitalUsdc - (fill.vwapEntry - entryPrice);
               expectedTotalNetUsdc =
-                expectedNetAfterCapitalUsdc * maxExecutableSize - DERIVE_TAKER_ORDER_FEE_USDC;
+                expectedNetAfterCapitalUsdc * maxExecutableSize - DERIVE_TAKER_ORDER_FEE_USDC - cfg.solanaFeeUsdc;
             }
           }
         }
@@ -302,7 +304,7 @@ export function computeSignals(
     }
     const totalNetUsdc =
       maxExecutableSize != null && maxExecutableSize > 0 && netAfterCapitalUsdc != null
-        ? netAfterCapitalUsdc * maxExecutableSize - DERIVE_TAKER_ORDER_FEE_USDC
+        ? netAfterCapitalUsdc * maxExecutableSize - DERIVE_TAKER_ORDER_FEE_USDC - cfg.solanaFeeUsdc
         : null;
 
     // Annualized ROI on the locked collateral — comparable across expiries.

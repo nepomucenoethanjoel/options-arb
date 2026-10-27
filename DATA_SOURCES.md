@@ -385,6 +385,7 @@ No published SDK or IDL reference.
 | 21 | Derive margin/funding on the short leg | — | **NOT MODELED** | Documented caveat |
 | 22 | SVI feed = smoothed curve; per-strike quoted IVs differ on wings | chart only | **VERIFIED-LIVE** | 187 options, RMS 2.8–17.9 vpts by expiry (2026-09-28) |
 | 23 | Marginal-fill VWAP: the AMM reprices piecewise-linearly along the borrow curve as utilization moves during the fill (32-tranche integration; put premium recycling excluded; rates clamp at the top node) | `expectedFillVwap` → `expectedEntryUsdc`/`expectedTotalNetUsdc`, KPI takes min(quote, expected) | **MODEL (components verified)** | Curve evaluation + pricing conventions are #1/#2/#4 above; continuous-utilization repricing between nodes is the assumption. Guarded: model fires only when it reproduces the cycle's quoted premium at current utilization (≤2%) |
+| 24 | Solana network fee `SOLANA_FEE_USDC` ($0.05) is per transaction — one tx opens the whole clip — charged once per clip with the Derive order fee, not per contract | `signals/engine.ts` totals, handcheck | **ASSUMPTION** | Deliberately high vs typical priority-fee costs; per-clip charging matches how the 2026-09-29 live fill was submitted (single tx for qty 0.031854) |
 
 | Date | Route / check | Result |
 |---|---|---|
