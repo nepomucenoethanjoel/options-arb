@@ -13,7 +13,7 @@ import { HealthTracker } from '../../util';
 import { OliveOnChainReader, getPythSpot, oliveStrikeBounds } from './onchain';
 import { OliveRestClient } from './rest';
 import { buildSyntheticAmmQuote } from './synth';
-import { OLIVE_MARKET_FILE_BASE, fetchOliveMarketFile, type OliveMarketFileData } from './marketFile';
+import { OLIVE_MARKET_FILE_BASE, fetchOliveMarketFile, isMarketFileFresh, type OliveMarketFileData } from './marketFile';
 import type { OliveRealtimeClient } from './realtime';
 export type AmmQuoteResult =
   | { quote: OptionQuote }
@@ -63,6 +63,8 @@ export class OliveAdapter {
   private readonly opts: OliveAdapterOptions;
   private stateCache = new Map<string, { ts: number; state: VenueMarketState }>();
   private marketFileCache = new Map<string, { ts: number; data: OliveMarketFileData | null }>();
+  /** Underlyings whose last fetched market file was frozen (asOf too old). */
+  private staleMarketFiles = new Set<string>();
   private lastDetail: string | null = null;
   /** True when at least one underlying's vol comes from the live market file. */
   private volLive = false;
@@ -71,7 +73,13 @@ export class OliveAdapter {
   private async getMarketFile(underlying: string): Promise<OliveMarketFileData | null> {
     const cached = this.marketFileCache.get(underlying);
     if (cached && Date.now() - cached.ts < MARKET_FILE_CACHE_TTL_MS) return cached.data;
-    const data = await fetchOliveMarketFile(OLIVE_MARKET_FILE_BASE, underlying).catch(() => null);
+    const fetched = await fetchOliveMarketFile(OLIVE_MARKET_FILE_BASE, underlying).catch(() => null);
+    // A frozen file must not feed spot/vol/custody as if live — drop it so
+    // every consumer takes the on-chain/Pyth fallback path instead.
+    const stale = fetched != null && !isMarketFileFresh(fetched, Date.now());
+    if (stale) this.staleMarketFiles.add(underlying);
+    else this.staleMarketFiles.delete(underlying);
+    const data = stale ? null : fetched;
     this.marketFileCache.set(underlying, { ts: Date.now(), data });
     if (data) this.volLive = true;
     return data;
@@ -202,6 +210,7 @@ export class OliveAdapter {
     // live projected vol, live Stork spot, live pool AUM). Falls back to the
     // on-chain reader + Pyth + pinned overrides when unreachable.
     const file = await this.getMarketFile(u).catch(() => null);
+    if (this.staleMarketFiles.has(u)) caveats.push('market_file_stale');
     const [pythSpot, volResult] = await Promise.all([
       file?.spot != null ? Promise.resolve(null) : getPythSpot(u).catch(() => null),
       file?.vol != null ? Promise.resolve(null) : this.onchain.readModelVol(u, this.opts.volOverrides[u]).catch(() => null),

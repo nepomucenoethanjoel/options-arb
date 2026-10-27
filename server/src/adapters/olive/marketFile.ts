@@ -50,8 +50,8 @@ export interface OliveMarketFileData {
    * the full curve, not just the point at current utilization, so consumers
    * can price a fill's own impact on the rate (marginal-fill integration). */
   curves: { token: OliveRateCurvePoint[] | null; usdc: OliveRateCurvePoint[] | null };
-  /** File generation time (ms). */
-  asOfMs: number;
+  /** File generation time (ms); null when the file carries no asOf. */
+  asOfMs: number | null;
   /** Last on-chain EWMA write (ms) — the projection base. */
   volOnChainMs: number | null;
   projectionBranch: string | null;
@@ -151,7 +151,7 @@ export function parseOliveMarketFile(json: any, underlying: string): OliveMarket
         ? Math.max(0, aumUsd - entryClaimsUsd)
         : aumUsd;
 
-  const asOfMs = num(json.asOf ? Date.parse(json.asOf) : NaN) ?? Date.now();
+  const asOfMs = num(json.asOf ? Date.parse(json.asOf) : NaN);
 
   if (spot == null && vol == null) return null;
   return {
@@ -172,6 +172,14 @@ export function parseOliveMarketFile(json: any, underlying: string): OliveMarket
     volOnChainMs,
     projectionBranch: volObj?.projectionBranch ?? null,
   };
+}
+
+/** Observed live: asOf trails the request by <1 s (2026-10-27); a file
+ *  older than this, or one with no asOf, is a frozen feed, not a live source. */
+export const MARKET_FILE_MAX_AGE_MS = 120_000;
+
+export function isMarketFileFresh(data: Pick<OliveMarketFileData, 'asOfMs'>, now: number, maxAgeMs = MARKET_FILE_MAX_AGE_MS): boolean {
+  return data.asOfMs != null && now - data.asOfMs <= maxAgeMs;
 }
 
 export async function fetchOliveMarketFile(

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseOliveMarketFile } from '../src/adapters/olive/marketFile';
+import { MARKET_FILE_MAX_AGE_MS, isMarketFileFresh, parseOliveMarketFile } from '../src/adapters/olive/marketFile';
 
 const fixture = {
   asOf: '2026-09-27T21:26:24.284Z',
@@ -110,6 +110,22 @@ describe('parseOliveMarketFile', () => {
   it('returns null when neither spot nor vol is present', () => {
     expect(parseOliveMarketFile({ ticker: [], state: {} }, 'SOL')).toBeNull();
     expect(parseOliveMarketFile(null, 'SOL')).toBeNull();
+  });
+});
+
+describe('market-file freshness', () => {
+  const asOf = Date.parse(fixture.asOf);
+
+  it('carries the file asOf, and null (not "now") when it is missing', () => {
+    expect(parseOliveMarketFile(fixture, 'SOL')!.asOfMs).toBe(asOf);
+    const { asOf: _omit, ...noAsOf } = fixture;
+    expect(parseOliveMarketFile(noAsOf, 'SOL')!.asOfMs).toBeNull();
+  });
+
+  it('treats a frozen or undated file as not live', () => {
+    expect(isMarketFileFresh({ asOfMs: asOf }, asOf + 1_000)).toBe(true);
+    expect(isMarketFileFresh({ asOfMs: asOf }, asOf + MARKET_FILE_MAX_AGE_MS + 1)).toBe(false);
+    expect(isMarketFileFresh({ asOfMs: null }, asOf)).toBe(false);
   });
 });
 
