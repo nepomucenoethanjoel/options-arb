@@ -35,10 +35,8 @@ describe('toLiteRows (WS payload projection)', () => {
     };
     const [lite] = toLiteRows([row]);
     expect(lite.pairKey).toBe(row.pairKey);
-    expect(lite.deriveIv).toBe(0.6);
-    expect(lite.deriveBid).toBe(79);
-    expect(lite.oliveIv).toBe(0.55);
-    expect(lite.olivePremium).toBe(70.5);
+    expect(lite.venues.derive).toEqual({ iv: 0.6, bid: 79, ask: 81, mark: 80 });
+    expect(lite.venues.olive).toEqual({ iv: 0.55, bid: null, ask: null, mark: 70.5 });
     expect(lite.note).toBe('amm_synthetic');
     expect(JSON.stringify(lite)).not.toContain('greeks');
     expect(JSON.stringify(lite)).not.toContain('instrumentId');

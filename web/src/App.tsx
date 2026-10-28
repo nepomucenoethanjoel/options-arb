@@ -69,7 +69,7 @@ export default function App() {
     if (spot == null) return [];
     const byExpiry = new Map<string, MatchRowLite>();
     for (const r of data?.rows ?? []) {
-      if (r.underlying !== effectiveUnderlying || r.kind !== 'call') continue;
+      if (r.underlying !== effectiveUnderlying || r.kind !== 'call' || r.venues.derive?.iv == null) continue;
       const cur = byExpiry.get(r.expiryDate);
       if (!cur || Math.abs(r.strike - spot) < Math.abs(cur.strike - spot)) byExpiry.set(r.expiryDate, r);
     }
@@ -77,7 +77,7 @@ export default function App() {
       .map((r) => ({
         expiryDate: r.expiryDate,
         days: +((r.expiryTs - Date.now()) / 86_400_000).toFixed(1),
-        atmIvPct: r.deriveIv != null ? +(r.deriveIv * 100).toFixed(1) : null,
+        atmIvPct: r.venues.derive?.iv != null ? +(r.venues.derive.iv * 100).toFixed(1) : null,
       }))
       .filter((p) => p.atmIvPct != null && p.days >= 0)
       .sort((a, b) => a.days - b.days);
@@ -87,7 +87,7 @@ export default function App() {
     return (
       <div className="app">
         <div className="loading">
-          <h1>Olive × Derive — IV Arbitrage Dashboard</h1>
+          <h1>Options IV Arbitrage Monitor</h1>
           <p>Connecting to the local server… (start it with `npm run dev:server`)</p>
         </div>
       </div>

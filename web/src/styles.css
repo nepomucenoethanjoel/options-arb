@@ -8,6 +8,11 @@
   --accent: #58a6ff;
   --derive: #4dd0e1;
   --olive: #a3d977;
+  --coincall: #f0883e;
+  --hypercall: #d2a8ff;
+  --callput: #ffd166;
+  --bybit: #f7a600;
+  --binance: #f3ba2f;
   --ok: #3fb950;
   --warn: #d29922;
   --bad: #f85149;
@@ -185,6 +190,10 @@ tr.clickable:hover td { background: var(--panel2); }
 .drawer h2 { font-size: 17px; margin: 0; }
 .drawer .close { background: none; border: none; color: var(--muted); font-size: 16px; cursor: pointer; }
 .drawer h3 { font-size: 14px; margin: 18px 0 8px; color: var(--muted); }
+.venue-quotes { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
+.venue-quotes th { text-align: left; color: var(--muted); font-weight: 500; padding: 4px 8px; border-bottom: 1px solid var(--border); }
+.venue-quotes td { padding: 4px 8px; border-bottom: 1px solid var(--border); }
+.venue-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
 .kv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px 16px; margin-top: 14px; }
 .kv-grid > div { display: flex; flex-direction: column; gap: 2px; }
 .kv-grid .k { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }

@@ -10,7 +10,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import type { MatchRow, Signal } from '@options-arb/shared';
+import { VENUE_ORDER, VENUE_SPECS, type MatchRow, type Signal } from '@options-arb/shared';
 import { fetchHistory, fetchPair, type HistoryResponse } from '../api';
 import { daysTo, expiryLabel, num, pairLabel, pct, usd } from '../format';
 import { directionLabel, venueLabel } from '../venues';
@@ -70,12 +70,17 @@ export function DetailPanel({
     ts: p.ts,
     time: new Date(p.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     spread: p.spreadVols,
-    deriveIv: p.deriveIv != null ? +(p.deriveIv * 100).toFixed(2) : null,
-    oliveIv: p.oliveIv != null ? +(p.oliveIv * 100).toFixed(2) : null,
+    ...Object.fromEntries(
+      Object.entries(p.ivs ?? { derive: p.deriveIv, olive: p.oliveIv }).map(([v, iv]) => [`iv_${v}`, iv != null ? +(iv * 100).toFixed(2) : null]),
+    ),
   }));
-
-  const dq = row?.legs.derive?.quote ?? null;
-  const oq = row?.legs.olive?.quote ?? null;
+  const historyVenues = VENUE_ORDER.filter((v) => chartData.some((d) => (d as Record<string, unknown>)[`iv_${v}`] != null));
+  const legVenues = VENUE_ORDER.filter((v) => row?.legs[v]);
+  // The book leg whose mark the cross-check reprices (first non-AMM venue in the pair).
+  const refVenue = signal
+    ? VENUE_ORDER.find((v) => (v === signal.buyVenue || v === signal.sellVenue) && VENUE_SPECS[v].quoteKind !== 'amm_synthetic')
+    : undefined;
+  const otherVenue = refVenue === signal?.buyVenue ? signal?.sellVenue : signal?.buyVenue;
 
   return (
     <div className="drawer-backdrop" onClick={onClose}>
@@ -85,16 +90,34 @@ export function DetailPanel({
           <button className="close" onClick={onClose}>✕</button>
         </div>
 
+        <table className="venue-quotes">
+          <thead>
+            <tr><th>Venue</th><th>IV</th><th>Bid</th><th>Ask</th><th>Mark / premium</th></tr>
+          </thead>
+          <tbody>
+            {legVenues.map((v) => {
+              const leg = row!.legs[v]!;
+              const q = leg.quote;
+              const role = signal?.buyVenue === v ? 'buy' : signal?.sellVenue === v ? 'sell' : null;
+              return (
+                <tr key={v}>
+                  <td>
+                    <span className="venue-dot" style={{ background: `var(--${v})` }} />
+                    {venueLabel(v)} {role && <span className={`chip ${role === 'buy' ? 'ok' : 'warn'}`}>{role}</span>}
+                    {leg.note && <span className="muted small"> · {leg.note}</span>}
+                  </td>
+                  <td className="mono">{pct(q?.iv)}{q?.ivSource === 'model' ? ' (model)' : ''}</td>
+                  <td className="mono">{q?.bid != null ? q.bid.toFixed(2) : '–'}{q?.bidSize != null ? <span className="muted small"> ×{num(q.bidSize, 1)}</span> : null}</td>
+                  <td className="mono">{q?.ask != null ? q.ask.toFixed(2) : '–'}{q?.askSize != null ? <span className="muted small"> ×{num(q.askSize, 1)}</span> : null}</td>
+                  <td className="mono">{usd(q?.mark)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
         <div className="kv-grid">
-          <div><span className="k">Derive IV</span><span className="v mono">{pct(dq?.iv)}</span></div>
-          <div><span className="k">Olive model vol</span><span className="v mono">{pct(oq?.iv)}</span></div>
           <div><span className="k">Spread</span><span className="v mono">{signal ? `${signal.ivSpreadVols} vol pts / ${signal.ivSpreadBps} bps` : '–'}</span></div>
           <div><span className="k">Tenor</span><span className="v mono">{row ? daysTo(row.expiryTs) : '–'} → {row ? expiryLabel(row.expiryDate) : ''}</span></div>
-          <div><span className="k">Derive bid/ask</span><span className="v mono">{dq?.bid?.toFixed(1) ?? '–'} / {dq?.ask?.toFixed(1) ?? '–'}</span></div>
-          <div><span className="k">Olive premium (AMM)</span><span className="v mono">{usd(oq?.mark)}</span></div>
-          {row?.legs.olive?.note && (
-            <div className="kv-wide"><span className="k">Olive leg</span><span className="v small">{row.legs.olive.note}</span></div>
-          )}
           {row?.matchType === 'unmatched_no_counterpart' && row.unmatchedReason && (
             <div className="kv-wide"><span className="k">Unmatched</span><span className="v small">{row.unmatchedReason}</span></div>
           )}
@@ -116,7 +139,7 @@ export function DetailPanel({
                   {signal.netAfterCapitalUsdc != null ? usd(signal.netAfterCapitalUsdc) : '–'} {signal.isProfitable ? '✓' : '✗'}
                 </span>
               </div>
-              <div><span className="k">Size cap (Derive touch / pool custody)</span><span className="v mono">{signal.maxExecutableSize != null ? `${signal.maxExecutableSize.toFixed(1)} ctr` : '– (no two-sided book)'}</span></div>
+              <div><span className="k">Size cap (book touch / pool capacity)</span><span className="v mono">{signal.maxExecutableSize != null ? `${signal.maxExecutableSize.toFixed(1)} ctr` : '– (no two-sided book)'}</span></div>
               <div><span className="k">Total (size-capped)</span><span className="v mono">{signal.totalNetUsdc != null ? usd(signal.totalNetUsdc, 0) : '–'}</span></div>
               {signal.expectedEntryUsdc != null && signal.expectedTotalNetUsdc != null && (
                 <>
@@ -131,11 +154,11 @@ export function DetailPanel({
                 </>
               )}
               <div><span className="k">ROI APY on collateral</span><span className="v mono">{signal.roiApyPct != null ? `${signal.roiApyPct > 0 ? '+' : ''}${signal.roiApyPct.toFixed(1)}%` : '–'}</span></div>
-              <div><span className="k">Settlement basis σ</span><span className="v mono" title="~1σ divergence between Derive's 30-min TWAP settlement and Olive's Stork print">{signal.settlementBasisUsdc != null ? `± ${usd(signal.settlementBasisUsdc)}` : '–'}</span></div>
+              <div><span className="k">Settlement basis σ</span><span className="v mono" title="~1σ divergence between the two venues' settlement prices (averaging windows / oracle sources differ)">{signal.settlementBasisUsdc != null ? `± ${usd(signal.settlementBasisUsdc)}` : '–'}</span></div>
               <div className="kv-wide">
                 <span className="k">BS cross-check</span>
                 <span className="v small">
-                  Derive mark − same leg repriced at Olive vol = {usd(signal.syntheticCrossCheckUsdc)}
+                  {venueLabel(refVenue)} mark − same leg repriced at {venueLabel(otherVenue)} vol = {usd(signal.syntheticCrossCheckUsdc)}
                   {signal.crossCheckDeviationUsdc != null && <> · vs vega×Δσ: {usd(signal.crossCheckDeviationUsdc)}</>}
                   {signal.bookVsMarkUsdc != null && <> · book mid − mark: {usd(signal.bookVsMarkUsdc)}
                     {signal.flags.includes('price_distortion') ? ' ⚠ price_distortion — the quoted edge is mostly book dislocation, not vol mispricing' : ''}</>}
@@ -145,10 +168,31 @@ export function DetailPanel({
                 <div className="kv-wide"><span className="k">Flags</span><span className="v flags">{signal.flags.join(' · ')}</span></div>
               )}
             </div>
+            {signal.alternatives && signal.alternatives.length > 0 && (
+              <>
+                <h3>Other venue pairs</h3>
+                <table className="venue-quotes">
+                  <thead>
+                    <tr><th>Pair</th><th>Spread</th><th>Entry → exit</th><th>Net/ctr</th><th>Total (honest)</th></tr>
+                  </thead>
+                  <tbody>
+                    {signal.alternatives.map((a) => (
+                      <tr key={`${a.buyVenue}-${a.sellVenue}`} title={a.flags.join(' · ')}>
+                        <td>{directionLabel(a)}{a.flags.includes('direction_limited') ? ' ⚠' : ''}</td>
+                        <td className="mono">{a.ivSpreadVols ?? '–'}</td>
+                        <td className="mono">{usd(a.entryPriceUsdc)} → {usd(a.exitPriceUsdc)}</td>
+                        <td className="mono">{usd(a.netAfterCapitalUsdc)}</td>
+                        <td className="mono">{a.honestTotalNetUsdc != null ? usd(a.honestTotalNetUsdc, 0) : '–'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
+            )}
             <div className="muted small" style={{ marginTop: 8 }}>
               Assumes both legs held to expiry, where the European payoffs converge and the price difference
-              locks in; settlement prints differ (TWAP vs Stork — the basis σ above), and the Olive AMM's
-              depth for the size cap is unknown. Read-only estimate, not executable advice.
+              locks in; venues' settlement prices differ (the basis σ above), and AMM / RFQ depth beyond the
+              size cap is unknown. Read-only estimate, not executable advice.
             </div>
           </>
         )}
@@ -183,8 +227,20 @@ export function DetailPanel({
                 />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
                 <Line yAxisId="l" type="monotone" dataKey="spread" name="Spread (vol pts)" stroke="var(--accent)" strokeWidth={2} dot={false} isAnimationActive={false} />
-                <Line yAxisId="r" type="monotone" dataKey="deriveIv" name="Derive IV %" stroke="var(--derive)" dot={false} isAnimationActive={false} />
-                <Line yAxisId="r" type="monotone" dataKey="oliveIv" name="Olive model vol %" stroke="var(--olive)" strokeDasharray="5 3" dot={false} isAnimationActive={false} />
+                {historyVenues.map((v) => (
+                  <Line
+                    key={v}
+                    yAxisId="r"
+                    type="monotone"
+                    dataKey={`iv_${v}`}
+                    name={`${venueLabel(v)} ${VENUE_SPECS[v].quoteKind === 'amm_synthetic' ? 'model vol' : 'IV'} %`}
+                    stroke={`var(--${v})`}
+                    strokeDasharray={VENUE_SPECS[v].quoteKind === 'amm_synthetic' ? '5 3' : undefined}
+                    dot={false}
+                    isAnimationActive={false}
+                    connectNulls
+                  />
+                ))}
                 <ReferenceLine yAxisId="l" y={0} stroke="var(--muted)" strokeDasharray="2 4" />
               </LineChart>
             </ResponsiveContainer>

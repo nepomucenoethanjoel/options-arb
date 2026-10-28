@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { MatchRow, MatchRowLite, Signal, SignalKpis, VenueHealthSnapshot } from '@options-arb/shared';
+import type { MatchRow, MatchRowLite, Signal, SignalKpis, Venue, VenueHealthSnapshot } from '@options-arb/shared';
 
 export interface OverviewConfig {
   ivSpreadThresholdVols: number;
@@ -41,7 +41,15 @@ export interface PairResponse {
 export interface HistoryResponse {
   pairKey: string;
   hours: number;
-  points: Array<{ ts: number; spreadVols: number | null; deriveIv: number | null; oliveIv: number | null }>;
+  points: Array<{
+    ts: number;
+    spreadVols: number | null;
+    deriveIv: number | null;
+    oliveIv: number | null;
+    ivs?: Partial<Record<Venue, number | null>>;
+    buyVenue?: Venue | null;
+    sellVenue?: Venue | null;
+  }>;
 }
 
 export interface SurfaceResponse {

@@ -11,9 +11,12 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import type { MatchRowLite } from '@options-arb/shared';
+import { VENUE_ORDER, VENUE_SPECS, type MatchRowLite } from '@options-arb/shared';
 import { fetchSurface, type SurfaceResponse } from '../api';
 import { expiryLabel } from '../format';
+
+/** Listed venues beyond the Derive smile / Olive flat line this view is built around. */
+const EXTRA_VENUES = VENUE_ORDER.filter((v) => v !== 'derive' && v !== 'olive');
 
 export interface TermPoint {
   expiryDate: string;
@@ -63,14 +66,27 @@ export function SmileView({
 
   const data = useMemo(() => {
     const quotes = (surface?.deriveQuotes ?? []).filter((q) => q.kind === kind && q.iv != null);
-    const byStrike = new Map<number, { strike: number; quoteIv?: number; sviIv?: number }>();
+    const byStrike = new Map<number, { strike: number; quoteIv?: number; sviIv?: number } & Record<string, number | undefined>>();
     for (const q of quotes) byStrike.set(q.strike, { strike: q.strike, quoteIv: +(q.iv! * 100).toFixed(2) });
     for (const p of surface?.deriveSvi ?? []) {
       const e = byStrike.get(Math.round(p.strike));
       if (e) e.sviIv = +(p.iv * 100).toFixed(2);
     }
+    // Other listed venues' quoted IVs on the same expiry, one dot series each.
+    const exp = surface?.expiryDate ?? expiry;
+    for (const r of rows) {
+      if (r.kind !== kind || (exp && r.expiryDate !== exp)) continue;
+      for (const v of EXTRA_VENUES) {
+        const iv = r.venues[v]?.iv;
+        if (iv == null) continue;
+        const e = byStrike.get(r.strike) ?? { strike: r.strike };
+        e[`${v}Iv`] = +(iv * 100).toFixed(2);
+        byStrike.set(r.strike, e);
+      }
+    }
     return [...byStrike.values()].sort((a, b) => a.strike - b.strike);
-  }, [surface, kind]);
+  }, [surface, kind, rows, expiry]);
+  const extraVenuesShown = EXTRA_VENUES.filter((v) => data.some((d) => d[`${v}Iv`] != null));
 
   // Split quote dots into above/below the flat line + profitable bands.
   const { above, below, bands } = useMemo(() => {
@@ -177,6 +193,9 @@ export function SmileView({
               <Line type="monotone" dataKey="aboveIv" name="Derive IV > Olive (executable)" stroke="var(--ok)" strokeWidth={0} dot={{ r: 3, fill: 'var(--ok)' }} isAnimationActive={false} />
               <Line type="monotone" dataKey="belowIv" name="Derive IV < Olive" stroke="var(--neg)" strokeWidth={0} dot={{ r: 2.5, fill: 'var(--neg)' }} isAnimationActive={false} />
               <Line type="monotone" dataKey="sviIv" name="Derive SVI feed" stroke="var(--derive)" strokeWidth={1} dot={false} isAnimationActive={false} connectNulls />
+              {extraVenuesShown.map((v) => (
+                <Line key={v} type="monotone" dataKey={`${v}Iv`} name={`${VENUE_SPECS[v].label} IV`} stroke={`var(--${v})`} strokeWidth={0} dot={{ r: 2.5, fill: `var(--${v})` }} isAnimationActive={false} />
+              ))}
               {flatVol != null && (
                 <Line
                   type="monotone"

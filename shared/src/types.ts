@@ -142,11 +142,6 @@ export interface MatchRowLite {
   strike: number;
   kind: OptionKind;
   matchType: MatchType;
-  deriveIv: number | null;
-  oliveIv: number | null;
-  deriveBid: number | null;
-  deriveAsk: number | null;
-  olivePremium: number | null;
   /** Every venue's quote summary for this contract. */
   venues: Partial<Record<Venue, LiteQuote>>;
   note?: string;

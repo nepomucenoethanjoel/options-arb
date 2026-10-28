@@ -27,11 +27,6 @@ export function toLiteRows(rows: MatchRow[]): MatchRowLite[] {
     strike: r.strike,
     kind: r.kind,
     matchType: r.matchType,
-    deriveIv: r.legs.derive?.quote?.iv ?? null,
-    oliveIv: r.legs.olive?.quote?.iv ?? null,
-    deriveBid: r.legs.derive?.quote?.bid ?? null,
-    deriveAsk: r.legs.derive?.quote?.ask ?? null,
-    olivePremium: r.legs.olive?.quote?.mark ?? null,
     venues: Object.fromEntries(
       Object.entries(r.legs).map(([v, leg]) => [
         v,
@@ -515,9 +510,9 @@ export class Orchestrator extends EventEmitter {
       payload.deriveQuotes.push({
         strike: row.strike,
         kind: row.kind,
-        iv: row.deriveIv,
-        bid: row.deriveBid,
-        ask: row.deriveAsk,
+        iv: row.venues.derive?.iv ?? null,
+        bid: row.venues.derive?.bid ?? null,
+        ask: row.venues.derive?.ask ?? null,
       });
     }
     try {

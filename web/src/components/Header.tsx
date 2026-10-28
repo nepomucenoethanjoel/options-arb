@@ -27,9 +27,9 @@ export function Header({ data, connected }: { data: OverviewResponse; connected:
   return (
     <header>
       <div className="title-block">
-        <h1>Olive <span className="x">×</span> Derive — IV Arbitrage Dashboard</h1>
+        <h1>Options IV Arbitrage Monitor</h1>
         <div className="subtitle">
-          Cross-venue implied-volatility comparison · read-only signal tool for manual review
+          Cross-venue implied-volatility comparison ({Object.keys(h?.venues ?? {}).map((v) => VENUE_SPECS[v as keyof typeof VENUE_SPECS]?.label ?? v).join(' · ') || '…'}) · read-only signal tool for manual review
         </div>
       </div>
       <div className="health-block">

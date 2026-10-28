@@ -44,8 +44,8 @@ function stubOrchestrator(): Orchestrator {
     ts: 123,
     durationMs: 5,
     rows: [
-      { pairKey: 'SOL-20261030-100-C', underlying: 'SOL', expiryTs: 0, expiryDate: '20261030', strike: 100, kind: 'call', matchType: 'exact_match', deriveIv: 0.6, oliveIv: 0.55, deriveBid: 1, deriveAsk: 2, olivePremium: 1.5, note: 'amm_synthetic', unmatchedReason: undefined },
-      { pairKey: 'ETH-20261030-2000-C', underlying: 'ETH', expiryTs: 0, expiryDate: '20261030', strike: 2000, kind: 'call', matchType: 'exact_match', deriveIv: 0.5, oliveIv: 0.55, deriveBid: 1, deriveAsk: 2, olivePremium: 1.5, note: 'amm_synthetic', unmatchedReason: undefined },
+      { pairKey: 'SOL-20261030-100-C', underlying: 'SOL', expiryTs: 0, expiryDate: '20261030', strike: 100, kind: 'call', matchType: 'exact_match', venues: { derive: { iv: 0.6, bid: 1, ask: 2, mark: 1.5 }, olive: { iv: 0.55, bid: null, ask: null, mark: 1.5 } }, note: 'amm_synthetic', unmatchedReason: undefined },
+      { pairKey: 'ETH-20261030-2000-C', underlying: 'ETH', expiryTs: 0, expiryDate: '20261030', strike: 2000, kind: 'call', matchType: 'exact_match', venues: { derive: { iv: 0.5, bid: 1, ask: 2, mark: 1.5 }, olive: { iv: 0.55, bid: null, ask: null, mark: 1.5 } }, note: 'amm_synthetic', unmatchedReason: undefined },
     ],
     signals,
     health: { venues: {}, serverTime: 0, pollIntervalMs: 15000, lastCycleMs: null, lastCycleDurationMs: null },
