@@ -4,6 +4,7 @@ import {
   type OptionInstrument,
   type OptionKind,
   type OptionQuote,
+  type OptionsVenueAdapter,
   type Venue,
   type VenueHealth,
   type VenueMarketState,
@@ -53,7 +54,7 @@ const MARKET_FILE_CACHE_TTL_MS = 10_000;
  * backend REST API grows market-data routes (probe-olive.ts tracks this),
  * getInstruments/getTickers can be populated without downstream changes.
  */
-export class OliveAdapter {
+export class OliveAdapter implements OptionsVenueAdapter {
   readonly venue: Venue = 'olive';
 
   private readonly rest: OliveRestClient | null;

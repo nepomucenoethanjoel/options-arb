@@ -1,3 +1,5 @@
+import type { Venue } from '@options-arb/shared';
+
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -42,7 +44,7 @@ export class HealthTracker {
   private lastError: string | null = null;
 
   constructor(
-    private readonly venue: 'derive' | 'olive',
+    private readonly venue: Venue,
     private readonly source: string,
     private readonly staleMs: number,
   ) {}

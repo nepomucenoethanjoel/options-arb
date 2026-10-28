@@ -1,5 +1,6 @@
 export type OptionKind = 'call' | 'put';
-export type Venue = 'derive' | 'olive';
+/** Every venue the app knows; which are polled is config (VENUES). */
+export type Venue = 'derive' | 'olive' | 'coincall' | 'hypercall' | 'callput' | 'bybit' | 'binance';
 
 export const MS_PER_YEAR = 365 * 24 * 60 * 60 * 1000;
 

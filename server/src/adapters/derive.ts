@@ -2,6 +2,7 @@ import {
   type IVSurfacePoint,
   type OptionInstrument,
   type OptionQuote,
+  type OptionsVenueAdapter,
   type SviSlice,
   type Venue,
   type VenueHealth,
@@ -210,7 +211,7 @@ export interface DeriveAdapterOptions {
   bookSource: 'merge' | 'v3' | 'legacy';
 }
 
-export class DeriveAdapter {
+export class DeriveAdapter implements OptionsVenueAdapter {
   readonly venue: Venue = 'derive';
 
   private readonly client: DeriveHttpClient;
