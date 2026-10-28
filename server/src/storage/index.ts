@@ -1,4 +1,4 @@
-import type { VenueHealth } from '@options-arb/shared';
+import type { Venue, VenueHealth } from '@options-arb/shared';
 
 export interface SignalRecord {
   ts: number;
@@ -8,6 +8,10 @@ export interface SignalRecord {
   spreadBps: number | null;
   deriveIv: number | null;
   oliveIv: number | null;
+  /** Every venue's IV for this contract (derive/olive columns kept for chart continuity). */
+  ivs: Partial<Record<Venue, number | null>>;
+  buyVenue: Venue | null;
+  sellVenue: Venue | null;
   edgeUsdc: number | null;
   netAfterCapitalUsdc: number | null;
   totalNetUsdc: number | null;
@@ -25,6 +29,10 @@ export interface SpreadHistoryPoint {
   spreadVols: number | null;
   deriveIv: number | null;
   oliveIv: number | null;
+  /** Per-venue IVs; rows written before multi-venue carry only derive/olive. */
+  ivs: Partial<Record<Venue, number | null>>;
+  buyVenue: Venue | null;
+  sellVenue: Venue | null;
 }
 
 /**

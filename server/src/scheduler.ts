@@ -5,6 +5,7 @@ import {
   type MatchRowLite,
   type OptionQuote,
   type Signal,
+  type Venue,
   type VenueHealthSnapshot,
 } from '@options-arb/shared';
 import type { AppConfig } from './config';
@@ -265,7 +266,10 @@ export class Orchestrator extends EventEmitter {
         const persistInteresting = persistAll || now - this.lastInterestingPersistMs >= PERSIST_INTERESTING_INTERVAL_MS;
         if (persistInteresting) this.lastInterestingPersistMs = now;
         const ivsByPair = new Map(
-          allRows.map((r) => [r.pairKey, { d: r.legs.derive?.quote?.iv ?? null, o: r.legs.olive?.quote?.iv ?? null }]),
+          allRows.map((r) => [
+            r.pairKey,
+            Object.fromEntries(Object.entries(r.legs).map(([v, leg]) => [v, leg?.quote?.iv ?? null])) as Partial<Record<Venue, number | null>>,
+          ]),
         );
         const toRecord = (s: Signal) => ({
           ts: s.ts,
@@ -273,8 +277,11 @@ export class Orchestrator extends EventEmitter {
           underlying: s.underlying,
           spreadVols: s.ivSpreadVols,
           spreadBps: s.ivSpreadBps,
-          deriveIv: ivsByPair.get(s.pairKey)?.d ?? null,
-          oliveIv: ivsByPair.get(s.pairKey)?.o ?? null,
+          deriveIv: ivsByPair.get(s.pairKey)?.derive ?? null,
+          oliveIv: ivsByPair.get(s.pairKey)?.olive ?? null,
+          ivs: ivsByPair.get(s.pairKey) ?? {},
+          buyVenue: s.buyVenue,
+          sellVenue: s.sellVenue,
           edgeUsdc: s.edgeUsdc,
           netAfterCapitalUsdc: s.netAfterCapitalUsdc,
           totalNetUsdc: s.totalNetUsdc,

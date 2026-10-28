@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import type { VenueHealth } from '@options-arb/shared';
+import type { Venue, VenueHealth } from '@options-arb/shared';
 import type { SignalRecord, SpreadHistoryPoint, Storage } from './index';
 
 /**
@@ -42,8 +42,8 @@ export class SqliteStorage implements Storage {
       `INSERT OR REPLACE INTO signals
         (ts, pair_key, underlying, spread_vols, spread_bps, derive_iv, olive_iv, edge_usdc,
          net_usdc, total_net_usdc, roi_apy_pct, max_size, costs_usdc, score,
-         is_opportunity, is_profitable, flags)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         is_opportunity, is_profitable, flags, ivs_json, buy_venue, sell_venue)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
   }
 
@@ -74,6 +74,9 @@ export class SqliteStorage implements Storage {
       ['roi_apy_pct', 'REAL'],
       ['max_size', 'REAL'],
       ['is_profitable', 'INTEGER'],
+      ['ivs_json', 'TEXT'],
+      ['buy_venue', 'TEXT'],
+      ['sell_venue', 'TEXT'],
     ];
     for (const [name, type] of columns) {
       try {
@@ -93,6 +96,7 @@ export class SqliteStorage implements Storage {
           r.ts, r.pairKey, r.underlying, r.spreadVols, r.spreadBps, r.deriveIv, r.oliveIv, r.edgeUsdc,
           r.netAfterCapitalUsdc, r.totalNetUsdc, r.roiApyPct, r.maxSize, r.costsUsdc, r.score,
           r.isOpportunity ? 1 : 0, r.isProfitable ? 1 : 0, r.flags,
+          JSON.stringify(r.ivs), r.buyVenue, r.sellVenue,
         );
       }
       this.db.exec('COMMIT');
@@ -115,7 +119,7 @@ export class SqliteStorage implements Storage {
   getSpreadHistory(pairKey: string, sinceTs: number): SpreadHistoryPoint[] {
     const rows = this.db
       .prepare(
-        `SELECT ts, spread_vols, derive_iv, olive_iv FROM signals
+        `SELECT ts, spread_vols, derive_iv, olive_iv, ivs_json, buy_venue, sell_venue FROM signals
          WHERE pair_key = ? AND ts >= ? ORDER BY ts ASC`,
       )
       .all(pairKey, sinceTs) as Array<{
@@ -123,12 +127,18 @@ export class SqliteStorage implements Storage {
       spread_vols: number | null;
       derive_iv: number | null;
       olive_iv: number | null;
+      ivs_json: string | null;
+      buy_venue: Venue | null;
+      sell_venue: Venue | null;
     }>;
     return rows.map((r) => ({
       ts: r.ts,
       spreadVols: r.spread_vols,
       deriveIv: r.derive_iv,
       oliveIv: r.olive_iv,
+      ivs: r.ivs_json ? (JSON.parse(r.ivs_json) as SpreadHistoryPoint['ivs']) : { derive: r.derive_iv, olive: r.olive_iv },
+      buyVenue: r.buy_venue,
+      sellVenue: r.sell_venue,
     }));
   }
 

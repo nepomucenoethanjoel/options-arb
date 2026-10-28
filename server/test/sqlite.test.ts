@@ -75,7 +75,8 @@ describe('SqliteStorage', () => {
       expect(storage.countSignals()).toBe(1);
       // The old signal row survives and is readable through the migrated schema.
       expect(storage.getSpreadHistory('SOL-20261030-120-C', 0)).toEqual([
-        { ts: 1000, spreadVols: 5.5, deriveIv: 0.6, oliveIv: 0.55 },
+        // Pre-multi-venue rows: ivs falls back to the derive/olive columns.
+        { ts: 1000, spreadVols: 5.5, deriveIv: 0.6, oliveIv: 0.55, ivs: { derive: 0.6, olive: 0.55 }, buyVenue: null, sellVenue: null },
       ]);
     } finally {
       storage.close();
@@ -100,11 +101,16 @@ describe('SqliteStorage', () => {
           ts: 2000, pairKey: 'ETH-20261030-2900-C', underlying: 'ETH', spreadVols: -3.2, spreadBps: -550,
           deriveIv: 0.5, oliveIv: 0.532, edgeUsdc: -1.5, netAfterCapitalUsdc: -2.1, totalNetUsdc: -6.3,
           roiApyPct: -12.5, maxSize: 3, costsUsdc: 0.4, score: -6.3, isOpportunity: true, isProfitable: false,
-          flags: 'direction_limited',
+          flags: 'direction_limited', ivs: { derive: 0.5, olive: 0.532, coincall: 0.51 }, buyVenue: 'derive', sellVenue: 'olive',
         },
       ]);
       const points = storage.getSpreadHistory('ETH-20261030-2900-C', 0);
-      expect(points).toEqual([{ ts: 2000, spreadVols: -3.2, deriveIv: 0.5, oliveIv: 0.532 }]);
+      expect(points).toEqual([
+        {
+          ts: 2000, spreadVols: -3.2, deriveIv: 0.5, oliveIv: 0.532,
+          ivs: { derive: 0.5, olive: 0.532, coincall: 0.51 }, buyVenue: 'derive', sellVenue: 'olive',
+        },
+      ]);
       expect(storage.getSpreadHistory('SOL-20261030-120-C', 0)).toEqual([]);
     } finally {
       storage.close();
@@ -121,6 +127,7 @@ describe('SqliteStorage', () => {
         spreadVols: 1, spreadBps: 100, deriveIv: 0.5, oliveIv: 0.55, edgeUsdc: 0.1,
         netAfterCapitalUsdc: 0.05, totalNetUsdc: 1, roiApyPct: 5, maxSize: 2, costsUsdc: 0.1,
         score: 1, isOpportunity: true, isProfitable: true, flags: '',
+        ivs: { derive: 0.5, olive: 0.55 }, buyVenue: 'olive' as const, sellVenue: 'derive' as const,
       }));
       storage.recordSignals(rows);
       expect(storage.countSignals()).toBe(5000);
