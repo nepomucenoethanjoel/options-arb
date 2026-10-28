@@ -192,6 +192,7 @@ function evaluatePair(
   for (const v of pair) {
     if (!isAmm(v) && row.legs[v]!.quote!.ts < now - cfg.staleQuoteMs) flag('stale');
   }
+  for (const v of pair) for (const f of row.legs[v]!.quote!.flags ?? []) flag(f);
 
   // ── IV spread (sell − buy: ≥ 0 by construction) ─────────────────────────
   const spreadVols = (sq.iv! - bq.iv!) * 100;

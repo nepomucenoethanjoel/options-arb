@@ -70,5 +70,12 @@ export function feeModels(cfg: FeeConfig): Partial<Record<Venue, VenueFeeModel>>
       },
       perOrder: 0,
     },
+    // Hypercall (docs venue-rules/fees): 0% today; the published schedule is
+    // 5 bps taker + 1.5 bps settlement. Charged at the published rates on
+    // index notional (base UNVERIFIED) — conservative while fees are waived.
+    hypercall: {
+      perContract: ({ notional }) => notional * 0.0005 + notional * 0.00015,
+      perOrder: 0,
+    },
   };
 }

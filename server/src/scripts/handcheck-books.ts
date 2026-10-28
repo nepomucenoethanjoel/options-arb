@@ -10,7 +10,7 @@
 import { loadConfig } from '../config';
 
 const APP = process.env.APP_URL ?? 'http://127.0.0.1:8799';
-const BOOK_VENUES = ['derive', 'coincall'] as const;
+const BOOK_VENUES = ['derive', 'coincall', 'hypercall'] as const;
 type BookVenue = (typeof BOOK_VENUES)[number];
 
 const n = (v: unknown): number | null => {
@@ -60,18 +60,33 @@ async function coincallRaw(underlying: string, symbol: string): Promise<RawQuote
   return { bid, bidSize: bid != null ? n(o.bidSize) : null, ask, askSize: ask != null ? n(o.askSize) : null, mark: n(o.markPrice), index: pos(o.underlyingPrice) };
 }
 
+async function hypercallRaw(underlying: string, name: string): Promise<RawQuote> {
+  const res = await fetch(`https://api.hypercall.xyz/options-summary?currency=${underlying}&kind=option&include_rfq_provider_quotes=true`);
+  const body = (await res.json()) as { result?: any[] };
+  const o = (body.result ?? []).find((x) => x.instrument_name === name);
+  if (!o) throw new Error(`Hypercall ${name} not found`);
+  let bid: number | null = null, bidSize: number | null = null, ask: number | null = null, askSize: number | null = null;
+  for (const q of o.rfq_provider_quotes ?? []) {
+    const b = pos(q.bid_price), a = pos(q.ask_price);
+    if (b != null && (bid == null || b > bid)) { bid = b; bidSize = n(q.max_bid_size); }
+    if (a != null && (ask == null || a < ask)) { ask = a; askSize = n(q.max_ask_size); }
+  }
+  return { bid, bidSize, ask, askSize, mark: pos(o.mark_price), index: pos(o.underlying_price) };
+}
+
 /** Taker fee per contract, written from the venue docs (not fees.ts). */
 function feeOf(venue: BookVenue, legPrice: number | null, spot: number, underlying: string, kind: string, strike: number, tteDays: number, deriveBps: number): number {
   if (venue === 'derive') {
     const f = spot * (deriveBps / 10_000);
     return legPrice != null && legPrice > 0 ? Math.min(f, 0.125 * legPrice) : f;
   }
+  if (venue === 'hypercall') return spot * (5 + 1.5) / 10_000; // published 5 bps taker + 1.5 bps settlement
   const rate = underlying === 'BTC' || underlying === 'ETH' ? 0.0003 : 0.0006;
   const trade = legPrice != null && legPrice > 0 ? Math.min(spot * rate, 0.125 * legPrice) : spot * rate;
   const intrinsic = Math.max(0, kind === 'call' ? spot - strike : strike - spot);
   return trade + (tteDays < 1 ? 0 : Math.min(spot * 0.00015, 0.125 * intrinsic));
 }
-const ORDER_FEE: Record<BookVenue, number> = { derive: 0.5, coincall: 0 };
+const ORDER_FEE: Record<BookVenue, number> = { derive: 0.5, coincall: 0, hypercall: 0 };
 
 async function main() {
   const cfg = loadConfig();
@@ -96,12 +111,32 @@ async function main() {
   const raw = async (v: BookVenue): Promise<RawQuote> =>
     v === 'derive'
       ? deriveRaw(row.underlying, row.expiryDate, row.legs.derive.instrumentId)
-      : coincallRaw(row.underlying, row.legs.coincall.instrumentId);
-  const [bq, sq] = await Promise.all([raw(buy), raw(sell)]);
+      : v === 'coincall'
+        ? coincallRaw(row.underlying, row.legs.coincall.instrumentId)
+        : hypercallRaw(row.underlying, row.legs.hypercall.instrumentId);
+  const [freshB, freshS] = await Promise.all([raw(buy), raw(sell)]);
+  // 1) Quote source: the fresh raw quote vs the quote the cycle used. RFQ
+  //    makers re-quote every second or two, so allow drift; a wrong side,
+  //    unit or instrument shows up as a gross miss.
+  const drift = (label: string, fresh: number | null, cycle: number | null) => {
+    if (fresh == null || cycle == null) return `${label}: fresh=${fresh} cycle=${cycle} ${fresh === cycle ? '✓' : '(null mismatch?)'}`;
+    const rel = Math.abs(fresh - cycle) / Math.max(Math.abs(cycle), 1e-9);
+    return `${label}: fresh=${fresh} cycle=${cycle} ${rel <= 0.02 ? `✓ (drift ${(rel * 100).toFixed(2)}%)` : `✗ ${(rel * 100).toFixed(2)}% off`}`;
+  };
+  const cycleQ = (v: BookVenue): RawQuote => {
+    const q = row.legs[v].quote;
+    return { bid: pos(q.bid), bidSize: n(q.bidSize), ask: pos(q.ask), askSize: n(q.askSize), mark: n(q.mark), index: pos(q.indexPrice) };
+  };
+  const bq = cycleQ(buy);
+  const sq = cycleQ(sell);
+  console.log(drift(`${buy} ask (source)`, freshB.ask, bq.ask));
+  console.log(drift(`${sell} bid (source)`, freshS.bid, sq.bid));
+  // 2) Money math: recomputed independently FROM the cycle's leg quotes, so
+  //    every field must match exactly (quote drift is checked above).
   const pair = BOOK_VENUES.filter((v) => v === buy || v === sell);
-  const ref = pair[0] === buy ? bq : sq; // first book venue in venue order (Derive before Coincall)
+  const ref = pair[0] === buy ? bq : sq; // first book venue in venue order (Derive first)
   const spot = ref.index ?? (bq.index ?? sq.index)!;
-  const tau = Math.max(0, (row.expiryTs - Date.now()) / (365 * 86_400_000));
+  const tau = Math.max(0, (row.expiryTs - signal.ts) / (365 * 86_400_000));
   const tteDays = tau * 365;
   const entry = bq.ask ?? bq.mark;
   const exit = sq.bid ?? sq.mark;

@@ -8,6 +8,8 @@ export const NON_EXECUTABLE_FLAGS: ReadonlySet<string> = new Set([
 /** Flags that keep a row out of headline totals/counts (still shown in the table). */
 export const HEADLINE_BLOCKING_FLAGS: ReadonlySet<string> = new Set([
   ...NON_EXECUTABLE_FLAGS, 'price_distortion', 'fill_model_skipped',
+  // Unproven fillability: lifted per venue only with live-fill evidence.
+  'single_maker', 'indicative_quote',
 ]);
 
 /**

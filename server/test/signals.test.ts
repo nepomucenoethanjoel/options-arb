@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bsPrice, type MatchRow, type OptionQuote, type Signal } from '@options-arb/shared';
+import { bsPrice, isHeadlineProfitable, type MatchRow, type OptionQuote, type Signal } from '@options-arb/shared';
 import { toLiteRows } from '../src/scheduler';
 import { computeSignals, isPersistWorthy, type SignalConfig } from '../src/signals/engine';
 
@@ -650,5 +650,23 @@ describe('computeSignals — N venues (best vol-consistent pair per contract)', 
   it('applies book-quality flags to every book leg', () => {
     const [s] = computeSignals([rowN({ derive: deriveQuote(), coincall: coincallQuote({ bid: null }) })], cfgN, NOW);
     expect(s.flags).toContain('one_sided');
+  });
+});
+
+describe('computeSignals — venue quote flags', () => {
+  it('carries a leg quote flag (single_maker) into the pair and keeps it out of the headline', () => {
+    const hq: OptionQuote = { ...deriveQuote(), venue: 'hypercall', instrumentId: 'ETH-20261030-2900-C', bid: 48, ask: 50, iv: 0.5, flags: ['single_maker'] };
+    const r: MatchRow = {
+      ...row(null, null),
+      legs: {
+        derive: { venue: 'derive', instrumentId: 'd', quote: deriveQuote() },
+        hypercall: { venue: 'hypercall', instrumentId: 'h', quote: hq },
+      },
+    };
+    const [s] = computeSignals([r], cfg, NOW);
+    expect([s.buyVenue, s.sellVenue]).toEqual(['hypercall', 'derive']);
+    expect(s.flags).toContain('single_maker');
+    expect(s.isProfitable).toBe(true);
+    expect(isHeadlineProfitable(s)).toBe(false);
   });
 });

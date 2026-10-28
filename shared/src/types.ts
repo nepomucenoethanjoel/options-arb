@@ -51,6 +51,8 @@ export interface OptionQuote {
   openInterest?: number | null;
   /** Where this quote came from, e.g. `derive:v3-rest`, `olive:synthetic-amm`. */
   source: string;
+  /** Venue-level caveats carried into any signal using this quote (e.g. `single_maker`). */
+  flags?: string[];
 }
 
 export interface IVSurfacePoint {

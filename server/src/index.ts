@@ -3,6 +3,7 @@ import { loadConfig, type ExtraVenue } from './config';
 import type { OptionsVenueAdapter } from '@options-arb/shared';
 import { DeriveAdapter } from './adapters/derive';
 import { CoincallAdapter } from './adapters/coincall';
+import { HypercallAdapter } from './adapters/hypercall';
 import { OliveAdapter } from './adapters/olive';
 import { OliveRealtimeClient } from './adapters/olive/realtime';
 import { SqliteStorage } from './storage/sqlite';
@@ -42,6 +43,7 @@ async function main(): Promise<void> {
   });
   const extraAdapters: Record<ExtraVenue, () => OptionsVenueAdapter> = {
     coincall: () => new CoincallAdapter(cfg.coincallBaseUrl),
+    hypercall: () => new HypercallAdapter(cfg.hypercallBaseUrl),
   };
   const extraVenues = cfg.extraVenues.map((v) => extraAdapters[v]());
   const alerter = new Alerter(cfg);
