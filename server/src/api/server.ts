@@ -112,7 +112,7 @@ export function buildKpis(signals: Signal[]): SignalKpis {
     executableProfitableCount: executable.length,
     lpOnlyProfitableCount: profitable.length - executable.length,
     opportunitiesCount: signals.filter((s) => s.isOpportunity).length,
-    totalExecutableUsd: [...bestPerUnderlying.values()].reduce((a, b) => a + b, 0),
+    totalExecutableUsd: Math.round([...bestPerUnderlying.values()].reduce((a, b) => a + b, 0) * 100) / 100,
     closest,
   };
 }
