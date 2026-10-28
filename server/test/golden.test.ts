@@ -24,7 +24,8 @@ interface GoldenCase {
   spots: Record<string, number | null>;
   /** Legacy row shape (fixed derive/olive legs) — compared via toLegacyRow. */
   rows: Array<Record<string, unknown>>;
-  signals: Signal[];
+  /** Legacy signal shape (direction enum) — compared via toLegacySignal. */
+  signals: Array<Record<string, unknown>>;
 }
 
 /** Project a venue-keyed row onto the recorded two-leg shape. */
@@ -35,6 +36,14 @@ function toLegacyRow(r: MatchRow): Record<string, unknown> {
     derive: legs.derive ?? { venue: 'derive', instrumentId: null, quote: null },
     olive: legs.olive ?? { venue: 'olive', instrumentId: null, quote: null },
   };
+}
+
+/** The recorded two-venue direction from the venue pair. */
+function toLegacySignal(s: Signal): Record<string, unknown> {
+  const { buyVenue, sellVenue, alternatives: _alt, ...rest } = s;
+  const direction =
+    buyVenue === 'olive' && sellVenue === 'derive' ? 'buy_olive_sell_derive' : buyVenue === 'derive' && sellVenue === 'olive' ? 'buy_derive_sell_olive' : null;
+  return { ...rest, direction };
 }
 
 const golden = JSON.parse(
@@ -70,7 +79,7 @@ describe('golden Olive × Derive cycle', () => {
     it(`${c.underlying}: reproduces every row and signal`, () => {
       const { rows, signals } = replay(c);
       expect(rows.map(toLegacyRow)).toEqual(c.rows);
-      expect(signals).toEqual(c.signals);
+      expect(signals.map(toLegacySignal)).toEqual(c.signals);
     });
   }
 });

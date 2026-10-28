@@ -27,14 +27,14 @@ function sig(pairKey: string, underlying: string, overrides: Partial<Signal> = {
     maxExecutableSize: 5, totalNetUsdc: 2.5, roiApyPct: 10, settlementBasisUsdc: 0.1,
     expectedEntryUsdc: null, expectedNetAfterCapitalUsdc: null, expectedTotalNetUsdc: null,
     syntheticCrossCheckUsdc: 0, crossCheckDeviationUsdc: 0, bookVsMarkUsdc: 0, score: 5,
-    isOpportunity: true, isProfitable: true, direction: 'buy_olive_sell_derive', flags: [], ts: 0,
+    isOpportunity: true, isProfitable: true, buyVenue: 'olive', sellVenue: 'derive', flags: [], ts: 0,
     ...overrides,
   };
 }
 
 const signals = [
   sig('SOL-20261030-100-C', 'SOL', { totalNetUsdc: 10 }),
-  sig('SOL-20261030-110-C', 'SOL', { direction: 'buy_derive_sell_olive', flags: ['direction_limited'], totalNetUsdc: 50 }),
+  sig('SOL-20261030-110-C', 'SOL', { buyVenue: 'derive', sellVenue: 'olive', flags: ['direction_limited'], totalNetUsdc: 50 }),
   sig('ETH-20261030-2000-C', 'ETH', { totalNetUsdc: 20, isProfitable: false, isOpportunity: false, netAfterCapitalUsdc: -1 }),
 ];
 
@@ -221,7 +221,7 @@ describe('buildKpis — pool-aware Σ', () => {
       sig('SOL-20261030-100-C', 'SOL', { totalNetUsdc: 10 }),
       sig('SOL-20261030-110-C', 'SOL', { totalNetUsdc: 7 }),   // same pool — must NOT add
       sig('ETH-20261030-2000-C', 'ETH', { totalNetUsdc: 4 }),
-      sig('ETH-20261030-2100-C', 'ETH', { direction: 'buy_derive_sell_olive', flags: ['direction_limited'], totalNetUsdc: 99 }), // not executable
+      sig('ETH-20261030-2100-C', 'ETH', { buyVenue: 'derive', sellVenue: 'olive', flags: ['direction_limited'], totalNetUsdc: 99 }), // not executable
     ];
     const k = buildKpis(rows);
     expect(k.totalExecutableUsd).toBe(14); // SOL best 10 + ETH best 4

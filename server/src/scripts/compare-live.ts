@@ -164,7 +164,7 @@ async function main() {
     const s = our.signal;
     if (s) {
       console.log(
-        `OUR signal : edge=${s.edgeUsdc?.toFixed(3)} net/ctr=${s.netAfterCapitalUsdc?.toFixed(3)} total=${s.totalNetUsdc?.toFixed(2)} dir=${s.direction} flags=${s.flags.join(',')}`,
+        `OUR signal : edge=${s.edgeUsdc?.toFixed(3)} net/ctr=${s.netAfterCapitalUsdc?.toFixed(3)} total=${s.totalNetUsdc?.toFixed(2)} dir=${s.buyVenue}->${s.sellVenue} flags=${s.flags.join(',')}`,
       );
     }
   }

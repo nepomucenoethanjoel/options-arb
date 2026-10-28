@@ -1,14 +1,18 @@
 import {
   bsPrice,
-  expectedFillVwap,
+  honestTotalNetUsdc,
   NON_EXECUTABLE_FLAGS,
+  VENUE_ORDER,
+  VENUE_SPECS,
   yearsBetween,
   type MatchRow,
-  type OliveRateCurvePoint,
   type OptionQuote,
+  type PairAlternative,
   type Signal,
-  type SignalDirection,
+  type Venue,
 } from '@options-arb/shared';
+import { feeModels, type VenueFeeModel } from './fees';
+import { oliveCapacityCap, oliveExecutionImpact, type OliveCustody } from './olive';
 
 export interface SignalConfig {
   ivSpreadThresholdVols: number;
@@ -34,21 +38,10 @@ export interface SignalConfig {
    *  90% utilization, where the convex borrow curve moves the pricing rate;
    *  `tokenCurve`/`usdcCurve` (the published borrowRateCurve nodes) let the
    *  engine PRICE that movement instead of only warning about it. */
-  poolCustodyByAsset: Record<string, {
-    underlyingFree: number | null;
-    usdcFreeUsd: number | null;
-    underlyingOwned?: number | null;
-    usdcOwnedUsd?: number | null;
-    tokenCurve?: OliveRateCurvePoint[] | null;
-    usdcCurve?: OliveRateCurvePoint[] | null;
-  }>;
+  poolCustodyByAsset: Record<string, OliveCustody>;
+  /** Extra venue fee models (new venues); Derive/Olive come from the fields above. */
+  extraFeeModels?: Partial<Record<Venue, VenueFeeModel>>;
 }
-
-/** Derive settles a 30-minute TWAP of the underlying; Olive settles a Stork oracle print. */
-const SETTLEMENT_TWAP_HOURS = 0.5;
-/** Derive taker base fee, per ORDER regardless of size (docs trading-fees,
- *  verified 2026-09-29) — charged once per clip, not per contract. */
-const DERIVE_TAKER_ORDER_FEE_USDC = 0.5;
 
 /**
  * Burst-persistence gate: only rows a user could actually capture are worth
@@ -72,17 +65,24 @@ function round(v: number | null, dp: number): number | null {
   return Math.round(v * f) / f;
 }
 
+const positive = (v: number | null | undefined): number | null => (v != null && v > 0 ? v : null);
+const isAmm = (venue: Venue) => VENUE_SPECS[venue].quoteKind === 'amm_synthetic';
+
 /**
  * Turn matched rows into signals with a held-to-expiry profit estimate.
  *
- * Framing: both legs are European options on the same underlying and (within
- * matching tolerance) the same expiry, so their payoffs converge at expiry.
- * Buying the cheap venue and selling the rich venue therefore locks in the
- * price difference — less fees, less the carry drag of Olive's full
- * collateral lock, and excluding the settlement-basis risk of a 30-min TWAP
- * (Derive) versus a Stork print (Olive), which is quantified but not
- * subtracted. Cross-venue legs are NOT risk-equivalent before expiry
+ * Framing: both legs are European options on the same underlying and the
+ * same expiry, so their payoffs converge at expiry. Buying the cheap venue
+ * and selling the rich venue therefore locks in the price difference — less
+ * fees, less the carry drag of full collateral, and excluding settlement-
+ * basis risk between the venues' settlement prices (quantified, not
+ * subtracted). Cross-venue legs are NOT risk-equivalent before expiry
  * (collateralized AMM vs margin venue); the UI surfaces those caveats.
+ *
+ * Every ordered venue pair on a row is a candidate when it is
+ * vol-consistent (sell-venue IV ≥ buy-venue IV). The row's signal is the
+ * best candidate: user-shortable sell venue first, then clean books, then
+ * the honest clip total. Remaining candidates ride along as `alternatives`.
  */
 export function computeSignals(
   rows: MatchRow[],
@@ -90,323 +90,32 @@ export function computeSignals(
   now: number,
   spotByUnderlying: Record<string, number | null> = {},
 ): Signal[] {
+  const fees = { ...feeModels(cfg), ...cfg.extraFeeModels };
   const signals: Signal[] = [];
 
   for (const row of rows) {
-    const dq: OptionQuote | null = row.legs.derive?.quote ?? null;
-    const oq: OptionQuote | null = row.legs.olive?.quote ?? null;
-    if (!dq?.iv || !oq?.iv || !oq.mark) continue;
-
-    const flags: string[] = ['amm_pool_depth_unknown'];
-
-    // ── Derive liquidity gating ─────────────────────────────────────────────
-    const hasBid = dq.bid != null && dq.bid > 0;
-    const hasAsk = dq.ask != null && dq.ask > 0;
-    const deriveBid = hasBid ? dq.bid : null;
-    const deriveAsk = hasAsk ? dq.ask : null;
-    const deriveMark = dq.mark ?? null;
-    const deriveMid = hasBid && hasAsk ? (dq.bid! + dq.ask!) / 2 : deriveMark;
-    if (hasBid && hasAsk) {
-      const width = dq.ask! - dq.bid!;
-      if ((dq.bidSize ?? 0) < cfg.minBookSize || (dq.askSize ?? 0) < cfg.minBookSize) {
-        flags.push('thin_book');
-      }
-      if (deriveMid != null && deriveMid > 0 && width / deriveMid > cfg.maxRelBookWidth) {
-        flags.push('wide_book');
-      }
-    } else if (hasBid || hasAsk) {
-      flags.push('one_sided');
-    } else {
-      flags.push('no_book');
-    }
-    if (dq.ts < now - cfg.staleQuoteMs) flags.push('stale');
-
-    // ── IV spread ───────────────────────────────────────────────────────────
-    const spreadVols = (dq.iv - oq.iv) * 100;
-    const spreadBps = ((dq.iv - oq.iv) / dq.iv) * 10_000;
-    const direction: SignalDirection = spreadVols >= 0 ? 'buy_olive_sell_derive' : 'buy_derive_sell_olive';
-    if (direction === 'buy_derive_sell_olive') {
-      // Olive's pool sells options; writing fresh shorts to it is an LP role.
-      flags.push('direction_limited');
-    }
-
-    // ── Time / near-expiry ──────────────────────────────────────────────────
-    const tau = yearsBetween(now, row.expiryTs);
-    const tteDays = tau * 365;
-    if (tteDays < cfg.nearExpiryDays) flags.push('near_expiry');
-
-    const spot = dq.indexPrice ?? spotByUnderlying[row.underlying] ?? dq.forward ?? null;
-
-    // ── Costs ───────────────────────────────────────────────────────────────
-    // Derive taker (docs.derive.xyz/integrators/trading/trading-fees, verified
-    // 2026-09-29): $0.50 per ORDER + min(0.03% × notional, 12.5% × premium).
-    // Notional ≈ qty × index. The $0.50 is order-level — charged once at the
-    // clip total below, not per contract.
-    // Olive (docs.olive.exchange/options/option-fees + a live fill 2026-09-29):
-    // min(2.5bps × qty × ORACLE SPOT, 10% × premium) — spot notional for BOTH
-    // kinds (the strike-based base overstated ITM put fees).
-    const feeNotional = spot ?? row.strike;
-    const deriveLegPremium =
-      direction === 'buy_olive_sell_derive' ? deriveBid ?? deriveMark : deriveAsk ?? deriveMark;
-    let deriveFee = feeNotional * (cfg.deriveTakerFeeBps / 10_000);
-    if (deriveLegPremium != null && deriveLegPremium > 0) {
-      deriveFee = Math.min(deriveFee, deriveLegPremium * 0.125);
-    }
-    const oliveFee =
-      oq.mark > 0
-        ? Math.min(
-            feeNotional * (cfg.oliveFeeNotionalBps / 10_000),
-            oq.mark * (cfg.oliveFeePremiumPct / 100),
-          )
-        : 0;
-    // Per-contract venue fees only; the Solana tx fee is per clip (one tx
-    // buys the whole size) and is charged with the order fee below.
-    const costsUsdc = deriveFee + oliveFee;
-
-    // Olive locks full collateral (call: 1 underlying, put: K USDC) for the
-    // whole tenor vs Derive's margin — the carry drag is a real cost.
-    // Modeling note (conservative by design): for buy_olive_sell_derive the
-    // ARBITRAGEUR posts no Olive collateral (the pool does); their own tied-up
-    // capital is the premium + Derive short margin. We still charge full
-    // collateral drag on both directions — understating executable-direction
-    // attractiveness rather than overstating it. Revisit if executable rows
-    // ever approach break-even on this term alone.
-    const oliveCollateral = row.kind === 'call' ? (spot ?? row.strike) : row.strike;
-    const capitalCostUsdc = oliveCollateral * cfg.capitalBorrowRateApr * tau;
-
-    // ── Profit estimate: executable prices, held-to-expiry convergence ──────
-    // Sell the rich leg at its executable price (Derive bid when Derive is
-    // rich), buy the cheap leg at its take price (Olive AMM premium / Derive ask).
-    // Mismatched legs (different strike or expiry — interpolated / offset
-    // matches) never converge at expiry, so the price difference does NOT
-    // lock in: the vol spread stays meaningful, the profit estimate does not.
-    const mismatchedLegs =
-      (row.legs.olive?.strikeOffset ?? 0) !== 0 || (row.legs.olive?.expiryOffsetDays ?? 0) !== 0;
-    if (mismatchedLegs) flags.push('mismatched_legs');
-    let entryPrice: number | null;
-    let exitPrice: number | null;
-    if (mismatchedLegs) {
-      entryPrice = null;
-      exitPrice = null;
-    } else if (direction === 'buy_olive_sell_derive') {
-      entryPrice = oq.mark;
-      exitPrice = deriveBid ?? deriveMark;
-    } else {
-      entryPrice = deriveAsk ?? deriveMark;
-      exitPrice = oq.mark;
-    }
-    const grossEdgeUsdc = entryPrice != null && exitPrice != null ? exitPrice - entryPrice : null;
-    const netEdgeUsdc = grossEdgeUsdc != null ? grossEdgeUsdc - costsUsdc : null;
-    const netAfterCapitalUsdc = netEdgeUsdc != null ? netEdgeUsdc - capitalCostUsdc : null;
-
-    // Size cap: the binding Derive touch for THIS direction (selling into
-    // the bid vs lifting the ask) against the Olive pool's per-custody
-    // capacity — calls lock 1 underlying each, puts K USDC each. Live
-    // custody balances win; the scalar AUM fallback is cruder and flagged.
-    const bookSize =
-      direction === 'buy_olive_sell_derive'
-        ? hasBid
-          ? dq.bidSize ?? 0
-          : null
-        : hasAsk
-          ? dq.askSize ?? 0
-          : null;
-    const custody = cfg.poolCustodyByAsset[row.underlying];
-    const custodyCap =
-      custody == null
-        ? null
-        : row.kind === 'call'
-          ? custody.underlyingFree
-          : custody.usdcFreeUsd != null && row.strike > 0
-            ? custody.usdcFreeUsd / row.strike
-            : null;
-    const poolLiquidityUsd = cfg.poolLiquidityUsdByAsset[row.underlying];
-    const fallbackCap =
-      poolLiquidityUsd != null && oliveCollateral > 0
-        ? Math.floor(poolLiquidityUsd / oliveCollateral)
-        : null;
-    let maxExecutableSize = mismatchedLegs ? null : bookSize;
-    if (!mismatchedLegs && bookSize != null) {
-      const capacity = custodyCap ?? fallbackCap;
-      if (capacity != null && capacity < bookSize) {
-        maxExecutableSize = capacity;
-        flags.push('pool_capacity_capped');
-        if (custodyCap == null && poolLiquidityUsd != null) {
-          flags.push('pool_capacity_estimated');
-        }
-      }
-    }
-    // Own-impact: a fill moves its custody's utilization, and the borrow curve
-    // (hence the AMM's pricing rate) is convex above ~90% — flag rows whose
-    // full execution would push past it (observed live 2026-09-29: a ~$50
-    // fill moved the ZEC short rate 30% → 69.5%). With the curve nodes in
-    // hand, go further and PRICE the movement: the expected average fill
-    // (expectedFillVwap integrates the AMM premium along the curve, 32
-    // tranches) is the honest entry — the quoted one assumes the rate stays
-    // put. Model conventions match synth.ts; guarded by requiring the model's
-    // rate-at-current-util premium to reproduce the cycle's quoted premium
-    // (≤2% deviation), else inputs are inconsistent and the model is skipped.
-    let expectedEntryUsdc: number | null = null;
-    let expectedNetAfterCapitalUsdc: number | null = null;
-    let expectedTotalNetUsdc: number | null = null;
-    if (custody != null && maxExecutableSize != null && maxExecutableSize > 0) {
-      const owned = row.kind === 'call' ? custody.underlyingOwned : custody.usdcOwnedUsd;
-      const free = row.kind === 'call' ? custody.underlyingFree : custody.usdcFreeUsd;
-      const perUnit = row.kind === 'call' ? 1 : row.strike;
-      if (owned != null && owned > 0 && free != null) {
-        const endUtil = (owned - free + maxExecutableSize * perUnit) / owned;
-        if (endUtil > 0.9) flags.push('execution_moves_rate');
-        const curve = row.kind === 'call' ? custody.tokenCurve : custody.usdcCurve;
-        if (
-          direction === 'buy_olive_sell_derive' &&
-          !mismatchedLegs &&
-          entryPrice != null &&
-          curve != null &&
-          curve.length > 0 &&
-          spot != null &&
-          oq.iv > 0 &&
-          tau > 0
-        ) {
-          const fill = expectedFillVwap({
-            kind: row.kind,
-            strike: row.strike,
-            spot,
-            vol: oq.iv,
-            tauYears: tau,
-            size: maxExecutableSize,
-            curve,
-            free,
-            owned,
-            perUnitLocked: perUnit,
-          });
-          if (fill && oq.mark > 0 && Math.abs(fill.quoteEntry - oq.mark) <= 0.02 * oq.mark) {
-            expectedEntryUsdc = fill.vwapEntry;
-            if (netAfterCapitalUsdc != null) {
-              expectedNetAfterCapitalUsdc = netAfterCapitalUsdc - (fill.vwapEntry - entryPrice);
-              expectedTotalNetUsdc =
-                expectedNetAfterCapitalUsdc * maxExecutableSize - DERIVE_TAKER_ORDER_FEE_USDC - cfg.solanaFeeUsdc;
-            }
-          }
-        }
-      }
-    }
-    // An executable-direction clip the fill model couldn't price (no custody/
-    // curve, or inconsistent inputs) only has the quote-based total, which
-    // assumes the rate stays put — mark it so headlines don't trust it.
-    if (
-      direction === 'buy_olive_sell_derive' &&
-      expectedTotalNetUsdc == null &&
-      maxExecutableSize != null &&
-      maxExecutableSize > 0 &&
-      netAfterCapitalUsdc != null
-    ) {
-      flags.push('fill_model_skipped');
-    }
-    const totalNetUsdc =
-      maxExecutableSize != null && maxExecutableSize > 0 && netAfterCapitalUsdc != null
-        ? netAfterCapitalUsdc * maxExecutableSize - DERIVE_TAKER_ORDER_FEE_USDC - cfg.solanaFeeUsdc
-        : null;
-
-    // Annualized ROI on the locked collateral — comparable across expiries.
-    const roiApyPct =
-      netAfterCapitalUsdc != null && oliveCollateral > 0 && tau > 0
-        ? (netAfterCapitalUsdc / oliveCollateral) / tau * 100
-        : null;
-
-    // ~1σ settlement basis risk: |delta|·S·σ·sqrt(30min / 1yr) per unit.
-    const delta = dq.greeks?.delta;
-    const settlementBasisUsdc =
-      typeof delta === 'number' && Number.isFinite(delta) && spot != null
-        ? Math.abs(delta) * spot * dq.iv * Math.sqrt(SETTLEMENT_TWAP_HOURS / (365 * 24))
-        : null;
-
-    // Brief §3.2 cross-check, calibrated live: Derive's MARKS are model-
-    // consistent (BS at their IV ≈ mark, verified to $0.09 RMS), so the mark
-    // repriced at Olive's vol isolates the pure vol gap (≈ vega×Δσ), while
-    // MID − MARK isolates book dislocation — where wide-book "edges" come from.
-    let syntheticCrossCheckUsdc: number | null = null;
-    let crossCheckDeviationUsdc: number | null = null;
-    let bookVsMarkUsdc: number | null = null;
-    if (deriveMid != null && deriveMark != null) {
-      bookVsMarkUsdc = deriveMid - deriveMark;
-    }
-    if (deriveMark != null && tau > 0) {
-      const forward = dq.forward ?? spot;
-      const df = dq.discountFactor ?? 1;
-      if (forward != null && forward > 0) {
-        // Informational: mark repriced at OLIVE's vol and the vega-linear
-        // residual. A large deviation here is expected whenever the vol gap
-        // is wide (second-order vol effects) — NOT a data problem, so it no
-        // longer raises the flag (it fired on 73% of rows at a 14-pt gap).
-        const reprice = bsPrice({ forward, strike: row.strike, tauYears: tau, vol: oq.iv, discountFactor: df, kind: row.kind });
-        syntheticCrossCheckUsdc = deriveMark - reprice;
-        const vega = dq.greeks?.vega;
-        if (typeof vega === 'number' && Number.isFinite(vega)) {
-          // Derive reports vega per 1 vol POINT; the IV gap is a fraction —
-          // multiply by 100 so both sides are in $ per full-vol unit.
-          const expected = vega * 100 * (dq.iv - oq.iv);
-          crossCheckDeviationUsdc = syntheticCrossCheckUsdc - expected;
-        }
-        // The actual consistency test: Derive's mark repriced at Derive's OWN
-        // quoted IV. Live audits put this at $0.06-0.21 RMS — flag only real
-        // mark/IV breakage, priced relative to the option.
-        const selfReprice = bsPrice({ forward, strike: row.strike, tauYears: tau, vol: dq.iv, discountFactor: df, kind: row.kind });
-        const markSelfBasisUsdc = deriveMark - selfReprice;
-        if (Math.abs(markSelfBasisUsdc) > Math.max(0.3, 0.05 * Math.abs(deriveMark))) {
-          flags.push('iv_mark_inconsistent');
-        }
-      }
-    }
-    // Dislocated book: the mid sits far off the model curve, so any "edge"
-    // computed from executable prices is mostly book noise. Flag when the
-    // dislocation rivals the claimed gross edge itself.
-    if (bookVsMarkUsdc != null && grossEdgeUsdc != null) {
-      if (Math.abs(bookVsMarkUsdc) > Math.max(1.0, 0.5 * Math.abs(grossEdgeUsdc))) {
-        flags.push('price_distortion');
-      }
-    }
-
-    // ── Ranking: USDC-native ────────────────────────────────────────────────
-    const executable = !flags.some((f) => NON_EXECUTABLE_FLAGS.has(f));
-    const base = totalNetUsdc ?? netAfterCapitalUsdc ?? Math.abs(spreadVols);
-    let score = base * (executable ? 1 : 0.4);
-
-    const isOpportunity = executable && Math.abs(spreadVols) >= cfg.ivSpreadThresholdVols;
-    const isProfitable = netAfterCapitalUsdc != null && netAfterCapitalUsdc > 0;
-
-    signals.push({
-      pairKey: row.pairKey,
-      underlying: row.underlying,
-      expiryDate: row.expiryDate,
-      expiryTs: row.expiryTs,
-      strike: row.strike,
-      kind: row.kind,
-      ivSpreadVols: round(spreadVols, 2),
-      ivSpreadBps: round(spreadBps, 1),
-      entryPriceUsdc: round(entryPrice, 4),
-      exitPriceUsdc: round(exitPrice, 4),
-      edgeUsdc: round(grossEdgeUsdc, 4),
-      netEdgeUsdc: round(netEdgeUsdc, 4),
-      netAfterCapitalUsdc: round(netAfterCapitalUsdc, 4),
-      costsUsdc: round(costsUsdc, 4) ?? 0,
-      capitalCostUsdc: round(capitalCostUsdc, 4) ?? 0,
-      maxExecutableSize: maxExecutableSize != null ? round(maxExecutableSize, 4) : null,
-      totalNetUsdc: round(totalNetUsdc, 2),
-      expectedEntryUsdc: round(expectedEntryUsdc, 4),
-      expectedNetAfterCapitalUsdc: round(expectedNetAfterCapitalUsdc, 4),
-      expectedTotalNetUsdc: round(expectedTotalNetUsdc, 2),
-      roiApyPct: round(roiApyPct, 2),
-      settlementBasisUsdc: round(settlementBasisUsdc, 4),
-      syntheticCrossCheckUsdc: round(syntheticCrossCheckUsdc, 4),
-      crossCheckDeviationUsdc: round(crossCheckDeviationUsdc, 4),
-      bookVsMarkUsdc: round(bookVsMarkUsdc, 4),
-      score: round(score, 2) ?? 0,
-      isOpportunity,
-      isProfitable,
-      direction,
-      flags,
-      ts: now,
+    const venues = VENUE_ORDER.filter((v) => {
+      const q = row.legs[v]?.quote;
+      return q?.iv && fees[v] && (!isAmm(v) || q.mark);
     });
+    const candidates: Signal[] = [];
+    for (const buy of venues) {
+      for (const sell of venues) {
+        if (buy === sell) continue;
+        const bq = row.legs[buy]!.quote!;
+        const sq = row.legs[sell]!.quote!;
+        // Vol-consistent direction only; a tie buys the AMM / sells the book
+        // (the original two-venue rule: spread ≥ 0 → buy Olive).
+        if (sq.iv! < bq.iv!) continue;
+        if (sq.iv === bq.iv && isAmm(sell)) continue;
+        candidates.push(evaluatePair(row, buy, sell, cfg, fees, now, spotByUnderlying));
+      }
+    }
+    if (candidates.length === 0) continue;
+    candidates.sort(comparePairs);
+    const [best, ...rest] = candidates;
+    if (rest.length > 0) best.alternatives = rest.slice(0, 3).map(toAlternative);
+    signals.push(best);
   }
 
   signals.sort(
@@ -416,4 +125,291 @@ export function computeSignals(
       b.score - a.score,
   );
   return signals;
+}
+
+function comparePairs(a: Signal, b: Signal): number {
+  const limited = (s: Signal) => (s.flags.includes('direction_limited') ? 1 : 0);
+  const blocked = (s: Signal) => (s.flags.some((f) => NON_EXECUTABLE_FLAGS.has(f)) ? 1 : 0);
+  const honest = (s: Signal) => honestTotalNetUsdc(s) ?? -Infinity;
+  return (
+    limited(a) - limited(b) ||
+    blocked(a) - blocked(b) ||
+    honest(b) - honest(a) ||
+    (b.netAfterCapitalUsdc ?? -Infinity) - (a.netAfterCapitalUsdc ?? -Infinity) ||
+    (b.ivSpreadVols ?? 0) - (a.ivSpreadVols ?? 0)
+  );
+}
+
+function toAlternative(s: Signal): PairAlternative {
+  return {
+    buyVenue: s.buyVenue!,
+    sellVenue: s.sellVenue!,
+    ivSpreadVols: s.ivSpreadVols,
+    entryPriceUsdc: s.entryPriceUsdc,
+    exitPriceUsdc: s.exitPriceUsdc,
+    netAfterCapitalUsdc: s.netAfterCapitalUsdc,
+    maxExecutableSize: s.maxExecutableSize,
+    totalNetUsdc: s.totalNetUsdc,
+    honestTotalNetUsdc: honestTotalNetUsdc(s),
+    flags: s.flags,
+  };
+}
+
+function evaluatePair(
+  row: MatchRow,
+  buy: Venue,
+  sell: Venue,
+  cfg: SignalConfig,
+  fees: Partial<Record<Venue, VenueFeeModel>>,
+  now: number,
+  spotByUnderlying: Record<string, number | null>,
+): Signal {
+  const bq = row.legs[buy]!.quote!;
+  const sq = row.legs[sell]!.quote!;
+  const pair = VENUE_ORDER.filter((v) => v === buy || v === sell);
+  const flags: string[] = [];
+  const flag = (f: string) => {
+    if (!flags.includes(f)) flags.push(f);
+  };
+  if (pair.some(isAmm)) flag('amm_pool_depth_unknown');
+
+  // ── Book-venue liquidity gating (each non-AMM leg) ──────────────────────
+  for (const v of pair) {
+    if (isAmm(v)) continue;
+    const q = row.legs[v]!.quote!;
+    const bid = positive(q.bid);
+    const ask = positive(q.ask);
+    if (bid != null && ask != null) {
+      const mid = (bid + ask) / 2;
+      if ((q.bidSize ?? 0) < cfg.minBookSize || (q.askSize ?? 0) < cfg.minBookSize) flag('thin_book');
+      if (mid > 0 && (ask - bid) / mid > cfg.maxRelBookWidth) flag('wide_book');
+    } else if (bid != null || ask != null) {
+      flag('one_sided');
+    } else {
+      flag('no_book');
+    }
+  }
+  for (const v of pair) {
+    if (!isAmm(v) && row.legs[v]!.quote!.ts < now - cfg.staleQuoteMs) flag('stale');
+  }
+
+  // ── IV spread (sell − buy: ≥ 0 by construction) ─────────────────────────
+  const spreadVols = (sq.iv! - bq.iv!) * 100;
+  const spreadBps = ((sq.iv! - bq.iv!) / sq.iv!) * 10_000;
+  if (!VENUE_SPECS[sell].canSell(row.underlying)) {
+    // e.g. Olive: writing fresh shorts to the pool is an LP role.
+    flag('direction_limited');
+  }
+
+  // ── Time / near-expiry / venue trading cutoffs ──────────────────────────
+  const tau = yearsBetween(now, row.expiryTs);
+  const tteDays = tau * 365;
+  if (tteDays < cfg.nearExpiryDays) flag('near_expiry');
+  if (pair.some((v) => row.expiryTs - now < VENUE_SPECS[v].tradingCutoffMs)) flag('trading_cutoff');
+
+  // Reference leg for spot / greeks / mark checks: the first book leg in
+  // venue order (Derive when present), else the buy leg.
+  const refVenue = pair.find((v) => !isAmm(v)) ?? buy;
+  const rq = row.legs[refVenue]!.quote!;
+  const otherQ = refVenue === buy ? sq : bq;
+  const spot = rq.indexPrice ?? spotByUnderlying[row.underlying] ?? rq.forward ?? null;
+
+  // ── Executable prices: buy at the ask (AMM: its premium), sell at the bid ─
+  const takePrice = (v: Venue, q: OptionQuote) => (isAmm(v) ? q.mark : positive(q.ask) ?? q.mark ?? null);
+  const hitPrice = (v: Venue, q: OptionQuote) => (isAmm(v) ? q.mark : positive(q.bid) ?? q.mark ?? null);
+  const buyLegPrice = takePrice(buy, bq);
+  const sellLegPrice = hitPrice(sell, sq);
+
+  // ── Costs (per contract; fixed per-order costs at the clip total) ──────
+  const feeNotional = spot ?? row.strike;
+  let costsUsdc = 0;
+  for (const v of pair) {
+    const legPrice = v === buy ? buyLegPrice : sellLegPrice;
+    costsUsdc += fees[v]!.perContract({ legPrice, notional: feeNotional, underlying: row.underlying });
+  }
+  const orderFees = (total: number) => pair.reduce((t, v) => t - fees[v]!.perOrder, total);
+
+  // Full collateral (call: 1 underlying, put: K USDC) for the whole tenor.
+  // Conservative by design: the arbitrageur's own capital is the premium +
+  // the short leg's margin, but the full-collateral drag is charged on every
+  // pair — understating attractiveness rather than overstating it.
+  const collateral = row.kind === 'call' ? (spot ?? row.strike) : row.strike;
+  const capitalCostUsdc = collateral * cfg.capitalBorrowRateApr * tau;
+
+  // ── Profit estimate: executable prices, held-to-expiry convergence ──────
+  // Mismatched legs (different strike or expiry — interpolated / offset
+  // matches) never converge at expiry: the vol spread stays meaningful, the
+  // profit estimate does not.
+  const mismatchedLegs = pair.some(
+    (v) => (row.legs[v]!.strikeOffset ?? 0) !== 0 || (row.legs[v]!.expiryOffsetDays ?? 0) !== 0,
+  );
+  if (mismatchedLegs) flag('mismatched_legs');
+  const entryPrice = mismatchedLegs ? null : buyLegPrice;
+  const exitPrice = mismatchedLegs ? null : sellLegPrice;
+  const grossEdgeUsdc = entryPrice != null && exitPrice != null ? exitPrice - entryPrice : null;
+  const netEdgeUsdc = grossEdgeUsdc != null ? grossEdgeUsdc - costsUsdc : null;
+  const netAfterCapitalUsdc = netEdgeUsdc != null ? netEdgeUsdc - capitalCostUsdc : null;
+
+  // Size cap: the binding book touch on each non-AMM leg (lifting the buy
+  // venue's ask, hitting the sell venue's bid), then Olive's pool capacity.
+  let bookSize: number | null = null;
+  let anyBookLeg = false;
+  let missingSide = false;
+  for (const v of pair) {
+    if (isAmm(v)) continue;
+    anyBookLeg = true;
+    const q = row.legs[v]!.quote!;
+    const side = v === buy ? (positive(q.ask) != null ? q.askSize ?? 0 : null) : positive(q.bid) != null ? q.bidSize ?? 0 : null;
+    if (side == null) missingSide = true;
+    else bookSize = bookSize == null ? side : Math.min(bookSize, side);
+  }
+  if (!anyBookLeg || missingSide) bookSize = null;
+
+  const custody = pair.includes('olive') ? cfg.poolCustodyByAsset[row.underlying] : undefined;
+  let maxExecutableSize = mismatchedLegs ? null : bookSize;
+  if (!mismatchedLegs && bookSize != null && pair.includes('olive')) {
+    const { cap, estimated } = oliveCapacityCap({
+      kind: row.kind,
+      strike: row.strike,
+      collateral,
+      custody,
+      poolLiquidityUsd: cfg.poolLiquidityUsdByAsset[row.underlying],
+    });
+    if (cap != null && cap < bookSize) {
+      maxExecutableSize = cap;
+      flag('pool_capacity_capped');
+      if (estimated) flag('pool_capacity_estimated');
+    }
+  }
+
+  let expectedEntryUsdc: number | null = null;
+  let expectedNetAfterCapitalUsdc: number | null = null;
+  let expectedTotalNetUsdc: number | null = null;
+  if (custody != null && maxExecutableSize != null && maxExecutableSize > 0) {
+    const impact = oliveExecutionImpact({
+      kind: row.kind,
+      strike: row.strike,
+      size: maxExecutableSize,
+      custody,
+      priceFill:
+        buy === 'olive' && !mismatchedLegs
+          ? { spot, vol: bq.iv!, tauYears: tau, quotedMark: bq.mark ?? 0, entryPrice }
+          : null,
+    });
+    if (impact.movesRate) flag('execution_moves_rate');
+    if (impact.vwapEntry != null && entryPrice != null) {
+      expectedEntryUsdc = impact.vwapEntry;
+      if (netAfterCapitalUsdc != null) {
+        expectedNetAfterCapitalUsdc = netAfterCapitalUsdc - (impact.vwapEntry - entryPrice);
+        expectedTotalNetUsdc = orderFees(expectedNetAfterCapitalUsdc * maxExecutableSize);
+      }
+    }
+  }
+  // Buying from Olive without a priced fill only has the quote-based total,
+  // which assumes the rate stays put — mark it so headlines don't trust it.
+  if (
+    buy === 'olive' &&
+    expectedTotalNetUsdc == null &&
+    maxExecutableSize != null &&
+    maxExecutableSize > 0 &&
+    netAfterCapitalUsdc != null
+  ) {
+    flag('fill_model_skipped');
+  }
+  const totalNetUsdc =
+    maxExecutableSize != null && maxExecutableSize > 0 && netAfterCapitalUsdc != null
+      ? orderFees(netAfterCapitalUsdc * maxExecutableSize)
+      : null;
+
+  // Annualized ROI on the locked collateral — comparable across expiries.
+  const roiApyPct =
+    netAfterCapitalUsdc != null && collateral > 0 && tau > 0 ? (netAfterCapitalUsdc / collateral) / tau * 100 : null;
+
+  // ~1σ settlement basis risk: |delta|·S·σ·sqrt(window / 1yr) per unit, the
+  // window being the longer of the two venues' settlement averaging windows.
+  const windowHours = Math.max(...pair.map((v) => VENUE_SPECS[v].settlementWindowHours));
+  const delta = rq.greeks?.delta;
+  const settlementBasisUsdc =
+    typeof delta === 'number' && Number.isFinite(delta) && spot != null
+      ? Math.abs(delta) * spot * rq.iv! * Math.sqrt(windowHours / (365 * 24))
+      : null;
+
+  // Brief §3.2 cross-check, calibrated live on Derive: book MARKS are model-
+  // consistent (BS at their IV ≈ mark, verified to $0.09 RMS), so the
+  // reference mark repriced at the other venue's vol isolates the pure vol
+  // gap (≈ vega×Δσ), while MID − MARK isolates book dislocation — where
+  // wide-book "edges" come from.
+  const refBid = positive(rq.bid);
+  const refAsk = positive(rq.ask);
+  const refMark = rq.mark ?? null;
+  const refMid = refBid != null && refAsk != null ? (refBid + refAsk) / 2 : refMark;
+  let syntheticCrossCheckUsdc: number | null = null;
+  let crossCheckDeviationUsdc: number | null = null;
+  const bookVsMarkUsdc = refMid != null && refMark != null ? refMid - refMark : null;
+  if (refMark != null && tau > 0) {
+    const forward = rq.forward ?? spot;
+    const df = rq.discountFactor ?? 1;
+    if (forward != null && forward > 0) {
+      // Informational: mark repriced at the OTHER venue's vol and the
+      // vega-linear residual. A large deviation is expected whenever the vol
+      // gap is wide (second-order vol effects) — NOT a data problem.
+      const reprice = bsPrice({ forward, strike: row.strike, tauYears: tau, vol: otherQ.iv!, discountFactor: df, kind: row.kind });
+      syntheticCrossCheckUsdc = refMark - reprice;
+      const vega = rq.greeks?.vega;
+      if (typeof vega === 'number' && Number.isFinite(vega)) {
+        // Vega is per 1 vol POINT; the IV gap is a fraction — × 100 so both
+        // sides are in $ per full-vol unit.
+        crossCheckDeviationUsdc = syntheticCrossCheckUsdc - vega * 100 * (rq.iv! - otherQ.iv!);
+      }
+      // The actual consistency test: the mark repriced at its OWN quoted IV.
+      // Live audits put this at $0.06-0.21 RMS — flag only real breakage.
+      const selfReprice = bsPrice({ forward, strike: row.strike, tauYears: tau, vol: rq.iv!, discountFactor: df, kind: row.kind });
+      if (Math.abs(refMark - selfReprice) > Math.max(0.3, 0.05 * Math.abs(refMark))) flag('iv_mark_inconsistent');
+    }
+  }
+  // Dislocated book: the mid sits far off the model curve, so any "edge"
+  // computed from executable prices is mostly book noise.
+  if (bookVsMarkUsdc != null && grossEdgeUsdc != null) {
+    if (Math.abs(bookVsMarkUsdc) > Math.max(1.0, 0.5 * Math.abs(grossEdgeUsdc))) flag('price_distortion');
+  }
+
+  // ── Ranking: USDC-native ────────────────────────────────────────────────
+  const executable = !flags.some((f) => NON_EXECUTABLE_FLAGS.has(f));
+  const base = totalNetUsdc ?? netAfterCapitalUsdc ?? Math.abs(spreadVols);
+  const score = base * (executable ? 1 : 0.4);
+
+  return {
+    pairKey: row.pairKey,
+    underlying: row.underlying,
+    expiryDate: row.expiryDate,
+    expiryTs: row.expiryTs,
+    strike: row.strike,
+    kind: row.kind,
+    ivSpreadVols: round(spreadVols, 2),
+    ivSpreadBps: round(spreadBps, 1),
+    entryPriceUsdc: round(entryPrice, 4),
+    exitPriceUsdc: round(exitPrice, 4),
+    edgeUsdc: round(grossEdgeUsdc, 4),
+    netEdgeUsdc: round(netEdgeUsdc, 4),
+    netAfterCapitalUsdc: round(netAfterCapitalUsdc, 4),
+    costsUsdc: round(costsUsdc, 4) ?? 0,
+    capitalCostUsdc: round(capitalCostUsdc, 4) ?? 0,
+    maxExecutableSize: maxExecutableSize != null ? round(maxExecutableSize, 4) : null,
+    totalNetUsdc: round(totalNetUsdc, 2),
+    expectedEntryUsdc: round(expectedEntryUsdc, 4),
+    expectedNetAfterCapitalUsdc: round(expectedNetAfterCapitalUsdc, 4),
+    expectedTotalNetUsdc: round(expectedTotalNetUsdc, 2),
+    roiApyPct: round(roiApyPct, 2),
+    settlementBasisUsdc: round(settlementBasisUsdc, 4),
+    syntheticCrossCheckUsdc: round(syntheticCrossCheckUsdc, 4),
+    crossCheckDeviationUsdc: round(crossCheckDeviationUsdc, 4),
+    bookVsMarkUsdc: round(bookVsMarkUsdc, 4),
+    score: round(score, 2) ?? 0,
+    isOpportunity: executable && Math.abs(spreadVols) >= cfg.ivSpreadThresholdVols,
+    isProfitable: netAfterCapitalUsdc != null && netAfterCapitalUsdc > 0,
+    buyVenue: buy,
+    sellVenue: sell,
+    flags,
+    ts: now,
+  };
 }

@@ -136,7 +136,7 @@ async function pickTarget(): Promise<TargetPick> {
   const res = await fetch(`${APP}/api/opportunities`);
   if (!res.ok) throw new Error(`/api/opportunities unreachable (${res.status}) — is the server running?`);
   const { signals } = (await res.json()) as { signals: any[] };
-  const executable = signals.filter((s) => s.direction === 'buy_olive_sell_derive');
+  const executable = signals.filter((s) => s.buyVenue === 'olive' && s.sellVenue === 'derive');
   const pick = executable[0] ?? [...signals].sort((a, b) => b.score - a.score)[0];
   if (!pick) throw new Error('no opportunities to verify (and no handcheck-target.json)');
   return {
@@ -292,7 +292,8 @@ async function main() {
   };
   console.log(`hand-check of ${target.pairKey} (tau=${tau.toFixed(6)}y, Derive index=${index}, server synth spot=${serverSynthSpot}, stork=${market.spot})`);
   console.log(`Derive IV: mine(fresh)=${(deriveIv * 100).toFixed(2)}% theirs(cycle)=${signal.ivSpreadVols != null ? (((signal.ivSpreadVols / 100) + market.vol) * 100).toFixed(2) : '?'}% — quoted IVs drift between the cycle and this check`);
-  console.log(`direction: mine=${direction} theirs=${signal.direction} ${direction === signal.direction ? '✓' : '✗'}`);
+  const theirs = `buy_${signal.buyVenue}_sell_${signal.sellVenue}`;
+  console.log(`direction: mine=${direction} theirs=${theirs} ${direction === theirs ? '✓' : '✗'}`);
   // 0.5 vol pts: Derive's quoted IV on the wings can jump a few tenths
   // between the server's cycle and this fetch; the point is catching gross
   // pipeline errors (wrong vol source / scale), not tick-level drift.

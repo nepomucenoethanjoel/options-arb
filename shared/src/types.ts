@@ -143,7 +143,19 @@ export interface MatchRowLite {
   unmatchedReason?: string;
 }
 
-export type SignalDirection = 'buy_olive_sell_derive' | 'buy_derive_sell_olive';
+/** A runner-up venue pair for the same contract (compact). */
+export interface PairAlternative {
+  buyVenue: Venue;
+  sellVenue: Venue;
+  ivSpreadVols: number | null;
+  entryPriceUsdc: number | null;
+  exitPriceUsdc: number | null;
+  netAfterCapitalUsdc: number | null;
+  maxExecutableSize: number | null;
+  totalNetUsdc: number | null;
+  honestTotalNetUsdc: number | null;
+  flags: string[];
+}
 
 export interface Signal {
   pairKey: string;
@@ -152,9 +164,9 @@ export interface Signal {
   expiryTs: number;
   strike: number;
   kind: OptionKind;
-  /** Derive IV − Olive model vol, in vol points (3.5 = 3.5%). */
+  /** Sell-venue IV − buy-venue IV, in vol points (3.5 = 3.5%); ≥ 0. */
   ivSpreadVols: number | null;
-  /** Relative spread vs Derive IV, in bps. */
+  /** Relative spread vs the sell venue's IV, in bps. */
   ivSpreadBps: number | null;
   /** Executable entry price (cheap venue, what you pay) per unit, USDC. */
   entryPriceUsdc: number | null;
@@ -166,14 +178,15 @@ export interface Signal {
   edgeUsdc: number | null;
   /** Gross edge minus round-trip fees/gas per unit, USDC. */
   netEdgeUsdc: number | null;
-  /** Net edge minus Olive collateral opportunity cost per unit, USDC. */
+  /** Net edge minus full-collateral opportunity cost per unit, USDC. */
   netAfterCapitalUsdc: number | null;
   /** Round-trip costs (fees + gas) per unit, USDC. */
   costsUsdc: number;
-  /** Opportunity cost of Olive's full collateral lock, USDC per unit. */
+  /** Opportunity cost of a full collateral lock, USDC per unit (conservative). */
   capitalCostUsdc: number;
-  /** Executable size at the Derive touch (min of bid/ask size); the Olive
-   * AMM quotes any size but its depth is unknown (flagged). */
+  /** Executable size: the binding book touch on each book leg (buy venue's
+   * ask, sell venue's bid), capped by Olive pool capacity when Olive is a
+   * leg (AMM depth beyond collateral is unknown — flagged). */
   maxExecutableSize: number | null;
   /** netAfterCapitalUsdc × maxExecutableSize — size-capped total estimate. */
   totalNetUsdc: number | null;
@@ -188,15 +201,15 @@ export interface Signal {
   expectedTotalNetUsdc: number | null;
   /** Net-after-capital ROI on Olive's locked collateral, annualized %. */
   roiApyPct: number | null;
-  /** ~1σ settlement basis risk (Derive 30-min TWAP vs Olive Stork print) per unit, USDC. A risk figure, not a cost. */
+  /** ~1σ settlement basis risk between the two venues' settlement prices, per unit, USDC. A risk figure, not a cost. */
   settlementBasisUsdc: number | null;
-  /** Derive MARK minus the Derive leg repriced at Olive's vol — the pure
-   * vol-gap measure (their marks are model-consistent; verified live). */
+  /** Reference book leg's MARK minus that leg repriced at the other venue's
+   * vol — the pure vol-gap measure (Derive marks are model-consistent; verified live). */
   syntheticCrossCheckUsdc: number | null;
   /** Cross-check minus its vega×Δσ expectation — large |values| flag
    * price distortion (stale/wide/deep-ITM books) rather than vol mispricing. */
   crossCheckDeviationUsdc: number | null;
-  /** Derive quoted MID minus Derive MARK — book dislocation from the model
+  /** Reference book leg's MID minus its MARK — book dislocation from the model
    * curve. Large values mean the displayed edge is book noise, not vol mispricing. */
   bookVsMarkUsdc: number | null;
   /** USDC-native ranking score: size-capped net when size is known, else net per unit. */
@@ -204,7 +217,12 @@ export interface Signal {
   isOpportunity: boolean;
   /** True when netAfterCapitalUsdc > 0 — the profitability estimate. */
   isProfitable: boolean;
-  direction: SignalDirection | null;
+  /** Venue you buy on (pay its ask / AMM premium). */
+  buyVenue: Venue | null;
+  /** Venue you sell on (hit its bid). `direction_limited` when users can't short there. */
+  sellVenue: Venue | null;
+  /** Runner-up vol-consistent venue pairs for this contract, best first. */
+  alternatives?: PairAlternative[];
   flags: string[];
   ts: number;
 }

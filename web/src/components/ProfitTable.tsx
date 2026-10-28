@@ -7,7 +7,8 @@ import {
   useReactTable,
   type SortingState,
 } from '@tanstack/react-table';
-import { isHeadlineProfitable, type MatchRowLite, type Signal } from '@options-arb/shared';
+import { isHeadlineProfitable, isTwoLegExecutable, type MatchRowLite, type Signal } from '@options-arb/shared';
+import { directionLabel } from '../venues';
 import { daysTo, expiryLabel } from '../format';
 
 const col = createColumnHelper<MatchRowLite & { signal?: Signal }>();
@@ -24,10 +25,10 @@ export function rowClass(row: { signal?: Signal }): 'profitable' | 'opportunity'
 }
 
 function DirectionBadge({ signal }: { signal?: Signal }) {
-  if (!signal?.direction) return <span className="muted">–</span>;
-  const exec = signal.direction === 'buy_olive_sell_derive';
+  if (!signal?.buyVenue || !signal.sellVenue) return <span className="muted">–</span>;
+  const exec = isTwoLegExecutable(signal);
   return (
-    <span className={exec ? 'chip ok' : 'chip warn'} title={exec ? 'Buy on Olive AMM, sell on Derive — both legs executable' : 'Requires writing to the Olive pool (LP-only) — not executable as a user'}>
+    <span className={exec ? 'chip ok' : 'chip warn'} title={exec ? `${directionLabel(signal)} — both legs executable` : `${directionLabel(signal)} — shorting there is an LP role, not executable as a user`}>
       {exec ? '2-LEG' : 'LP-ONLY'}
     </span>
   );

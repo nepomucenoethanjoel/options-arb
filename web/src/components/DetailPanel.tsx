@@ -13,6 +13,7 @@ import {
 import type { MatchRow, Signal } from '@options-arb/shared';
 import { fetchHistory, fetchPair, type HistoryResponse } from '../api';
 import { daysTo, expiryLabel, num, pairLabel, pct, usd } from '../format';
+import { directionLabel, venueLabel } from '../venues';
 
 export function DetailPanel({
   pairKey,
@@ -103,7 +104,7 @@ export function DetailPanel({
           <>
             <h3>Profit estimate — held to expiry</h3>
             <div className="kv-grid">
-              <div><span className="k">Direction</span><span className="v small">{signal.direction ?? '–'}{signal.direction === 'buy_derive_sell_olive' ? ' (writing to the Olive pool is an LP role)' : ''}</span></div>
+              <div><span className="k">Direction</span><span className="v small">{directionLabel(signal)}{signal.flags.includes('direction_limited') ? ` (shorting on ${venueLabel(signal.sellVenue)} is an LP role)` : ''}</span></div>
               <div><span className="k">Entry (pay)</span><span className="v mono">{usd(signal.entryPriceUsdc)}</span></div>
               <div><span className="k">Exit (receive)</span><span className="v mono">{usd(signal.exitPriceUsdc)}</span></div>
               <div><span className="k">Gross edge</span><span className="v mono">{usd(signal.edgeUsdc)}</span></div>

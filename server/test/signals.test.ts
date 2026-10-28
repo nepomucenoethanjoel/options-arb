@@ -127,7 +127,7 @@ function row(
 describe('computeSignals — profit estimates', () => {
   it('prices the Derive sell side at the bid (conservative executable)', () => {
     const [s] = computeSignals([row(deriveQuote(), oliveQuote())], cfg, NOW);
-    expect(s.direction).toBe('buy_olive_sell_derive');
+    expect([s.buyVenue, s.sellVenue]).toEqual(['olive', 'derive']);
     expect(s.entryPriceUsdc).toBe(70); // Olive AMM premium
     expect(s.exitPriceUsdc).toBe(79); // Derive BID, not mid (80)
     expect(s.edgeUsdc).toBeCloseTo(9, 6);
@@ -162,18 +162,18 @@ describe('computeSignals — profit estimates', () => {
   });
 
   it('sizes by the direction-relevant book side, not the min of both', () => {
-    // Derive richer (iv 0.6 > 0.55) → buy_olive_sell_derive → exit into the
+    // Derive richer (iv 0.6 > 0.55) → buy Olive / sell Derive → exit into the
     // BID: 300 contracts available there; the 3-lot ask must not cap it.
     const [sellIntoBid] = computeSignals([row(deriveQuote({ bidSize: 300, askSize: 3 }), oliveQuote())], cfg, NOW);
-    expect(sellIntoBid.direction).toBe('buy_olive_sell_derive');
+    expect([sellIntoBid.buyVenue, sellIntoBid.sellVenue]).toEqual(['olive', 'derive']);
     expect(sellIntoBid.maxExecutableSize).toBe(300);
-    // Olive richer → buy_derive_sell_olive → entry lifts the ASK: 3 lots.
+    // Olive richer → buy Derive / sell Olive → entry lifts the ASK: 3 lots.
     const [liftAsk] = computeSignals(
       [row(deriveQuote({ bidSize: 300, askSize: 3, iv: 0.5 }), oliveQuote(70, 0.55))],
       cfg,
       NOW,
     );
-    expect(liftAsk.direction).toBe('buy_derive_sell_olive');
+    expect([liftAsk.buyVenue, liftAsk.sellVenue]).toEqual(['derive', 'olive']);
     expect(liftAsk.maxExecutableSize).toBe(3);
   });
 
@@ -308,7 +308,7 @@ describe('computeSignals — profit estimates', () => {
 
   it('uses the ask when Derive is the cheap leg', () => {
     const [s] = computeSignals([row(deriveQuote({ iv: 0.5 }), oliveQuote(75, 0.55))], cfg, NOW);
-    expect(s.direction).toBe('buy_derive_sell_olive');
+    expect([s.buyVenue, s.sellVenue]).toEqual(['derive', 'olive']);
     expect(s.flags).toContain('direction_limited');
     expect(s.entryPriceUsdc).toBe(81); // Derive ask
     expect(s.exitPriceUsdc).toBe(75); // Olive AMM premium
@@ -386,7 +386,7 @@ describe('isPersistWorthy — 1/min burst-persistence gate', () => {
     maxExecutableSize: 10, totalNetUsdc: 5, roiApyPct: 10, settlementBasisUsdc: 0.1,
     expectedEntryUsdc: null, expectedNetAfterCapitalUsdc: null, expectedTotalNetUsdc: null,
     syntheticCrossCheckUsdc: 0, crossCheckDeviationUsdc: 0, bookVsMarkUsdc: 0, score: 5,
-    isOpportunity: true, isProfitable: true, direction: 'buy_olive_sell_derive', flags: [], ts: 0,
+    isOpportunity: true, isProfitable: true, buyVenue: 'olive', sellVenue: 'derive', flags: [], ts: 0,
     ...overrides,
   });
 
@@ -397,7 +397,7 @@ describe('isPersistWorthy — 1/min burst-persistence gate', () => {
   });
 
   it('drops LP-only directions and price-distorted books to the 10-min floor', () => {
-    expect(isPersistWorthy(sig({ direction: 'buy_derive_sell_olive', flags: ['direction_limited'] }))).toBe(false);
+    expect(isPersistWorthy(sig({ buyVenue: 'derive', sellVenue: 'olive', flags: ['direction_limited'] }))).toBe(false);
     expect(isPersistWorthy(sig({ flags: ['price_distortion'] }))).toBe(false);
   });
 
@@ -416,7 +416,7 @@ describe('computeSignals — mismatched-legs guard', () => {
     r.legs.olive!.strikeOffset = 10; // interpolated match, e.g. 2910 vs 2900
     const [s] = computeSignals([r], cfg, NOW);
     expect(s.ivSpreadVols).toBeCloseTo(5, 5);
-    expect(s.direction).toBe('buy_olive_sell_derive');
+    expect([s.buyVenue, s.sellVenue]).toEqual(['olive', 'derive']);
     expect(s.flags).toContain('mismatched_legs');
     expect(s.entryPriceUsdc).toBeNull();
     expect(s.exitPriceUsdc).toBeNull();
@@ -571,8 +571,86 @@ describe('marginal-fill pricing — expected VWAP when the fill moves the rate (
 
   it('does not model LP-only directions (the user never pays the AMM premium)', () => {
     const [s] = computeSignals([row(deriveQuote({ bidSize: 20, askSize: 20, iv: 0.5 }), oliveQuote(quote, 0.55))], custody, NOW);
-    expect(s.direction).toBe('buy_derive_sell_olive');
+    expect([s.buyVenue, s.sellVenue]).toEqual(['derive', 'olive']);
     expect(s.expectedEntryUsdc).toBeNull();
     expect(s.flags).not.toContain('fill_model_skipped');
+  });
+});
+
+describe('computeSignals — N venues (best vol-consistent pair per contract)', () => {
+  // Flat test fee for a second book venue: $0.10/contract, $0 per order.
+  const coincallFees = { coincall: { perContract: () => 0.1, perOrder: 0 } };
+  const cfgN = { ...cfg, extraFeeModels: coincallFees };
+  const coincallQuote = (overrides: Partial<OptionQuote> = {}): OptionQuote => ({
+    ...deriveQuote(),
+    venue: 'coincall',
+    instrumentId: 'ETHUSD-30OCT26-2900.0-C',
+    bid: 74,
+    bidSize: 7,
+    ask: 76,
+    askSize: 4,
+    mark: 75,
+    iv: 0.58,
+    source: 'coincall:test',
+    ...overrides,
+  });
+  const rowN = (legs: Partial<Record<'derive' | 'olive' | 'coincall', OptionQuote>>, expiryTs = NOW + 30 * 86_400_000): MatchRow => ({
+    ...row(null, null, expiryTs),
+    legs: Object.fromEntries(
+      Object.entries(legs).map(([v, q]) => [v, { venue: v as 'derive', instrumentId: q!.instrumentId, quote: q! }]),
+    ),
+  });
+
+  it('prices a book-vs-book pair: ask on the buy venue, bid on the sell venue, both fee models', () => {
+    const [s] = computeSignals([rowN({ derive: deriveQuote(), coincall: coincallQuote() })], cfgN, NOW);
+    expect([s.buyVenue, s.sellVenue]).toEqual(['coincall', 'derive']);
+    expect(s.entryPriceUsdc).toBe(76); // coincall ASK
+    expect(s.exitPriceUsdc).toBe(79); // derive BID
+    expect(s.ivSpreadVols).toBeCloseTo(2, 5); // 0.60 − 0.58
+    const deriveFee = Math.min(3000 * 0.0003, 79 * 0.125);
+    expect(s.costsUsdc).toBeCloseTo(deriveFee + 0.1, 4);
+    expect(s.maxExecutableSize).toBe(4); // min(coincall ask 4, derive bid 5)
+    expect(s.flags).not.toContain('amm_pool_depth_unknown');
+    expect(s.totalNetUsdc).toBeCloseTo(s.netAfterCapitalUsdc! * 4 - 0.5, 1); // Derive $0.50 order fee, coincall none
+  });
+
+  it('chooses the best pair across three venues and keeps the runners-up', () => {
+    const [s] = computeSignals(
+      [rowN({ derive: deriveQuote(), olive: oliveQuote(70, 0.55), coincall: coincallQuote() })],
+      cfgN,
+      NOW,
+    );
+    // Vol-consistent candidates: olive→coincall, olive→derive, coincall→derive.
+    const all = [[s.buyVenue, s.sellVenue], ...(s.alternatives ?? []).map((a) => [a.buyVenue, a.sellVenue])];
+    expect(all).toHaveLength(3);
+    expect(all).toContainEqual(['olive', 'derive']);
+    expect(all).toContainEqual(['olive', 'coincall']);
+    expect(all).toContainEqual(['coincall', 'derive']);
+    // Ranked by honest total, best first.
+    const totals = [s.totalNetUsdc!, ...s.alternatives!.map((a) => a.honestTotalNetUsdc!)];
+    expect([...totals].sort((a, b) => b - a)).toEqual(totals);
+  });
+
+  it('prefers a pair users can execute over an LP-only pair with a bigger edge', () => {
+    // Olive richest: selling there is LP-only; coincall→derive is executable.
+    const [s] = computeSignals(
+      [rowN({ derive: deriveQuote({ iv: 0.6 }), olive: oliveQuote(95, 0.7), coincall: coincallQuote() })],
+      cfgN,
+      NOW,
+    );
+    expect([s.buyVenue, s.sellVenue]).toEqual(['coincall', 'derive']);
+    expect(s.flags).not.toContain('direction_limited');
+    expect(s.alternatives?.some((a) => a.sellVenue === 'olive' && a.flags.includes('direction_limited'))).toBe(true);
+  });
+
+  it('marks quotes inside a venue trading cutoff non-executable (Coincall halts 15 min before expiry)', () => {
+    const [s] = computeSignals([rowN({ derive: deriveQuote(), coincall: coincallQuote() }, NOW + 10 * 60_000)], cfgN, NOW);
+    expect(s.flags).toContain('trading_cutoff');
+    expect(s.isOpportunity).toBe(false);
+  });
+
+  it('applies book-quality flags to every book leg', () => {
+    const [s] = computeSignals([rowN({ derive: deriveQuote(), coincall: coincallQuote({ bid: null }) })], cfgN, NOW);
+    expect(s.flags).toContain('one_sided');
   });
 });

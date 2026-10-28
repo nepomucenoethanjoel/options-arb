@@ -6,7 +6,7 @@ import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 import type WebSocket from 'ws';
 import Fastify, { type FastifyInstance } from 'fastify';
-import { honestTotalNetUsdc, isHeadlineProfitable, type Signal, type SignalKpis, type VenueHealthSnapshot } from '@options-arb/shared';
+import { honestTotalNetUsdc, isHeadlineProfitable, isTwoLegExecutable, type Signal, type SignalKpis, type VenueHealthSnapshot } from '@options-arb/shared';
 import type { AppConfig } from '../config';
 import type { Orchestrator } from '../scheduler';
 import type { Storage } from '../storage';
@@ -78,11 +78,11 @@ export function buildKpis(signals: Signal[]): SignalKpis {
   const profitable = signals
     .filter(isHeadlineProfitable)
     .sort((a, b) => honestTotal(b) - honestTotal(a));
-  const executable = profitable.filter((s) => s.direction === 'buy_olive_sell_derive');
+  const executable = profitable.filter(isTwoLegExecutable);
   const closest = signals
     .filter(
       (s) =>
-        s.direction === 'buy_olive_sell_derive' &&
+        isTwoLegExecutable(s) &&
         !s.flags.includes('price_distortion') &&
         s.netAfterCapitalUsdc != null &&
         !s.isProfitable,

@@ -1,4 +1,5 @@
-import { honestTotalNetUsdc, type Signal } from '@options-arb/shared';
+import { honestTotalNetUsdc, isTwoLegExecutable, type Signal } from '@options-arb/shared';
+import { directionLabel } from '../venues';
 import { fmtSize, pairLabel, usd } from '../format';
 
 /** Top profitable clips — TOTAL $ is the headline, one line of context. */
@@ -19,7 +20,7 @@ export function TopClips({
   return (
     <div className="feed">
       {clips.map((s) => {
-        const exec = s.direction === 'buy_olive_sell_derive';
+        const exec = isTwoLegExecutable(s);
         return (
           <button key={s.pairKey} className="clip-card" onClick={() => onSelect(s.pairKey)}>
             <div className={`clip-total ${exec ? 'pos' : 'muted-clip'}`}>{exec ? usd(honestTotalNetUsdc(s), 0) : `${usd(honestTotalNetUsdc(s), 0)} ⚠`}</div>
@@ -27,7 +28,7 @@ export function TopClips({
             <div className="opp-meta">
               {usd(s.netAfterCapitalUsdc)}/ctr × {fmtSize(s.maxExecutableSize)} · APY {s.roiApyPct != null ? `${s.roiApyPct > 0 ? '+' : ''}${s.roiApyPct.toFixed(0)}%` : '–'}
             </div>
-            <div className={`opp-dir ${exec ? '' : 'warn'}`}>{exec ? 'buy Olive · sell Derive' : 'LP-only direction ⚠'}</div>
+            <div className={`opp-dir ${exec ? '' : 'warn'}`}>{exec ? directionLabel(s) : `${directionLabel(s)} · LP-only ⚠`}</div>
           </button>
         );
       })}

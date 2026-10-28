@@ -1,4 +1,4 @@
-import { honestTotalNetUsdc, type Signal } from '@options-arb/shared';
+import { honestTotalNetUsdc, isTwoLegExecutable, type Signal } from '@options-arb/shared';
 import type { AppConfig } from './config';
 import { fetchWithTimeout } from './util';
 
@@ -35,7 +35,7 @@ export class Alerter {
     const sends: Array<Promise<void>> = [];
     for (const s of signals) {
       if (!s.isOpportunity) continue;
-      if (this.cfg.alertsExecutableOnly && s.direction !== 'buy_olive_sell_derive') continue;
+      if (this.cfg.alertsExecutableOnly && !isTwoLegExecutable(s)) continue;
       if (s.flags.includes('price_distortion')) continue;
       const honest = honestTotalNetUsdc(s) ?? 0;
       if (this.cfg.alertMinTotalUsdc > 0 && honest < this.cfg.alertMinTotalUsdc) continue;
@@ -46,7 +46,7 @@ export class Alerter {
           ? ` (fill model: ${s.expectedTotalNetUsdc.toFixed(2)} after rate impact)`
           : '';
       const text = [
-        `🎯 ${s.pairKey}`,
+        `🎯 ${s.pairKey} — buy ${s.buyVenue} · sell ${s.sellVenue}`,
         `spread ${s.ivSpreadVols} vol pts (${s.ivSpreadBps} bps) · ${s.kind.toUpperCase()}`,
         `net ${s.netAfterCapitalUsdc} USDC/ctr · size ${s.maxExecutableSize} · APY ${s.roiApyPct}%`,
         `total ${s.totalNetUsdc} USDC${expectedNote}`,

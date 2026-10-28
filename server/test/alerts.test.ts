@@ -13,7 +13,7 @@ function sig(overrides: Partial<Signal> = {}): Signal {
     expectedEntryUsdc: 95, expectedNetAfterCapitalUsdc: 0.2, expectedTotalNetUsdc: -0.4,
     settlementBasisUsdc: 5.2, syntheticCrossCheckUsdc: 26, crossCheckDeviationUsdc: -0.6,
     bookVsMarkUsdc: 10.4, score: 0.98, isOpportunity: true, isProfitable: true,
-    direction: 'buy_olive_sell_derive', flags: ['amm_pool_depth_unknown'], ts: 0,
+    buyVenue: 'olive', sellVenue: 'derive', flags: ['amm_pool_depth_unknown'], ts: 0,
     ...overrides,
   };
 }
@@ -121,7 +121,7 @@ describe('Alerter — transports and gating', () => {
     const alerter = new Alerter({ ...base, telegramBotToken: 'T0K', telegramChatId: '1' });
     await alerter.process([
       sig({ pairKey: 'X1', isOpportunity: false }),
-      sig({ pairKey: 'X2', direction: 'buy_derive_sell_olive' }),
+      sig({ pairKey: 'X2', buyVenue: 'derive', sellVenue: 'olive', flags: ['direction_limited'] }),
       sig({ pairKey: 'X3', flags: ['price_distortion'] }),
     ]);
     expect(fetchMock.mock.calls).toHaveLength(0);
