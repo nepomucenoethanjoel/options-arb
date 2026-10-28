@@ -93,8 +93,8 @@ export function computeSignals(
   const signals: Signal[] = [];
 
   for (const row of rows) {
-    const dq: OptionQuote | null = row.derive.quote;
-    const oq: OptionQuote | null = row.olive.quote;
+    const dq: OptionQuote | null = row.legs.derive?.quote ?? null;
+    const oq: OptionQuote | null = row.legs.olive?.quote ?? null;
     if (!dq?.iv || !oq?.iv || !oq.mark) continue;
 
     const flags: string[] = ['amm_pool_depth_unknown'];
@@ -181,7 +181,7 @@ export function computeSignals(
     // matches) never converge at expiry, so the price difference does NOT
     // lock in: the vol spread stays meaningful, the profit estimate does not.
     const mismatchedLegs =
-      (row.olive.strikeOffset ?? 0) !== 0 || (row.olive.expiryOffsetDays ?? 0) !== 0;
+      (row.legs.olive?.strikeOffset ?? 0) !== 0 || (row.legs.olive?.expiryOffsetDays ?? 0) !== 0;
     if (mismatchedLegs) flags.push('mismatched_legs');
     let entryPrice: number | null;
     let exitPrice: number | null;

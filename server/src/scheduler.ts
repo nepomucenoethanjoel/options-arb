@@ -25,12 +25,12 @@ export function toLiteRows(rows: MatchRow[]): MatchRowLite[] {
     strike: r.strike,
     kind: r.kind,
     matchType: r.matchType,
-    deriveIv: r.derive.quote?.iv ?? null,
-    oliveIv: r.olive.quote?.iv ?? null,
-    deriveBid: r.derive.quote?.bid ?? null,
-    deriveAsk: r.derive.quote?.ask ?? null,
-    olivePremium: r.olive.quote?.mark ?? null,
-    note: r.olive.note,
+    deriveIv: r.legs.derive?.quote?.iv ?? null,
+    oliveIv: r.legs.olive?.quote?.iv ?? null,
+    deriveBid: r.legs.derive?.quote?.bid ?? null,
+    deriveAsk: r.legs.derive?.quote?.ask ?? null,
+    olivePremium: r.legs.olive?.quote?.mark ?? null,
+    note: r.legs.olive?.note,
     unmatchedReason: r.unmatchedReason,
   }));
 }
@@ -265,7 +265,7 @@ export class Orchestrator extends EventEmitter {
         const persistInteresting = persistAll || now - this.lastInterestingPersistMs >= PERSIST_INTERESTING_INTERVAL_MS;
         if (persistInteresting) this.lastInterestingPersistMs = now;
         const ivsByPair = new Map(
-          allRows.map((r) => [r.pairKey, { d: r.derive.quote?.iv ?? null, o: r.olive.quote?.iv ?? null }]),
+          allRows.map((r) => [r.pairKey, { d: r.legs.derive?.quote?.iv ?? null, o: r.legs.olive?.quote?.iv ?? null }]),
         );
         const toRecord = (s: Signal) => ({
           ts: s.ts,
@@ -417,14 +417,17 @@ export class Orchestrator extends EventEmitter {
     const matched = matchChain({
       now,
       underlying,
-      deriveInstruments: instruments.filter((i) => limited.includes(i.expiryDate)),
-      deriveQuotes: quotes,
-      oliveQuoteProvider: (strike, expiryTs, kind) =>
-        this.olive.getAmmQuote(underlying, strike, expiryTs, kind, now, oliveState),
+      chains: [{ venue: 'derive', instruments: instruments.filter((i) => limited.includes(i.expiryDate)), quotes }],
+      synthesizers: [
+        {
+          venue: 'olive',
+          maxTenorMs: this.cfg.oliveMaxTenorDays * 86_400_000,
+          quote: (strike, expiryTs, kind) => this.olive.getAmmQuote(underlying, strike, expiryTs, kind, now, oliveState),
+        },
+      ],
       config: {
         expiryToleranceMs: this.cfg.matchExpiryToleranceDays * 86_400_000,
         maxStrikeRelDist: this.cfg.matchMaxStrikeRelDist,
-        oliveMaxTenorMs: this.cfg.oliveMaxTenorDays * 86_400_000,
       },
     });
     rows.push(...matched);

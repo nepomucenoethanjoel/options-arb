@@ -73,8 +73,8 @@ export function DetailPanel({
     oliveIv: p.oliveIv != null ? +(p.oliveIv * 100).toFixed(2) : null,
   }));
 
-  const dq = row?.derive.quote ?? null;
-  const oq = row?.olive.quote ?? null;
+  const dq = row?.legs.derive?.quote ?? null;
+  const oq = row?.legs.olive?.quote ?? null;
 
   return (
     <div className="drawer-backdrop" onClick={onClose}>
@@ -91,8 +91,8 @@ export function DetailPanel({
           <div><span className="k">Tenor</span><span className="v mono">{row ? daysTo(row.expiryTs) : '–'} → {row ? expiryLabel(row.expiryDate) : ''}</span></div>
           <div><span className="k">Derive bid/ask</span><span className="v mono">{dq?.bid?.toFixed(1) ?? '–'} / {dq?.ask?.toFixed(1) ?? '–'}</span></div>
           <div><span className="k">Olive premium (AMM)</span><span className="v mono">{usd(oq?.mark)}</span></div>
-          {row?.olive.note && (
-            <div className="kv-wide"><span className="k">Olive leg</span><span className="v small">{row.olive.note}</span></div>
+          {row?.legs.olive?.note && (
+            <div className="kv-wide"><span className="k">Olive leg</span><span className="v small">{row.legs.olive.note}</span></div>
           )}
           {row?.matchType === 'unmatched_no_counterpart' && row.unmatchedReason && (
             <div className="kv-wide"><span className="k">Unmatched</span><span className="v small">{row.unmatchedReason}</span></div>

@@ -215,7 +215,7 @@ async function main() {
   if (!pairRes.ok) throw new Error(`/api/pair unreachable (${pairRes.status})`);
   const { row, signal } = (await pairRes.json()) as { row: any; signal: any };
   if (!signal) throw new Error(`no live signal for ${target.pairKey} in the current cycle`);
-  const serverSynthSpot = n(row?.olive?.quote?.indexPrice) ?? market.spot;
+  const serverSynthSpot = n(row?.legs?.olive?.quote?.indexPrice) ?? market.spot;
 
   // ── Independent recomputation (engine semantics, live inputs) ────────────
   const expiryTs = Date.UTC(
@@ -280,9 +280,9 @@ async function main() {
   const total = size != null && size > 0 && netAfterCapital != null ? netAfterCapital * size - 0.5 - cfg.solanaFeeUsdc : null; // $0.50 Derive order fee + one Solana tx
   const apy = netAfterCapital / collateral / tau * 100;
   const basis = Math.abs(delta) * spot * deriveIv * Math.sqrt(0.5 / (365 * 24));
-  // Cross-check: reprice at the CYCLE's olive vol (row.olive.quote.iv) so the
+  // Cross-check: reprice at the CYCLE's olive vol (row.legs.olive.quote.iv) so the
   // only residual is Derive-mark drift between the cycle and this fetch.
-  const xchkVol = n(row?.olive?.quote?.iv) ?? market.vol;
+  const xchkVol = n(row?.legs?.olive?.quote?.iv) ?? market.vol;
   const xchk = deriveMark - bsPrice({ forward, strike: target.strike, tauYears: tau, vol: xchkVol, discountFactor: df, kind: target.kind });
 
   const cmp = (label: string, mine: number | null, theirs: number | null, tol = 0.02) => {

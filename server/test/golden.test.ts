@@ -17,11 +17,24 @@ interface GoldenCase {
   deriveInstruments: OptionInstrument[];
   deriveQuotes: OptionQuote[];
   ammCalls: Array<{ strike: number; expiryTs: number; kind: 'call' | 'put'; result: AmmQuoteResult }>;
-  matchConfig: MatchConfig;
+  /** Recorded with the pre-refactor config shape (oliveMaxTenorMs inside). */
+  matchConfig: MatchConfig & { oliveMaxTenorMs?: number };
+  oliveMaxTenorMs?: number;
   signalConfig: SignalConfig;
   spots: Record<string, number | null>;
-  rows: MatchRow[];
+  /** Legacy row shape (fixed derive/olive legs) — compared via toLegacyRow. */
+  rows: Array<Record<string, unknown>>;
   signals: Signal[];
+}
+
+/** Project a venue-keyed row onto the recorded two-leg shape. */
+function toLegacyRow(r: MatchRow): Record<string, unknown> {
+  const { legs, ...rest } = r;
+  return {
+    ...rest,
+    derive: legs.derive ?? { venue: 'derive', instrumentId: null, quote: null },
+    olive: legs.olive ?? { venue: 'olive', instrumentId: null, quote: null },
+  };
 }
 
 const golden = JSON.parse(
@@ -35,14 +48,19 @@ function replay(c: GoldenCase): { rows: MatchRow[]; signals: Signal[] } {
   const rows = matchChain({
     now: c.now,
     underlying: c.underlying,
-    deriveInstruments: c.deriveInstruments,
-    deriveQuotes: new Map(c.deriveQuotes.map((q) => [q.instrumentId, q])),
-    oliveQuoteProvider: (strike, expiryTs, kind) => {
-      const r = amm.get(ammKey(strike, expiryTs, kind));
-      if (!r) throw new Error(`unrecorded AMM call ${ammKey(strike, expiryTs, kind)}`);
-      return r;
-    },
-    config: c.matchConfig,
+    chains: [{ venue: 'derive', instruments: c.deriveInstruments, quotes: new Map(c.deriveQuotes.map((q) => [q.instrumentId, q])) }],
+    synthesizers: [
+      {
+        venue: 'olive',
+        maxTenorMs: c.oliveMaxTenorMs ?? c.matchConfig.oliveMaxTenorMs ?? 365 * 86_400_000,
+        quote: (strike, expiryTs, kind) => {
+          const r = amm.get(ammKey(strike, expiryTs, kind));
+          if (!r) throw new Error(`unrecorded AMM call ${ammKey(strike, expiryTs, kind)}`);
+          return r;
+        },
+      },
+    ],
+    config: { expiryToleranceMs: c.matchConfig.expiryToleranceMs, maxStrikeRelDist: c.matchConfig.maxStrikeRelDist },
   });
   return { rows, signals: computeSignals(rows, c.signalConfig, c.now, c.spots) };
 }
@@ -51,7 +69,7 @@ describe('golden Olive × Derive cycle', () => {
   for (const c of golden.cases) {
     it(`${c.underlying}: reproduces every row and signal`, () => {
       const { rows, signals } = replay(c);
-      expect(rows).toEqual(c.rows);
+      expect(rows.map(toLegacyRow)).toEqual(c.rows);
       expect(signals).toEqual(c.signals);
     });
   }

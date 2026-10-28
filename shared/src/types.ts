@@ -109,7 +109,7 @@ export interface LegSnapshot {
   expiryOffsetDays?: number;
 }
 
-/** One comparison row: the same economic contract on both venues. */
+/** One comparison row: the same economic contract across venues. */
 export interface MatchRow {
   pairKey: string;
   underlying: string;
@@ -120,8 +120,8 @@ export interface MatchRow {
   matchType: MatchType;
   /** Why a counterpart was not found, e.g. `strike_out_of_olive_bounds`. */
   unmatchedReason?: string;
-  derive: LegSnapshot;
-  olive: LegSnapshot;
+  /** One leg per venue that lists (or synthesizes) this contract. */
+  legs: Partial<Record<Venue, LegSnapshot>>;
 }
 
 /** Compact row projection for the WS cycle push — everything the table/cards

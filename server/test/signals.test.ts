@@ -13,22 +13,24 @@ describe('toLiteRows (WS payload projection)', () => {
       strike: 2900,
       kind: 'call',
       matchType: 'exact_match',
-      derive: {
-        venue: 'derive',
-        instrumentId: 'ETH-20261030-2900-C',
-        quote: {
-          venue: 'derive', instrumentId: 'x', ts: 0, bid: 79, bidSize: 5, ask: 81, askSize: 5,
-          mark: 80, iv: 0.6, ivSource: 'market', source: 't',
+      legs: {
+        derive: {
+          venue: 'derive',
+          instrumentId: 'ETH-20261030-2900-C',
+          quote: {
+            venue: 'derive', instrumentId: 'x', ts: 0, bid: 79, bidSize: 5, ask: 81, askSize: 5,
+            mark: 80, iv: 0.6, ivSource: 'market', source: 't',
+          },
         },
-      },
-      olive: {
-        venue: 'olive',
-        instrumentId: 'o',
-        quote: {
-          venue: 'olive', instrumentId: 'y', ts: 0, bid: null, bidSize: null, ask: null, askSize: null,
-          mark: 70.5, iv: 0.55, ivSource: 'model', source: 't',
+        olive: {
+          venue: 'olive',
+          instrumentId: 'o',
+          quote: {
+            venue: 'olive', instrumentId: 'y', ts: 0, bid: null, bidSize: null, ask: null, askSize: null,
+            mark: 70.5, iv: 0.55, ivSource: 'model', source: 't',
+          },
+          note: 'amm_synthetic',
         },
-        note: 'amm_synthetic',
       },
     };
     const [lite] = toLiteRows([row]);
@@ -114,8 +116,10 @@ function row(
     strike: 2900,
     kind: 'call',
     matchType: 'exact_match',
-    derive: { venue: 'derive', instrumentId: dq?.instrumentId ?? null, quote: dq },
-    olive: { venue: 'olive', instrumentId: oq?.instrumentId ?? null, quote: oq },
+    legs: {
+      derive: { venue: 'derive', instrumentId: dq?.instrumentId ?? null, quote: dq },
+      olive: { venue: 'olive', instrumentId: oq?.instrumentId ?? null, quote: oq },
+    },
     ...overrides,
   };
 }
@@ -409,7 +413,7 @@ describe('computeSignals — mismatched-legs guard', () => {
   // NOT converge — the vol spread stays, the profit estimate must not.
   it('keeps the IV spread but nulls every profit field for a strike-mismatched leg', () => {
     const r = row(deriveQuote(), oliveQuote());
-    r.olive.strikeOffset = 10; // interpolated match, e.g. 2910 vs 2900
+    r.legs.olive!.strikeOffset = 10; // interpolated match, e.g. 2910 vs 2900
     const [s] = computeSignals([r], cfg, NOW);
     expect(s.ivSpreadVols).toBeCloseTo(5, 5);
     expect(s.direction).toBe('buy_olive_sell_derive');
@@ -428,7 +432,7 @@ describe('computeSignals — mismatched-legs guard', () => {
 
   it('nulls profit for an expiry-offset match even at the same strike', () => {
     const r = row(deriveQuote(), oliveQuote());
-    r.olive.expiryOffsetDays = 1; // exact strike, ±1-day tolerance match
+    r.legs.olive!.expiryOffsetDays = 1; // exact strike, ±1-day tolerance match
     const [s] = computeSignals([r], cfg, NOW);
     expect(s.flags).toContain('mismatched_legs');
     expect(s.edgeUsdc).toBeNull();

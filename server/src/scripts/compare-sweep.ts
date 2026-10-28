@@ -137,7 +137,7 @@ async function main() {
     let comboWorst = 0;
     for (const s of samples) {
       const full = await fetch(`http://127.0.0.1:8799/api/pair?pairKey=${s.pairKey}`).then((x) => x.json());
-      const q = full.row?.olive?.quote;
+      const q = full.row?.legs?.olive?.quote;
       if (!q?.mark || q.iv == null || !q.indexPrice) continue;
       const rate = RATES[ccy] ?? { token: 0, usdc: 0 };
       const tau = Math.max(0, (full.row.expiryTs - Date.now()) / (365 * 86_400_000));

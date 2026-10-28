@@ -53,19 +53,24 @@ async function main(): Promise<void> {
     const matchConfig = {
       expiryToleranceMs: cfg.matchExpiryToleranceDays * 86_400_000,
       maxStrikeRelDist: cfg.matchMaxStrikeRelDist,
-      oliveMaxTenorMs: cfg.oliveMaxTenorDays * 86_400_000,
     };
+    const oliveMaxTenorMs = cfg.oliveMaxTenorDays * 86_400_000;
     const deriveInstruments = instruments.filter((i) => expiries.includes(i.expiryDate));
     const rows = matchChain({
       now,
       underlying,
-      deriveInstruments,
-      deriveQuotes: new Map(quotes.map((q) => [q.instrumentId, q])),
-      oliveQuoteProvider: (strike, expiryTs, kind) => {
-        const result = olive.getAmmQuote(underlying, strike, expiryTs, kind, now, oliveState);
-        ammCalls.push({ strike, expiryTs, kind, result });
-        return result;
-      },
+      chains: [{ venue: 'derive', instruments: deriveInstruments, quotes: new Map(quotes.map((q) => [q.instrumentId, q])) }],
+      synthesizers: [
+        {
+          venue: 'olive',
+          maxTenorMs: oliveMaxTenorMs,
+          quote: (strike, expiryTs, kind) => {
+            const result = olive.getAmmQuote(underlying, strike, expiryTs, kind, now, oliveState);
+            ammCalls.push({ strike, expiryTs, kind, result });
+            return result;
+          },
+        },
+      ],
       config: matchConfig,
     });
     const liveLiquidity = olive.getCachedLiquidity(underlying);
@@ -86,7 +91,7 @@ async function main(): Promise<void> {
     };
     const spots = { [underlying]: spot };
     const signals = computeSignals(rows, signalConfig, now, spots);
-    cases.push({ underlying, now, deriveInstruments, deriveQuotes: quotes, ammCalls, matchConfig, signalConfig, spots, rows, signals });
+    cases.push({ underlying, now, deriveInstruments, deriveQuotes: quotes, ammCalls, matchConfig, oliveMaxTenorMs, signalConfig, spots, rows, signals });
     console.log(`${underlying}: ${rows.length} rows, ${signals.length} signals, ${ammCalls.length} AMM quotes`);
   }
   mkdirSync('test/fixtures', { recursive: true });

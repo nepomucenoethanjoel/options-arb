@@ -152,11 +152,11 @@ async function main() {
     console.log(
       `RAW legacy : bid=${n(tl?.b)} ask=${n(tl?.a)} bidSz=${n(tl?.B)} askSz=${n(tl?.A)}`,
     );
-    const dq = our.row?.derive?.quote;
+    const dq = our.row?.legs?.derive?.quote;
     console.log(
       `OUR Derive : bid=${dq?.bid} ask=${dq?.ask} mark=${dq?.mark} iv=${dq?.iv}`,
     );
-    const oq = our.row?.olive?.quote;
+    const oq = our.row?.legs?.olive?.quote;
     console.log(
       `OLIVE indep: premium=${indepOlive == null ? 'n/a' : indepOlive.toFixed(4)} (spot=${spot?.toFixed?.(4)} vol=${vol})`,
     );

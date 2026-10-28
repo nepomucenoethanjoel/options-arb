@@ -1,13 +1,39 @@
 import { describe, expect, it } from 'vitest';
 import type { OptionInstrument, OptionQuote } from '@options-arb/shared';
-import { matchChain, pairKeyOf, type MatchConfig } from '../src/matching/engine';
+import type { AmmQuoteResult } from '../src/adapters/olive';
+import { matchChain as matchVenues, pairKeyOf, type MatchConfig } from '../src/matching/engine';
 
 const NOW = Date.UTC(2026, 8, 27, 12, 0, 0);
-const config: MatchConfig = {
+const config: MatchConfig & { oliveMaxTenorMs: number } = {
   expiryToleranceMs: 86_400_000,
   maxStrikeRelDist: 0.02,
   oliveMaxTenorMs: 365 * 86_400_000,
 };
+
+/** Two-venue harness: Derive anchors the grid, Olive is listed and/or synthesized. */
+function matchChain(input: {
+  now: number;
+  underlying: string;
+  deriveInstruments: OptionInstrument[];
+  deriveQuotes: Map<string, OptionQuote>;
+  oliveInstruments?: OptionInstrument[];
+  oliveQuotes?: Map<string, OptionQuote>;
+  oliveQuoteProvider?: (strike: number, expiryTs: number, kind: 'call' | 'put') => AmmQuoteResult;
+  config: typeof config;
+}) {
+  const { oliveMaxTenorMs, ...matchConfig } = input.config;
+  return matchVenues({
+    now: input.now,
+    underlying: input.underlying,
+    chains: [
+      { venue: 'derive', instruments: input.deriveInstruments, quotes: input.deriveQuotes },
+      // Olive is always the expected counterpart (absent data → no_olive_data).
+      { venue: 'olive' as const, instruments: input.oliveInstruments ?? [], quotes: input.oliveQuotes ?? new Map(), anchor: false },
+    ],
+    synthesizers: input.oliveQuoteProvider ? [{ venue: 'olive', maxTenorMs: oliveMaxTenorMs, quote: input.oliveQuoteProvider }] : [],
+    config: matchConfig,
+  });
+}
 
 function deriveInst(strike: number, expiryDate = '20261030', kind: 'call' | 'put' = 'call'): OptionInstrument {
   const [y, m, d] = [expiryDate.slice(0, 4), expiryDate.slice(4, 6), expiryDate.slice(6, 8)];
@@ -59,9 +85,9 @@ describe('matchChain', () => {
     });
     expect(rows).toHaveLength(1);
     expect(rows[0].matchType).toBe('exact_match');
-    expect(rows[0].olive.note).toBe('amm_synthetic');
-    expect(rows[0].olive.quote?.iv).toBe(0.55);
-    expect(rows[0].derive.quote?.iv).toBe(0.6);
+    expect(rows[0].legs.olive?.note).toBe('amm_synthetic');
+    expect(rows[0].legs.olive?.quote?.iv).toBe(0.55);
+    expect(rows[0].legs.derive?.quote?.iv).toBe(0.6);
   });
 
   it('marks out-of-bounds strikes as unmatched with reason', () => {
@@ -106,9 +132,9 @@ describe('matchChain', () => {
       config,
     });
     expect(rows[0].matchType).toBe('exact_match');
-    expect(rows[0].olive.note).toContain('listed');
-    expect(rows[0].olive.note).toContain('expiry_off_1d');
-    expect(rows[0].olive.instrumentId).toBe('OLIVE-20261031-2900-C');
+    expect(rows[0].legs.olive?.note).toContain('listed');
+    expect(rows[0].legs.olive?.note).toContain('expiry_off_1d');
+    expect(rows[0].legs.olive?.instrumentId).toBe('OLIVE-20261031-2900-C');
   });
 
   it('falls back to nearest-strike interpolation within maxStrikeRelDist', () => {
@@ -127,7 +153,7 @@ describe('matchChain', () => {
       config,
     });
     expect(rows[0].matchType).toBe('interpolated');
-    expect(rows[0].olive.note).toContain('nearest_strike_2910');
+    expect(rows[0].legs.olive?.note).toContain('nearest_strike_2910');
   });
 
   it('does not interpolate beyond maxStrikeRelDist', () => {
@@ -165,8 +191,8 @@ describe('matchChain', () => {
       config,
     });
     expect(rows).toHaveLength(1);
-    expect(rows[0].unmatchedReason).toBe('no_derive_listing');
-    expect(rows[0].derive.quote).toBeNull();
+    expect(rows[0].unmatchedReason).toBe('no_anchor_listing');
+    expect(rows[0].legs.derive).toBeUndefined();
   });
 
   it('skips expired Derive instruments', () => {
@@ -192,6 +218,26 @@ describe('matchChain', () => {
   });
 });
 
+describe('matchChain — multiple anchor venues', () => {
+  it('unions anchor chains on pairKey and keeps one leg per venue', () => {
+    const coincall = (strike: number): OptionInstrument => ({ ...deriveInst(strike), venue: 'coincall', instrumentId: `ETHUSD-30OCT26-${strike}.0-C` });
+    const rows = matchVenues({
+      now: NOW,
+      underlying: 'ETH',
+      chains: [
+        { venue: 'derive', instruments: [deriveInst(2900)], quotes: new Map() },
+        { venue: 'coincall', instruments: [coincall(2900), coincall(3000)], quotes: new Map() },
+      ],
+      config,
+    });
+    expect(rows.map((r) => r.pairKey)).toEqual(['ETH-20261030-2900-C', 'ETH-20261030-3000-C']);
+    expect(Object.keys(rows[0].legs).sort()).toEqual(['coincall', 'derive']);
+    expect(rows[0].matchType).toBe('exact_match');
+    expect(rows[1].matchType).toBe('unmatched_no_counterpart');
+    expect(rows[1].unmatchedReason).toBe('no_counterpart');
+  });
+});
+
 describe('matchChain — structured leg offsets', () => {
   it('flags interpolated matches with the strike offset', () => {
     const oliveListing: OptionInstrument = {
@@ -208,8 +254,8 @@ describe('matchChain — structured leg offsets', () => {
       oliveQuotes: new Map([['OLIVE-20261030-2910-C', quote('olive', 'OLIVE-20261030-2910-C', 0.52)]]),
       config,
     });
-    expect(rows[0].olive.strikeOffset).toBe(10);
-    expect(rows[0].olive.expiryOffsetDays).toBeUndefined();
+    expect(rows[0].legs.olive?.strikeOffset).toBe(10);
+    expect(rows[0].legs.olive?.expiryOffsetDays).toBeUndefined();
   });
 
   it('flags expiry-offset matches on the exact-strike branch too', () => {
@@ -227,8 +273,8 @@ describe('matchChain — structured leg offsets', () => {
       oliveQuotes: new Map([['OLIVE-20261031-2900-C', quote('olive', 'OLIVE-20261031-2900-C', 0.52)]]),
       config,
     });
-    expect(rows[0].olive.strikeOffset).toBeUndefined();
-    expect(rows[0].olive.expiryOffsetDays).toBe(1);
+    expect(rows[0].legs.olive?.strikeOffset).toBeUndefined();
+    expect(rows[0].legs.olive?.expiryOffsetDays).toBe(1);
   });
 
   it('leaves offsets undefined for same-day AMM synthetics (live behavior)', () => {
@@ -242,7 +288,7 @@ describe('matchChain — structured leg offsets', () => {
       }),
       config,
     });
-    expect(rows[0].olive.strikeOffset).toBeUndefined();
-    expect(rows[0].olive.expiryOffsetDays).toBeUndefined();
+    expect(rows[0].legs.olive?.strikeOffset).toBeUndefined();
+    expect(rows[0].legs.olive?.expiryOffsetDays).toBeUndefined();
   });
 });
