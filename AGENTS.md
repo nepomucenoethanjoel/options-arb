@@ -1,6 +1,7 @@
 # AGENTS.md — how to work on this repo
 
-Olive Exchange × Derive.xyz options arbitrage monitor. Read this before
+Multi-venue options arbitrage monitor (Derive, Olive, Coincall, Hypercall,
+Callput; Bybit/Binance deferred — geo-blocked from the US host). Read this before
 changing anything. The short version: **this app's value is that every
 number it shows is verified against venue reality — never weaken that to
 make a number look better.**
@@ -17,8 +18,10 @@ make a number look better.**
 
 ## Non-negotiable rules
 
-1. **The verification stack is load-bearing.** 128 tests, typechecks in
-   three workspaces, and `server/src/scripts/handcheck.ts` (live field
+1. **The verification stack is load-bearing.** 188 tests (incl. a golden
+   replay of a recorded live Olive × Derive cycle), typechecks in three
+   workspaces, and `server/src/scripts/handcheck.ts` /
+   `handcheck-books.ts` (live field
    parity against real venue data). Do not skip, weaken, or "fix" tests to
    make a change pass. If a test fails, the code is wrong or the venue
    changed — find out which.
@@ -42,7 +45,8 @@ npm install                 # once, at repo root (workspaces)
 npm test                    # shared + server test suites — must be green
 npx tsc -b shared server web  # typecheck — must be clean
 npm run build -w shared -w web  # build dists
-npm run handcheck -w server   # LIVE check vs real venue data (read-only)
+npm run handcheck -w server   # LIVE check of an Olive pair vs real venue data (read-only)
+npm run handcheck:books -w server  # LIVE check of a book-venue pair (PAIR_KEY=… optional)
 bash deploy/deploy.sh root@<vps>  # deploy: build locally + ship + restart
 ```
 
@@ -52,10 +56,24 @@ bash deploy/deploy.sh root@<vps>  # deploy: build locally + ship + restart
   Olive calls `F=S·e^(rL·T)`, `df=e^(−rL·T)`; puts `F=S·e^(−rS·T)`,
   `df=e^(+rS·T)`; rates = per-custody borrow curve at `locked/owned`
   utilization; strike band ±1σ (`K_L=S·e^(−rS·T−σ√T)`, `K_U=S·e^(rL·T+σ√T)`).
-- `server/src/signals/engine.ts` — signal computation. `NON_EXECUTABLE_FLAGS`,
-  fee models (both venues, live-fill verified), capacity caps (calls: free
-  underlying custody; puts: free USDC ÷ strike), marginal-fill VWAP.
+- `shared/src/venueSpecs.ts` — `VENUE_SPECS`: per-venue quote kind, whether users
+  can short there, trading cutoff, settlement asset/window. Every entry is a
+  DATA_SOURCES row.
+- `server/src/matching/engine.ts` — grid = union of anchor chains by pairKey;
+  synthesizers (Olive AMM) fill legs on demand. `MatchRow.legs` is per venue.
+- `server/src/signals/engine.ts` — evaluates every vol-consistent venue pair
+  per contract, keeps the best (shortable sell venue → clean book → honest
+  total) plus `alternatives`. Per-venue fees in `signals/fees.ts`; Olive-only
+  capacity caps + marginal-fill VWAP in `signals/olive.ts`.
+- `server/src/adapters/{coincall,hypercall,callput}.ts` — extra listed venues
+  (`getChain`), enabled by `VENUES`; quote-level `flags` (`single_maker`,
+  `indicative_quote`) keep unproven venues out of headline totals.
+- Adding a venue: adapter with `getChain` + fixture test from a captured live
+  response, a `VENUE_SPECS` entry, a fee model, a raw fetcher in
+  `handcheck-books.ts`, and DATA_SOURCES rows — same commit.
 - `server/src/scheduler.ts` — cycle orchestration + change-gated persistence.
+- `test/golden.test.ts` — replays a recorded live Olive × Derive cycle; any
+  change to those numbers fails it (re-record only with evidence).
 - `server/src/api/server.ts` — REST + WS + `buildKpis` (pool-aware Σ takes
   `min(quoted, expected)` per clip — the honest headline).
 - Olive's market file (`marketFile.ts`) is the primary live data source;

@@ -1,9 +1,22 @@
-# options-arb — Olive × Derive IV Arbitrage Dashboard
+# options-arb — Options IV Arbitrage Monitor
 
 Read-only, real-time analytics dashboard comparing options implied volatility
-between **Derive.xyz** (EVM/OP-Stack) and **Olive Exchange** (Solana), surfacing
-relative IV mispricings for **manual review**. This is a signal tool — it does
-not route or execute orders.
+across venues, surfacing relative IV mispricings for **manual review**. This is
+a signal tool — it does not route or execute orders.
+
+| Venue | Kind | Underlyings | How quotes are read | Headline-eligible |
+|---|---|---|---|---|
+| **Derive.xyz** (EVM) | order book | SOL BTC ETH ZEC | v3 REST (+ legacy-host book merge) | ✓ |
+| **Olive Exchange** (Solana) | AMM, model vol | SOL BTC ETH ZEC | market file + our own BS synthesis | ✓ (buy side only) |
+| **Coincall** | order book | SOL BTC ETH | public REST, whole chain per call | ✓ |
+| **Hypercall** (HyperEVM) | RFQ makers | BTC ETH | `options-summary` RFQ provider quotes | ✗ `single_maker` |
+| **Callput** (Base) | vault, keeper-filled | BTC ETH | app S3 feed, mark ± risk premium | ✗ `indicative_quote` |
+| Bybit, Binance | order book | — | deferred: they geo-block the US host | — |
+
+Every contract (same underlying, 08:00 UTC expiry, strike, kind) is compared
+across all venues that list it; the row shows the best **vol-consistent pair**
+(buy the lower-IV venue at its ask, sell the higher-IV venue at its bid), with
+runner-up pairs in the detail panel. Enable venues with `VENUES`.
 
 Data-source provenance and discovery history: [DATA_SOURCES.md](./DATA_SOURCES.md).
 
@@ -131,11 +144,16 @@ converge and the price difference locks in. What it does **not** lock in:
   Olive's vol. Should sit near vega × Δσ; large deviations hint at
   quote/settlement distortion rather than pure IV mispricing.
 
-`npm run handcheck -w server` re-verifies one live signal against raw venue
+`npm run handcheck -w server` re-verifies one live Olive-pair signal against raw venue
 APIs with independent math — every field must reproduce. The pair comes from
 `handcheck-target.json` (pairKey only) when present, else the top executable
 opportunity; all inputs are live (market-file vol/spot/custody, config rates),
 never pinned snapshots.
+
+`npm run handcheck:books -w server` does the same for book-vs-book pairs
+(Derive / Coincall / Hypercall / Callput): raw REST quotes are compared with the
+quotes the cycle used (drift reported), and every money field is recomputed
+from them with independently written fee formulas (`PAIR_KEY=…` to pick one).
 
 ## Caveats encoded in the app
 
