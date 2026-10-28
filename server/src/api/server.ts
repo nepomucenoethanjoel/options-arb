@@ -28,7 +28,13 @@ const REALTIME_DEGRADED_AFTER_MS = 120_000;
 export interface HealthRollup {
   status: 'ok' | 'starting' | 'degraded';
   reasons: string[];
+  /** Problems on additional venues: visible, but they don't degrade the app
+   *  (a restart can't fix another venue's outage; core pricing still works). */
+  warnings: string[];
 }
+
+/** Venues the app cannot work without; anything else only warns. */
+const CORE_VENUES = new Set(['derive', 'olive']);
 
 /**
  * One verdict over everything that silently erodes the numbers: venue
@@ -43,11 +49,15 @@ export function buildHealthRollup(input: {
   now: number;
 }): HealthRollup {
   const { health, realtime, now } = input;
-  if (!health) return { status: 'starting', reasons: ['no_cycle_yet'] };
+  if (!health) return { status: 'starting', reasons: ['no_cycle_yet'], warnings: [] };
   const reasons: string[] = [];
-  for (const v of ['derive', 'olive'] as const) {
-    const st = health[v]?.status;
+  const warnings: string[] = [];
+  for (const v of CORE_VENUES) {
+    const st = health.venues[v as keyof typeof health.venues]?.status;
     if (st !== 'ok') reasons.push(`${v}_${st ?? 'unknown'}`);
+  }
+  for (const [v, h] of Object.entries(health.venues)) {
+    if (!CORE_VENUES.has(v) && h?.status !== 'ok') warnings.push(`${v}_${h?.status ?? 'unknown'}`);
   }
   if (health.lastCycleMs != null && now - health.lastCycleMs > 3 * input.pollIntervalMs) {
     reasons.push(`cycle_stale_${Math.round((now - health.lastCycleMs) / 1000)}s`);
@@ -59,7 +69,7 @@ export function buildHealthRollup(input: {
     }
   }
   if (input.oliveCaveats.includes('market_file_stale')) reasons.push('market_file_stale');
-  return { status: reasons.length ? 'degraded' : 'ok', reasons };
+  return { status: reasons.length ? 'degraded' : 'ok', reasons, warnings };
 }
 
 /**

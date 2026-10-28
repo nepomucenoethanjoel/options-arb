@@ -48,7 +48,8 @@ if [ "$status" = ok ]; then
     if (h.status === "degraded") { console.log("bad: " + (h.reasons ?? []).join(" ")); process.exit(0); }
     const bad = [];
     for (const v of ["derive", "olive"]) {
-      if (h.health?.[v]?.status !== "ok") bad.push(v + "=" + (h.health?.[v]?.status ?? "?"));
+      const vh = h.health?.venues?.[v] ?? h.health?.[v];
+      if (vh?.status !== "ok") bad.push(v + "=" + (vh?.status ?? "?"));
     }
     const cyc = h.health?.lastCycleMs ?? 0;
     if (cyc && Date.now() - cyc > 10 * 60_000) {

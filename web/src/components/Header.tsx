@@ -1,3 +1,4 @@
+import { VENUE_ORDER, VENUE_SPECS } from '@options-arb/shared';
 import type { OverviewResponse } from '../api';
 import { ago, HEALTH_COLORS } from '../format';
 
@@ -34,8 +35,10 @@ export function Header({ data, connected }: { data: OverviewResponse; connected:
       <div className="health-block">
         {h && (
           <>
-            <Badge label="Derive" source={h.derive.source} status={h.derive.status} detail={h.derive.lastError ?? h.derive.detail} />
-            <Badge label="Olive" source={h.olive.source} status={h.olive.status} detail={h.olive.lastError ?? h.olive.detail} />
+            {VENUE_ORDER.map((v) => {
+              const vh = h.venues[v];
+              return vh ? <Badge key={v} label={VENUE_SPECS[v].label} source={vh.source} status={vh.status} detail={vh.lastError ?? vh.detail} /> : null;
+            })}
             {data.realtime && (
               <Badge
                 label="Olive RT"
@@ -57,7 +60,7 @@ export function Header({ data, connected }: { data: OverviewResponse; connected:
               vol pin: {pin} old
             </span>
           )}
-          {!pin && data.health?.olive?.status === 'ok' && (
+          {!pin && data.health?.venues.olive?.status === 'ok' && (
             <span className="vol-live" title="Olive vol/liquidity/spot stream live from their market-state file (~5s)">
               Olive vol: live
             </span>

@@ -48,7 +48,7 @@ function stubOrchestrator(): Orchestrator {
       { pairKey: 'ETH-20261030-2000-C', underlying: 'ETH', expiryTs: 0, expiryDate: '20261030', strike: 2000, kind: 'call', matchType: 'exact_match', deriveIv: 0.5, oliveIv: 0.55, deriveBid: 1, deriveAsk: 2, olivePremium: 1.5, note: 'amm_synthetic', unmatchedReason: undefined },
     ],
     signals,
-    health: { derive: null, olive: null, serverTime: 0, pollIntervalMs: 15000, lastCycleMs: null, lastCycleDurationMs: null },
+    health: { venues: {}, serverTime: 0, pollIntervalMs: 15000, lastCycleMs: null, lastCycleDurationMs: null },
     spots: { SOL: 100, ETH: 2000 },
     realtime: null,
     oliveCaveats: [],
@@ -261,15 +261,15 @@ describe('buildKpis — pool-aware Σ', () => {
 describe('buildHealthRollup', () => {
   const NOW = 10_000_000;
   const venue = (status: string) => ({ venue: 'x', source: 'x', status, lastSuccessTs: NOW, lastError: null });
-  const health = (over: Record<string, unknown> = {}) => ({
-    derive: venue('ok'), olive: venue('ok'), serverTime: NOW, pollIntervalMs: 15_000,
+  const health = (over: Record<string, unknown> = {}, venues: Record<string, unknown> = {}) => ({
+    venues: { derive: venue('ok'), olive: venue('ok'), ...venues }, serverTime: NOW, pollIntervalMs: 15_000,
     lastCycleMs: NOW - 5_000, lastCycleDurationMs: 15_000, ...over,
   }) as never;
   const base = { oliveCaveats: [] as string[], pollIntervalMs: 15_000, now: NOW };
 
   it('is ok when venues, cycle and stream are all fresh', () => {
     const r = buildHealthRollup({ ...base, health: health(), realtime: { status: 'live', statusSinceMs: NOW - 1e6, lastFrameAgeMs: 100, assets: [] } });
-    expect(r).toEqual({ status: 'ok', reasons: [] });
+    expect(r).toEqual({ status: 'ok', reasons: [], warnings: [] });
   });
 
   it('degrades on a realtime stream stuck reconnecting (the 7.6-day live case)', () => {
@@ -285,9 +285,14 @@ describe('buildHealthRollup', () => {
 
   it('degrades on a stale cycle, a non-ok venue, or a frozen market file', () => {
     const r = buildHealthRollup({ ...base, oliveCaveats: ['market_file_stale'], realtime: null,
-      health: health({ lastCycleMs: NOW - 60_000, derive: venue('stale') }) });
+      health: health({ lastCycleMs: NOW - 60_000 }, { derive: venue('stale') }) });
     expect(r.status).toBe('degraded');
     expect(r.reasons).toEqual(['derive_stale', 'cycle_stale_60s', 'market_file_stale']);
+  });
+
+  it('an additional venue being down warns but does not degrade (a restart cannot fix it)', () => {
+    const r = buildHealthRollup({ ...base, realtime: null, health: health({}, { hypercall: venue('error') }) });
+    expect(r).toEqual({ status: 'ok', reasons: [], warnings: ['hypercall_error'] });
   });
 
   it('reports starting before the first cycle', () => {

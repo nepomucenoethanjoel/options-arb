@@ -124,6 +124,14 @@ export interface MatchRow {
   legs: Partial<Record<Venue, LegSnapshot>>;
 }
 
+/** A venue's quote in the compact WS projection. */
+export interface LiteQuote {
+  iv: number | null;
+  bid: number | null;
+  ask: number | null;
+  mark: number | null;
+}
+
 /** Compact row projection for the WS cycle push — everything the table/cards
  * render without nested quotes. Full detail lives behind GET /api/pair. */
 export interface MatchRowLite {
@@ -139,6 +147,8 @@ export interface MatchRowLite {
   deriveBid: number | null;
   deriveAsk: number | null;
   olivePremium: number | null;
+  /** Every venue's quote summary for this contract. */
+  venues: Partial<Record<Venue, LiteQuote>>;
   note?: string;
   unmatchedReason?: string;
 }
@@ -228,8 +238,8 @@ export interface Signal {
 }
 
 export interface VenueHealthSnapshot {
-  derive: VenueHealth;
-  olive: VenueHealth;
+  /** One entry per polled venue. */
+  venues: Partial<Record<Venue, VenueHealth>>;
   serverTime: number;
   pollIntervalMs: number;
   lastCycleMs: number | null;

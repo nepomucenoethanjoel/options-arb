@@ -8,6 +8,7 @@ import {
   type Venue,
   type VenueHealthSnapshot,
 } from '@options-arb/shared';
+import type { OptionsVenueAdapter } from '@options-arb/shared';
 import type { AppConfig } from './config';
 import type { DeriveAdapter } from './adapters/derive';
 import type { OliveAdapter } from './adapters/olive';
@@ -31,6 +32,12 @@ export function toLiteRows(rows: MatchRow[]): MatchRowLite[] {
     deriveBid: r.legs.derive?.quote?.bid ?? null,
     deriveAsk: r.legs.derive?.quote?.ask ?? null,
     olivePremium: r.legs.olive?.quote?.mark ?? null,
+    venues: Object.fromEntries(
+      Object.entries(r.legs).map(([v, leg]) => [
+        v,
+        { iv: leg?.quote?.iv ?? null, bid: leg?.quote?.bid ?? null, ask: leg?.quote?.ask ?? null, mark: leg?.quote?.mark ?? null },
+      ]),
+    ),
     note: r.legs.olive?.note,
     unmatchedReason: r.unmatchedReason,
   }));
@@ -125,6 +132,8 @@ export class Orchestrator extends EventEmitter {
     private readonly olive: OliveAdapter,
     private readonly storage: Storage,
     private readonly alerter?: Alerter,
+    /** Additional listed venues (whole-chain getChain), polled alongside Derive. */
+    private readonly extraVenues: OptionsVenueAdapter[] = [],
   ) {
     super();
     // Static vol pins age — surface when they were set so the UI can nag.
@@ -239,8 +248,11 @@ export class Orchestrator extends EventEmitter {
       }
 
       const health: VenueHealthSnapshot = {
-        derive: this.derive.getHealth(),
-        olive: this.olive.getHealth(),
+        venues: {
+          derive: this.derive.getHealth(),
+          olive: this.olive.getHealth(),
+          ...Object.fromEntries(this.extraVenues.map((v) => [v.venue, v.getHealth()])),
+        },
         serverTime: Date.now(),
         pollIntervalMs: this.cfg.pollIntervalMs,
         lastCycleMs: now,
@@ -318,8 +330,7 @@ export class Orchestrator extends EventEmitter {
           }
         }
         this.storage.recordSignals(toPersist.map(toRecord));
-        this.storage.upsertHealth(health.derive);
-        this.storage.upsertHealth(health.olive);
+        for (const h of Object.values(health.venues)) if (h) this.storage.upsertHealth(h);
       } catch (err) {
         console.warn('[scheduler] persistence failed:', err instanceof Error ? err.message : err);
       }
@@ -361,7 +372,7 @@ export class Orchestrator extends EventEmitter {
     const signals: Signal[] = [];
     const oliveCaveats: string[] = [];
 
-    const [instruments, oliveState] = await Promise.all([
+    const [instruments, oliveState, extraChains] = await Promise.all([
       this.derive.getInstruments(underlying).catch((err) => {
         console.warn(`[scheduler] Derive instruments ${underlying} failed:`, err instanceof Error ? err.message : err);
         return [];
@@ -370,9 +381,19 @@ export class Orchestrator extends EventEmitter {
         console.warn(`[scheduler] Olive state ${underlying} failed:`, err instanceof Error ? err.message : err);
         return null;
       }),
+      // A failing extra venue only empties its own chain (its health says why).
+      Promise.all(
+        this.extraVenues.map(async (v) => {
+          const chain = await v.getChain?.(underlying).catch((err) => {
+            console.warn(`[scheduler] ${v.venue} chain ${underlying} failed:`, err instanceof Error ? err.message : err);
+            return null;
+          });
+          return { venue: v.venue, instruments: chain?.instruments ?? [], quotes: new Map((chain?.quotes ?? []).map((q) => [q.instrumentId, q])) };
+        }),
+      ),
     ]);
     oliveCaveats.push(...(oliveState?.caveats ?? []));
-    if (instruments.length === 0) {
+    if (instruments.length === 0 && extraChains.every((c) => c.instruments.length === 0)) {
       return { underlying, rows, signals, spot: null, oliveCaveats };
     }
 
@@ -388,9 +409,9 @@ export class Orchestrator extends EventEmitter {
       }
     }
 
-    // Underlying spot: venue index price, else Olive's own feeds.
+    // Underlying spot: a venue index price (Derive first), else Olive's own feeds.
     let spot: number | null = null;
-    for (const q of quotes.values()) {
+    for (const q of [...quotes.values(), ...extraChains.flatMap((c) => [...c.quotes.values()])]) {
       if (q.indexPrice != null) {
         spot = q.indexPrice;
         break;
@@ -424,7 +445,7 @@ export class Orchestrator extends EventEmitter {
     const matched = matchChain({
       now,
       underlying,
-      chains: [{ venue: 'derive', instruments: instruments.filter((i) => limited.includes(i.expiryDate)), quotes }],
+      chains: [{ venue: 'derive', instruments: instruments.filter((i) => limited.includes(i.expiryDate)), quotes }, ...extraChains],
       synthesizers: [
         {
           venue: 'olive',

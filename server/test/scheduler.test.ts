@@ -54,3 +54,58 @@ describe('Orchestrator cadence', () => {
     expect(o.starts.length).toBe(3);
   });
 });
+
+describe('Orchestrator — extra listed venues', () => {
+  const NOW = Date.now();
+  const expiryTs = NOW + 7 * 86_400_000;
+  const d = new Date(expiryTs);
+  const expiryDate = `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`;
+  const inst = (venue: 'derive' | 'coincall', strike: number) => ({
+    venue, instrumentId: `${venue}-${strike}`, underlying: 'ETH', expiryTs, expiryDate, strike, kind: 'call' as const,
+  });
+  const quote = (venue: 'derive' | 'coincall', strike: number, iv: number) => ({
+    venue, instrumentId: `${venue}-${strike}`, ts: Date.now(), bid: 9, bidSize: 5, ask: 10, askSize: 5, mark: 9.5,
+    indexPrice: 3000, iv, ivSource: 'market' as const, source: `${venue}:test`,
+  });
+  const health = (venue: string) => () => ({ venue, source: `${venue}:test`, status: 'ok' as const, lastSuccessTs: 1, lastError: null });
+
+  it('matches extra venue chains onto the grid and reports their health', async () => {
+    const derive = {
+      getInstruments: async () => [inst('derive', 3000)],
+      getTickers: async () => [quote('derive', 3000, 0.6)],
+      getHealth: health('derive'),
+    };
+    const olive = {
+      getMarketState: async () => null,
+      getAmmQuote: () => ({ rejected: 'no_olive_state' }),
+      getHealth: health('olive'),
+      getRealtimeHealth: () => null,
+      isVolLive: () => true,
+      getCachedLiquidity: () => null,
+      getCachedCapacity: () => null,
+      onSpot: () => () => {},
+    };
+    const coincall = {
+      venue: 'coincall' as const,
+      getChain: async () => ({ instruments: [inst('coincall', 3000), inst('coincall', 3100)], quotes: [quote('coincall', 3000, 0.55)] }),
+      getHealth: health('coincall'),
+    };
+    const o = new Orchestrator(
+      { pollIntervalMs: 15_000, historyRetentionDays: 3, oliveVolOverrides: {}, oliveRealtimeSpotTriggerPct: 0, underlyings: ['ETH'],
+        deriveMaxExpiries: 0, matchExpiryToleranceDays: 1, matchMaxStrikeRelDist: 0.02, oliveMaxTenorDays: 365, ivSpreadThresholdVols: 3,
+        minBookSize: 1, maxRelBookWidth: 0.5, nearExpiryDays: 1, deriveTakerFeeBps: 3, solanaFeeUsdc: 0.05, capitalBorrowRateApr: 0.08,
+        olivePoolLiquidityUsd: {} } as unknown as AppConfig,
+      derive as never,
+      olive as never,
+      { recordSignals: () => {}, upsertHealth: () => {}, prune: () => {} } as never,
+      undefined,
+      [coincall as never],
+    );
+    await o.runOnce();
+    const rows = o.latest!.rows;
+    expect(rows.map((r) => r.pairKey).sort()).toEqual([`ETH-${expiryDate}-3000-C`, `ETH-${expiryDate}-3100-C`]);
+    const atm = rows.find((r) => r.strike === 3000)!;
+    expect(Object.keys(atm.venues).sort()).toEqual(['coincall', 'derive']);
+    expect(o.latest!.health.venues.coincall?.status).toBe('ok');
+  });
+});

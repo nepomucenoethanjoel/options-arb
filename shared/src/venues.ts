@@ -22,6 +22,10 @@ export interface OptionsVenueAdapter {
   /** Latest quote for one instrument by venue-native id, or null. */
   getTicker(instrumentId: string): Promise<OptionQuote | null>;
 
+  /** Optional whole-chain read (instruments + quotes in one go) — how
+   *  additional listed venues are polled. */
+  getChain?(underlying: string): Promise<{ instruments: OptionInstrument[]; quotes: OptionQuote[] }>;
+
   /** Optional batch form: all quotes for one underlying+expiry. */
   getTickers?(underlying: string, expiryDate: string): Promise<OptionQuote[]>;
 
