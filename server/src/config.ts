@@ -27,11 +27,28 @@ function list(name: string, def: string[]): string[] {
     .filter((s) => s.length > 0);
 }
 
+/** Venues with an adapter that can be enabled via VENUES (Bybit/Binance:
+ *  deferred — geo-blocked from the US host, see DATA_SOURCES row 32). */
+export const EXTRA_VENUES = ['coincall'] as const;
+export type ExtraVenue = (typeof EXTRA_VENUES)[number];
+
+function extraVenueList(): ExtraVenue[] {
+  const requested = list('VENUES', ['COINCALL']).map((v) => v.toLowerCase());
+  const known = requested.filter((v): v is ExtraVenue => (EXTRA_VENUES as readonly string[]).includes(v));
+  for (const v of requested) {
+    if (!known.includes(v as ExtraVenue) && v !== 'derive' && v !== 'olive') console.warn(`[config] VENUES: no adapter for "${v}" — ignored`);
+  }
+  return known;
+}
+
 export interface AppConfig {
   port: number;
   host: string;
   underlyings: string[];
   pollIntervalMs: number;
+  /** Listed venues polled alongside Derive/Olive (VENUES). */
+  extraVenues: ExtraVenue[];
+  coincallBaseUrl: string;
 
   deriveBaseUrl: string;
   deriveLegacyUrl: string;
@@ -161,6 +178,8 @@ export function loadConfig(): AppConfig {
     host: str('HOST', '127.0.0.1'),
     underlyings: list('UNDERLYINGS', ['SOL', 'BTC', 'ETH']),
     pollIntervalMs: Math.max(5000, num('POLL_INTERVAL_MS', 15000)),
+    extraVenues: extraVenueList(),
+    coincallBaseUrl: str('COINCALL_BASE_URL', 'https://api.coincall.com'),
 
     deriveBaseUrl: str('DERIVE_BASE_URL', 'https://api.derive.xyz/v3'),
     deriveLegacyUrl: str('DERIVE_LEGACY_URL', 'https://api.lyra.finance'),

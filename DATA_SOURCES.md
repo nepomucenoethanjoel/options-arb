@@ -394,6 +394,9 @@ No published SDK or IDL reference.
 | 30 | Callput: expiry 08:00 UTC; calls settle in WBTC/WETH, puts in USDC; open/close blocked 30 min before expiry; keeper-fed settlement price | `venueSpecs.ts` | **DOCS-CONFIRMED** (crypto TWAP window **UNVERIFIED**) | docs.callput.app pricing + contracts; feed timestamps 08:00 UTC; `positionDeadlineBuffer` |
 | 31 | Callput open-sell (writing to the OLP vault) is available to users | `venueSpecs.ts` canSell | **UNVERIFIED** | Fee schedule lists open-sell 3 bps; not trade-verified |
 | 32 | Bybit / Binance (deferred — US host geo-blocked: 403 / 451): 08:00 UTC, USDT, 30-min avg index; Binance SOL `nakedSell:false` | `venueSpecs.ts` | **VERIFIED-LIVE** (from EU IP) | Research 2026-10-28; not polled until hosted where reachable |
+| 33 | Coincall quotes: `/open/option/get/v1/{U}USD` whole chain; prices USD(T) per 1 coin, `markIv` fraction, `underlyingPrice` = spot index; missing side = `bid: null` (bidIv 1e-4 sentinel); ZEC unlisted (code 40034) | `adapters/coincall.ts` | **VERIFIED-LIVE** | Captured fixture test/fixtures/coincall-sol.json (2026-10-28); BS-consistent greeks |
+| 34 | Coincall fees: taker 0.03% (BTC/ETH) / 0.06% (altcoins) of index notional, capped at 12.5% of premium; delivery fee min(0.015% × index, 12.5% × intrinsic), none on dailies | `signals/fees.ts` coincall | **DOCS-CONFIRMED** (not trade-verified) | support.coincall.com Trading Fees (updated 2026-10-14) + contract specs; held-to-expiry delivery fee estimated at current intrinsic |
+| 35 | Coincall pairs verify independently: raw REST quote + independently written fee math reproduce the server signal | `scripts/handcheck-books.ts` | **VERIFIED-LIVE** | ETH-20261030-2600-C coincall→derive and BTC-20261029-85000-C derive→coincall: every field ✓ (2026-10-28) |
 
 | Date | Route / check | Result |
 |---|---|---|

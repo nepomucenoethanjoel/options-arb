@@ -1,6 +1,8 @@
 import { join } from 'node:path';
-import { loadConfig } from './config';
+import { loadConfig, type ExtraVenue } from './config';
+import type { OptionsVenueAdapter } from '@options-arb/shared';
 import { DeriveAdapter } from './adapters/derive';
+import { CoincallAdapter } from './adapters/coincall';
 import { OliveAdapter } from './adapters/olive';
 import { OliveRealtimeClient } from './adapters/olive/realtime';
 import { SqliteStorage } from './storage/sqlite';
@@ -38,13 +40,17 @@ async function main(): Promise<void> {
     realtime: oliveRealtime,
     realtimeMaxSpotAgeMs: cfg.oliveRealtimeMaxSpotAgeMs,
   });
+  const extraAdapters: Record<ExtraVenue, () => OptionsVenueAdapter> = {
+    coincall: () => new CoincallAdapter(cfg.coincallBaseUrl),
+  };
+  const extraVenues = cfg.extraVenues.map((v) => extraAdapters[v]());
   const alerter = new Alerter(cfg);
-  const orchestrator = new Orchestrator(cfg, derive, olive, storage, alerter);
+  const orchestrator = new Orchestrator(cfg, derive, olive, storage, alerter, extraVenues);
   const app = await buildServer({ cfg, orchestrator, storage, olive });
 
   await app.listen({ port: cfg.port, host: cfg.host });
   console.log(`[options-arb] API + WS listening on http://${cfg.host}:${cfg.port}`);
-  console.log(`[options-arb] underlyings=${cfg.underlyings.join(',')} poll=${cfg.pollIntervalMs}ms threshold=${cfg.ivSpreadThresholdVols} vol pts`);
+  console.log(`[options-arb] underlyings=${cfg.underlyings.join(',')} venues=derive,olive${cfg.extraVenues.map((v) => `,${v}`).join('')} poll=${cfg.pollIntervalMs}ms threshold=${cfg.ivSpreadThresholdVols} vol pts`);
   if (cfg.alertsEnabled && cfg.alertWebhookUrl) {
     console.log(`[options-arb] webhook alerts enabled (cooldown ${cfg.alertCooldownMs}ms)`);
   }

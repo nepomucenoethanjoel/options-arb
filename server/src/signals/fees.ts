@@ -7,6 +7,10 @@ export interface FeeContext {
   /** Notional base, per contract (spot, or strike when spot is unknown). */
   notional: number;
   underlying: string;
+  kind: 'call' | 'put';
+  strike: number;
+  /** Days to expiry (some venues waive settlement fees on dailies). */
+  tteDays: number;
 }
 
 /**
@@ -51,6 +55,20 @@ export function feeModels(cfg: FeeConfig): Partial<Record<Venue, VenueFeeModel>>
           ? Math.min(notional * (cfg.oliveFeeNotionalBps / 10_000), legPrice * (cfg.oliveFeePremiumPct / 100))
           : 0,
       perOrder: cfg.solanaFeeUsdc,
+    },
+    // Coincall (fee page updated 2026-10-14 + contract specs): taker 0.03%
+    // of index notional for BTC/ETH, 0.06% for altcoins, capped at 12.5% of
+    // premium; held to expiry, a delivery fee of min(0.015% × index, 12.5% ×
+    // intrinsic) applies except on dailies — estimated at today's intrinsic.
+    coincall: {
+      perContract: ({ legPrice, notional, underlying, kind, strike, tteDays }) => {
+        const rate = underlying === 'BTC' || underlying === 'ETH' ? 0.0003 : 0.0006;
+        const trade = legPrice != null && legPrice > 0 ? Math.min(notional * rate, legPrice * 0.125) : notional * rate;
+        const intrinsic = Math.max(0, kind === 'call' ? notional - strike : strike - notional);
+        const delivery = tteDays < 1 ? 0 : Math.min(notional * 0.00015, intrinsic * 0.125);
+        return trade + delivery;
+      },
+      perOrder: 0,
     },
   };
 }

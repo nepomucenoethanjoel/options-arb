@@ -225,7 +225,14 @@ function evaluatePair(
   let costsUsdc = 0;
   for (const v of pair) {
     const legPrice = v === buy ? buyLegPrice : sellLegPrice;
-    costsUsdc += fees[v]!.perContract({ legPrice, notional: feeNotional, underlying: row.underlying });
+    costsUsdc += fees[v]!.perContract({
+      legPrice,
+      notional: feeNotional,
+      underlying: row.underlying,
+      kind: row.kind,
+      strike: row.strike,
+      tteDays,
+    });
   }
   const orderFees = (total: number) => pair.reduce((t, v) => t - fees[v]!.perOrder, total);
 
