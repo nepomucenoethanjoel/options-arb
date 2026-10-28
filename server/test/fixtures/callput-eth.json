@@ -1,0 +1,77 @@
+{
+ "timestamp": 1793176302806,
+ "data": {
+  "market": {
+   "ETH": {
+    "expiries": [
+     1793347200
+    ],
+    "options": {
+     "1793347200": {
+      "call": [
+       {
+        "instrument": "ETH-30OCT26-2150-C",
+        "optionId": "0x0002006ae44e8000000000086600000000000000000000000000000000000000",
+        "strikePrice": 2150,
+        "markIv": 0.7092970137738083,
+        "markPrice": 224.22729251643614,
+        "riskPremiumRateForBuy": 0.013905123399015135,
+        "riskPremiumRateForSell": 0.009517116980555802,
+        "delta": 0.9723082445573891,
+        "gamma": 0.0005137987162044207,
+        "vega": 0.11120444131369014,
+        "theta": -1.993922402459766,
+        "volume": null,
+        "openInterest": "0",
+        "isOptionAvailable": true,
+        "expiry": 1793347200
+       },
+       {
+        "instrument": "ETH-30OCT26-1600-C",
+        "optionId": "0x0002006ae44e8000000000064000000000000000000000000000000000000000",
+        "strikePrice": 1600,
+        "markIv": 1.3797,
+        "markPrice": 772.8886461486018,
+        "riskPremiumRateForBuy": 0.015286709626217143,
+        "riskPremiumRateForSell": 0.008988932809203374,
+        "delta": 0.9999577569773275,
+        "gamma": 7.288830753573506e-7,
+        "vega": 0.0003068622864640868,
+        "theta": -0.01070252300086961,
+        "volume": null,
+        "openInterest": "0",
+        "isOptionAvailable": false,
+        "expiry": 1793347200
+       }
+      ],
+      "put": [
+       {
+        "instrument": "ETH-30OCT26-2150-P",
+        "optionId": "0x0002006ae44e8000000000086600000000000000000000000000000000000000",
+        "strikePrice": 2150,
+        "markIv": 0.7092970137738083,
+        "markPrice": 1.3410279172337312,
+        "riskPremiumRateForBuy": 0.0008647821274168729,
+        "riskPremiumRateForSell": 0.011252487803210384,
+        "delta": -0.027691755442610932,
+        "gamma": 0.0005137987162044207,
+        "vega": 0.11120444131369014,
+        "theta": -1.993922402459766,
+        "volume": null,
+        "openInterest": "0",
+        "isOptionAvailable": true,
+        "expiry": 1793347200
+       }
+      ]
+     }
+    }
+   }
+  },
+  "spotIndices": {
+   "ETH": 2373.438666666666
+  },
+  "futuresIndices": {
+   "ETH": 2372.4531279066664
+  }
+ }
+}

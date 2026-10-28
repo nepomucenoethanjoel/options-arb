@@ -77,7 +77,7 @@ describe('CoincallAdapter.getChain', () => {
 
 describe('Coincall fee model', () => {
   const fee = feeModels({ deriveTakerFeeBps: 3, oliveFeeNotionalBps: 2.5, oliveFeePremiumPct: 10, solanaFeeUsdc: 0.05 }).coincall!;
-  const ctx = { notional: 100, kind: 'call' as const, strike: 110, tteDays: 30 };
+  const ctx = { notional: 100, kind: 'call' as const, strike: 110, tteDays: 30, side: 'buy' as const };
 
   it('altcoins pay 0.06% taker, BTC/ETH 0.03%, capped at 12.5% of premium', () => {
     expect(fee.perContract({ ...ctx, legPrice: 5, underlying: 'SOL' })).toBeCloseTo(0.06, 6);

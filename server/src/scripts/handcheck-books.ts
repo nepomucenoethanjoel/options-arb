@@ -10,7 +10,7 @@
 import { loadConfig } from '../config';
 
 const APP = process.env.APP_URL ?? 'http://127.0.0.1:8799';
-const BOOK_VENUES = ['derive', 'coincall', 'hypercall'] as const;
+const BOOK_VENUES = ['derive', 'coincall', 'hypercall', 'callput'] as const;
 type BookVenue = (typeof BOOK_VENUES)[number];
 
 const n = (v: unknown): number | null => {
@@ -74,19 +74,41 @@ async function hypercallRaw(underlying: string, name: string): Promise<RawQuote>
   return { bid, bidSize, ask, askSize, mark: pos(o.mark_price), index: pos(o.underlying_price) };
 }
 
+async function callputRaw(underlying: string, name: string): Promise<RawQuote> {
+  const feed = (await (await fetch('https://app-data-base.s3.ap-southeast-1.amazonaws.com/market-data.json')).json()) as any;
+  const all = Object.values(feed.data?.market?.[underlying]?.options ?? {}).flatMap((e: any) => [...(e.call ?? []), ...(e.put ?? [])]);
+  const o: any = all.find((x: any) => x.instrument === name);
+  if (!o) throw new Error(`Callput ${name} not found`);
+  const mark = pos(o.markPrice);
+  // Docs pricing-mechanism: execution = mark ± risk premium.
+  const ok = o.isOptionAvailable !== false && mark != null;
+  return {
+    bid: ok ? mark! * (1 - o.riskPremiumRateForSell) : null,
+    bidSize: null,
+    ask: ok ? mark! * (1 + o.riskPremiumRateForBuy) : null,
+    askSize: null,
+    mark,
+    index: pos(feed.data?.spotIndices?.[underlying]),
+  };
+}
+
 /** Taker fee per contract, written from the venue docs (not fees.ts). */
-function feeOf(venue: BookVenue, legPrice: number | null, spot: number, underlying: string, kind: string, strike: number, tteDays: number, deriveBps: number): number {
+function feeOf(venue: BookVenue, legPrice: number | null, spot: number, underlying: string, kind: string, strike: number, tteDays: number, deriveBps: number, side: 'buy' | 'sell'): number {
   if (venue === 'derive') {
     const f = spot * (deriveBps / 10_000);
     return legPrice != null && legPrice > 0 ? Math.min(f, 0.125 * legPrice) : f;
   }
   if (venue === 'hypercall') return spot * (5 + 1.5) / 10_000; // published 5 bps taker + 1.5 bps settlement
+  if (venue === 'callput') {
+    const capped = (bps: number) => (legPrice != null && legPrice > 0 ? Math.min(spot * bps / 10_000, 0.125 * legPrice) : spot * bps / 10_000);
+    return capped(side === 'buy' ? 6 : 3) + capped(2);
+  }
   const rate = underlying === 'BTC' || underlying === 'ETH' ? 0.0003 : 0.0006;
   const trade = legPrice != null && legPrice > 0 ? Math.min(spot * rate, 0.125 * legPrice) : spot * rate;
   const intrinsic = Math.max(0, kind === 'call' ? spot - strike : strike - spot);
   return trade + (tteDays < 1 ? 0 : Math.min(spot * 0.00015, 0.125 * intrinsic));
 }
-const ORDER_FEE: Record<BookVenue, number> = { derive: 0.5, coincall: 0, hypercall: 0 };
+const ORDER_FEE: Record<BookVenue, number> = { derive: 0.5, coincall: 0, hypercall: 0, callput: 0 };
 
 async function main() {
   const cfg = loadConfig();
@@ -113,7 +135,9 @@ async function main() {
       ? deriveRaw(row.underlying, row.expiryDate, row.legs.derive.instrumentId)
       : v === 'coincall'
         ? coincallRaw(row.underlying, row.legs.coincall.instrumentId)
-        : hypercallRaw(row.underlying, row.legs.hypercall.instrumentId);
+        : v === 'hypercall'
+          ? hypercallRaw(row.underlying, row.legs.hypercall.instrumentId)
+          : callputRaw(row.underlying, row.legs.callput.instrumentId);
   const [freshB, freshS] = await Promise.all([raw(buy), raw(sell)]);
   // 1) Quote source: the fresh raw quote vs the quote the cycle used. RFQ
   //    makers re-quote every second or two, so allow drift; a wrong side,
@@ -142,12 +166,13 @@ async function main() {
   const exit = sq.bid ?? sq.mark;
   const gross = entry != null && exit != null ? exit - entry : null;
   const costs =
-    feeOf(buy, entry, spot, row.underlying, row.kind, row.strike, tteDays, cfg.deriveTakerFeeBps) +
-    feeOf(sell, exit, spot, row.underlying, row.kind, row.strike, tteDays, cfg.deriveTakerFeeBps);
+    feeOf(buy, entry, spot, row.underlying, row.kind, row.strike, tteDays, cfg.deriveTakerFeeBps, 'buy') +
+    feeOf(sell, exit, spot, row.underlying, row.kind, row.strike, tteDays, cfg.deriveTakerFeeBps, 'sell');
   const collateral = row.kind === 'call' ? spot : row.strike;
   const capital = collateral * cfg.capitalBorrowRateApr * tau;
   const netAfterCapital = gross != null ? gross - costs - capital : null;
-  const size = bq.askSize != null && sq.bidSize != null ? Math.min(bq.askSize, sq.bidSize) : null;
+  // A quoted side with no published size (Callput) counts as size 0 — no clip total.
+  const size = bq.ask != null && sq.bid != null ? Math.min(bq.askSize ?? 0, sq.bidSize ?? 0) : null;
   const total = size != null && size > 0 && netAfterCapital != null ? netAfterCapital * size - ORDER_FEE[buy] - ORDER_FEE[sell] : null;
 
   const cmp = (label: string, mine: number | null, theirs: number | null, tol: number) => {

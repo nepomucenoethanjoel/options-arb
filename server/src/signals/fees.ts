@@ -11,6 +11,8 @@ export interface FeeContext {
   strike: number;
   /** Days to expiry (some venues waive settlement fees on dailies). */
   tteDays: number;
+  /** Which side of the pair this leg is: buy (open long) or sell (open short). */
+  side: 'buy' | 'sell';
 }
 
 /**
@@ -75,6 +77,19 @@ export function feeModels(cfg: FeeConfig): Partial<Record<Venue, VenueFeeModel>>
     // index notional (base UNVERIFIED) — conservative while fees are waived.
     hypercall: {
       perContract: ({ notional }) => notional * 0.0005 + notional * 0.00015,
+      perOrder: 0,
+    },
+    // Callput (docs fees): open-buy 6 bps, open-sell 3 bps, settle 2 bps of
+    // notional, each capped at 12.5% of premium. The keeper's native-token
+    // execution fee is unpublished — quotes carry execution_fee_unknown.
+    callput: {
+      perContract: ({ legPrice, notional, side }) => {
+        const cap = (bps: number) => {
+          const f = notional * (bps / 10_000);
+          return legPrice != null && legPrice > 0 ? Math.min(f, legPrice * 0.125) : f;
+        };
+        return cap(side === 'buy' ? 6 : 3) + cap(2);
+      },
       perOrder: 0,
     },
   };

@@ -647,6 +647,13 @@ describe('computeSignals — N venues (best vol-consistent pair per contract)', 
     expect(s.isOpportunity).toBe(false);
   });
 
+  it('flags legs that settle in different assets (Derive USDC vs Coincall USDT)', () => {
+    const [s] = computeSignals([rowN({ derive: deriveQuote(), coincall: coincallQuote() })], cfgN, NOW);
+    expect(s.flags).toContain('settlement_asset_mismatch');
+    const [o] = computeSignals([row(deriveQuote(), oliveQuote())], cfg, NOW); // both USDC
+    expect(o.flags).not.toContain('settlement_asset_mismatch');
+  });
+
   it('applies book-quality flags to every book leg', () => {
     const [s] = computeSignals([rowN({ derive: deriveQuote(), coincall: coincallQuote({ bid: null }) })], cfgN, NOW);
     expect(s.flags).toContain('one_sided');

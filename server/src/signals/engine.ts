@@ -193,6 +193,11 @@ function evaluatePair(
     if (!isAmm(v) && row.legs[v]!.quote!.ts < now - cfg.staleQuoteMs) flag('stale');
   }
   for (const v of pair) for (const f of row.legs[v]!.quote!.flags ?? []) flag(f);
+  // Informational: the legs pay out in different assets (USDC / USDT / the
+  // coin itself) — convergence holds in USD terms only at those rates.
+  if (VENUE_SPECS[buy].settlementAsset(row.kind) !== VENUE_SPECS[sell].settlementAsset(row.kind)) {
+    flag('settlement_asset_mismatch');
+  }
 
   // ── IV spread (sell − buy: ≥ 0 by construction) ─────────────────────────
   const spreadVols = (sq.iv! - bq.iv!) * 100;
@@ -233,6 +238,7 @@ function evaluatePair(
       kind: row.kind,
       strike: row.strike,
       tteDays,
+      side: v === buy ? 'buy' : 'sell',
     });
   }
   const orderFees = (total: number) => pair.reduce((t, v) => t - fees[v]!.perOrder, total);
