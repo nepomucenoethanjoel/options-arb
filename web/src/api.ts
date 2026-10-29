@@ -174,7 +174,10 @@ export function useLiveOverview(underlying: string): { data: OverviewResponse | 
       };
       ws.onmessage = (ev) => {
         const parsed = parseCycle(ev.data as string);
-        if (parsed) setData(parsed);
+        // A digest (no subscription yet, e.g. the default '' underlying the
+        // server ignores) carries KPI/health only — keep the rows on screen
+        // instead of blanking the table until the next REST refresh.
+        if (parsed) setData((prev) => (parsed.underlying == null && prev ? { ...parsed, rows: prev.rows, signals: prev.signals, underlying: prev.underlying } : parsed));
       };
       ws.onclose = () => {
         setConnected(false);
