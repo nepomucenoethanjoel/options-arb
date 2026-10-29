@@ -67,3 +67,24 @@ describe('Callput fee model', () => {
     expect(fee.perContract({ ...ctx, legPrice: 4, side: 'buy' })).toBeCloseTo(0.5 + 0.4, 9); // 12.5% × 4 caps the 1.2 open fee
   });
 });
+
+describe('CallputAdapter read interval', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it('re-reads only after the configured interval', async () => {
+    vi.useFakeTimers({ now: 1_000_000, toFake: ['Date'] });
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 200, headers: new Headers(), json: async () => fixture }));
+    vi.stubGlobal('fetch', fetchMock);
+    const a = new CallputAdapter('https://x', 300_000);
+    await a.getChain('ETH');
+    vi.setSystemTime(1_000_000 + 120_000);
+    await a.getChain('ETH');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    vi.setSystemTime(1_000_000 + 301_000);
+    await a.getChain('ETH');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});

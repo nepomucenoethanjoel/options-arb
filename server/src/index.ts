@@ -46,7 +46,7 @@ async function main(): Promise<void> {
   const extraAdapters: Record<ExtraVenue, () => OptionsVenueAdapter> = {
     coincall: () => new CoincallAdapter(cfg.coincallBaseUrl),
     hypercall: () => new HypercallAdapter(cfg.hypercallBaseUrl),
-    callput: () => new CallputAdapter(cfg.callputFeedUrl),
+    callput: () => new CallputAdapter(cfg.callputFeedUrl, cfg.callputMinIntervalMs),
     deribit: () => new DeribitAdapter(cfg.deribitBaseUrl),
   };
   const extraVenues = cfg.extraVenues.map((v) => extraAdapters[v]());

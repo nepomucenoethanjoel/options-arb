@@ -51,6 +51,7 @@ export interface AppConfig {
   coincallBaseUrl: string;
   hypercallBaseUrl: string;
   callputFeedUrl: string;
+  callputMinIntervalMs: number;
   deribitBaseUrl: string;
 
   deriveBaseUrl: string;
@@ -185,6 +186,7 @@ export function loadConfig(): AppConfig {
     coincallBaseUrl: str('COINCALL_BASE_URL', 'https://api.coincall.com'),
     hypercallBaseUrl: str('HYPERCALL_BASE_URL', 'https://api.hypercall.xyz'),
     deribitBaseUrl: str('DERIBIT_BASE_URL', 'https://www.deribit.com/api/v2'),
+    callputMinIntervalMs: Math.max(15_000, num('CALLPUT_MIN_INTERVAL_MS', 60_000)),
     callputFeedUrl: str('CALLPUT_FEED_URL', 'https://app-data-base.s3.ap-southeast-1.amazonaws.com/market-data.json'),
 
     deriveBaseUrl: str('DERIVE_BASE_URL', 'https://api.derive.xyz/v3'),

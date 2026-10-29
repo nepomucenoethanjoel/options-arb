@@ -27,7 +27,8 @@ import { HealthTracker, fetchWithTimeout } from '../util';
 
 export const CALLPUT_FEED_URL = 'https://app-data-base.s3.ap-southeast-1.amazonaws.com/market-data.json';
 /** The feed is one multi-MB file for every asset: read it at most this often. */
-const FEED_MIN_INTERVAL_MS = 60_000;
+/** Default spacing between feed reads (CALLPUT_MIN_INTERVAL_MS overrides): each read is ~4 MB. */
+export const CALLPUT_DEFAULT_MIN_INTERVAL_MS = 60_000;
 const NAME_RE = /^([A-Z0-9]+)-(\d{1,2})([A-Z]{3})(\d{2})-([\d.]+)-([CP])$/;
 
 interface RawOption {
@@ -116,13 +117,24 @@ export function mapCallputChain(feed: CallputFeed, underlying: string): { instru
 
 export class CallputAdapter implements OptionsVenueAdapter {
   readonly venue: Venue = 'callput';
-  private readonly health = new HealthTracker('callput', 'callput:s3-feed', 3 * FEED_MIN_INTERVAL_MS);
+  private readonly health: HealthTracker;
   private feed: CallputFeed | null = null;
   private fetchedAt = 0;
   private etag: string | null = null;
   private inflight: Promise<CallputFeed> | null = null;
 
-  constructor(private readonly feedUrl: string = CALLPUT_FEED_URL) {}
+  /**
+   * A longer interval saves bandwidth (~4 MB/read) but quotes keep the
+   * feed's own timestamp, so between reads they age into `stale` like any
+   * venue — deliberately not exempted (a minutes-old indicative price must
+   * not show as a best venue).
+   */
+  constructor(
+    private readonly feedUrl: string = CALLPUT_FEED_URL,
+    private readonly minIntervalMs: number = CALLPUT_DEFAULT_MIN_INTERVAL_MS,
+  ) {
+    this.health = new HealthTracker('callput', 'callput:s3-feed', 3 * minIntervalMs);
+  }
 
   getHealth(): VenueHealth {
     return this.health.snapshot();
@@ -130,7 +142,7 @@ export class CallputAdapter implements OptionsVenueAdapter {
 
   /** One shared read for every underlying; conditional GET skips the body when unchanged. */
   private async getFeed(): Promise<CallputFeed> {
-    if (this.feed && Date.now() - this.fetchedAt < FEED_MIN_INTERVAL_MS) return this.feed;
+    if (this.feed && Date.now() - this.fetchedAt < this.minIntervalMs) return this.feed;
     this.inflight ??= (async () => {
       try {
         const res = await fetchWithTimeout(
