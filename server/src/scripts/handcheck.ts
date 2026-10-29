@@ -128,7 +128,8 @@ async function fetchMarketFile(sym: string): Promise<MarketFile> {
 async function pickTarget(): Promise<TargetPick> {
   // Manual focus file wins; it only selects the pair (the numbers compared
   // against are always the server's LIVE signal for that pair).
-  if (existsSync('../handcheck-target.json')) {
+  // Scheduled runs (HANDCHECK_AUTO=1) ignore a leftover manual focus file.
+  if (process.env.HANDCHECK_AUTO !== '1' && existsSync('../handcheck-target.json')) {
     const t = JSON.parse(readFileSync('../handcheck-target.json', 'utf8')) as TargetPick;
     if (!t.pairKey) throw new Error('handcheck-target.json has no pairKey');
     return { ...t, how: 'manual handcheck-target.json' };
@@ -136,9 +137,11 @@ async function pickTarget(): Promise<TargetPick> {
   const res = await fetch(`${APP}/api/opportunities`);
   if (!res.ok) throw new Error(`/api/opportunities unreachable (${res.status}) — is the server running?`);
   const { signals } = (await res.json()) as { signals: any[] };
-  const executable = signals.filter((s) => s.buyVenue === 'olive' && s.sellVenue === 'derive');
-  const pick = executable[0] ?? [...signals].sort((a, b) => b.score - a.score)[0];
-  if (!pick) throw new Error('no opportunities to verify (and no handcheck-target.json)');
+  // This script verifies Olive × Derive pairs (book pairs: handcheck-books.ts).
+  const oliveDerive = signals.filter((s) => [s.buyVenue, s.sellVenue].sort().join() === 'derive,olive');
+  const executable = oliveDerive.filter((s) => s.buyVenue === 'olive');
+  const pick = executable[0] ?? [...oliveDerive].sort((a, b) => b.score - a.score)[0];
+  if (!pick) throw new NothingToCheck('no opportunities to verify (and no handcheck-target.json)');
   return {
     pairKey: pick.pairKey,
     underlying: pick.underlying,
@@ -150,6 +153,11 @@ async function pickTarget(): Promise<TargetPick> {
       : 'top-scoring signal — NO executable-direction rows right now (/api/opportunities)',
   };
 }
+
+/** Exit codes (scheduled runs, deploy/options-arb-handcheck.sh): 0 all ✓, 1 a
+ *  pipeline field ✗ or an error, 3 nothing to check right now. */
+let failures = 0;
+class NothingToCheck extends Error {}
 
 async function main() {
   const cfg = loadConfig();
@@ -215,6 +223,9 @@ async function main() {
   if (!pairRes.ok) throw new Error(`/api/pair unreachable (${pairRes.status})`);
   const { row, signal } = (await pairRes.json()) as { row: any; signal: any };
   if (!signal) throw new Error(`no live signal for ${target.pairKey} in the current cycle`);
+  if ([signal.buyVenue, signal.sellVenue].sort().join() !== 'derive,olive') {
+    throw new NothingToCheck(`${target.pairKey} is now ${signal.buyVenue}→${signal.sellVenue}; this script verifies Olive × Derive pairs`);
+  }
   const serverSynthSpot = n(row?.legs?.olive?.quote?.indexPrice) ?? market.spot;
 
   // ── Independent recomputation (engine semantics, live inputs) ────────────
@@ -286,13 +297,18 @@ async function main() {
   const xchk = deriveMark - bsPrice({ forward, strike: target.strike, tauYears: tau, vol: xchkVol, discountFactor: df, kind: target.kind });
 
   const cmp = (label: string, mine: number | null, theirs: number | null, tol = 0.02) => {
-    if (mine == null || theirs == null) return `${label}: mine=${mine} theirs=${theirs} (null mismatch?)`;
+    if (mine == null || theirs == null) {
+      if (mine !== theirs) failures++;
+      return `${label}: mine=${mine} theirs=${theirs} (null mismatch?)`;
+    }
     const ok = Math.abs(mine - theirs) <= tol;
+    if (!ok) failures++;
     return `${label}: mine=${mine.toFixed(4)} theirs=${theirs} ${ok ? '✓' : `✗ DIFF ${Math.abs(mine - theirs).toFixed(4)}`}`;
   };
   console.log(`hand-check of ${target.pairKey} (tau=${tau.toFixed(6)}y, Derive index=${index}, server synth spot=${serverSynthSpot}, stork=${market.spot})`);
   console.log(`Derive IV: mine(fresh)=${(deriveIv * 100).toFixed(2)}% theirs(cycle)=${signal.ivSpreadVols != null ? (((signal.ivSpreadVols / 100) + market.vol) * 100).toFixed(2) : '?'}% — quoted IVs drift between the cycle and this check`);
   const theirs = `buy_${signal.buyVenue}_sell_${signal.sellVenue}`;
+  if (direction !== theirs) failures++;
   console.log(`direction: mine=${direction} theirs=${theirs} ${direction === theirs ? '✓' : '✗'}`);
   // 0.5 vol pts: Derive's quoted IV on the wings can jump a few tenths
   // between the server's cycle and this fetch; the point is catching gross
@@ -323,7 +339,19 @@ async function main() {
   console.log(`executability: size ${signal.maxExecutableSize ?? 'null'} vs 1e-6 tick: ${sizeOk ? '✓' : '✗ below minimum quantity'}`);
 }
 
-main().catch((e) => {
-  console.error('HANDCHECK FAILED:', e);
-  process.exit(1);
-});
+main()
+  .then(() => {
+    if (failures > 0) {
+      console.error(`HANDCHECK MISMATCH: ${failures} field(s) ✗`);
+      process.exitCode = 1;
+    }
+  })
+  .catch((e) => {
+    if (e instanceof NothingToCheck) {
+      console.log(`HANDCHECK SKIPPED: ${e.message}`);
+      process.exitCode = 3;
+      return;
+    }
+    console.error('HANDCHECK FAILED:', e);
+    process.exit(1);
+  });

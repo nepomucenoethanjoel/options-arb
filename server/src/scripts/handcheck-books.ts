@@ -126,6 +126,12 @@ function feeOf(venue: BookVenue, legPrice: number | null, spot: number, underlyi
 }
 const ORDER_FEE: Record<BookVenue, number> = { derive: 0.5, coincall: 0, hypercall: 0, callput: 0, deribit: 0 };
 
+/** Exit codes (scheduled runs, deploy/options-arb-handcheck.sh): 0 all ✓, 1 a
+ *  money field ✗ or an error, 3 nothing to check right now. Quote drift
+ *  between the cycle and the fresh fetch is reported, never counted. */
+let failures = 0;
+class NothingToCheck extends Error {}
+
 async function main() {
   const cfg = loadConfig();
   let pairKey = process.env.PAIR_KEY;
@@ -136,7 +142,7 @@ async function main() {
     const pick = signals.find(
       (s) => BOOK_VENUES.includes(s.buyVenue) && BOOK_VENUES.includes(s.sellVenue) && s.maxExecutableSize > 0,
     );
-    if (!pick) throw new Error('no sized book-venue pair signal right now (set PAIR_KEY)');
+    if (!pick) throw new NothingToCheck('no sized book-venue pair signal right now (set PAIR_KEY)');
     pairKey = pick.pairKey as string;
   }
   const { row, signal } = (await (await fetch(`${APP}/api/pair?pairKey=${encodeURIComponent(pairKey)}`)).json()) as { row: any; signal: any };
@@ -194,8 +200,12 @@ async function main() {
   const total = size != null && size > 0 && netAfterCapital != null ? netAfterCapital * size - ORDER_FEE[buy] - ORDER_FEE[sell] : null;
 
   const cmp = (label: string, mine: number | null, theirs: number | null, tol: number) => {
-    if (mine == null || theirs == null) return `${label}: mine=${mine} theirs=${theirs} ${mine === theirs ? '✓' : '(null mismatch?)'}`;
+    if (mine == null || theirs == null) {
+      if (mine !== theirs) failures++;
+      return `${label}: mine=${mine} theirs=${theirs} ${mine === theirs ? '✓' : '(null mismatch?)'}`;
+    }
     const ok = Math.abs(mine - theirs) <= tol;
+    if (!ok) failures++;
     return `${label}: mine=${mine.toFixed(4)} theirs=${theirs} ${ok ? '✓' : `✗ DIFF ${Math.abs(mine - theirs).toFixed(4)}`}`;
   };
   console.log(cmp('entryPrice', entry, signal.entryPriceUsdc, 0.02));
@@ -208,7 +218,19 @@ async function main() {
   console.log(cmp('totalNet', total, signal.totalNetUsdc, 1));
 }
 
-main().catch((e) => {
-  console.error('HANDCHECK FAILED:', e);
-  process.exit(1);
-});
+main()
+  .then(() => {
+    if (failures > 0) {
+      console.error(`HANDCHECK MISMATCH: ${failures} field(s) ✗`);
+      process.exitCode = 1;
+    }
+  })
+  .catch((e) => {
+    if (e instanceof NothingToCheck) {
+      console.log(`HANDCHECK SKIPPED: ${e.message}`);
+      process.exitCode = 3;
+      return;
+    }
+    console.error('HANDCHECK FAILED:', e);
+    process.exit(1);
+  });
