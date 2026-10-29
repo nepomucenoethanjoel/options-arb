@@ -12,7 +12,7 @@ import {
   type Venue,
 } from '@options-arb/shared';
 import { feeModels, type VenueFeeModel } from './fees';
-import { oliveCapacityCap, oliveExecutionImpact, type OliveCustody } from './olive';
+import { bestOliveClip, oliveCapacityCap, oliveExecutionImpact, type OliveCustody } from './olive';
 
 export interface SignalConfig {
   ivSpreadThresholdVols: number;
@@ -319,6 +319,22 @@ function evaluatePair(
       }
     }
   }
+  // Own impact grows with size: when the full clip is priced, search smaller
+  // clips with the same fill model (only where a contract nets positive at the quote).
+  let bestClip: ReturnType<typeof bestOliveClip> = null;
+  if (expectedTotalNetUsdc != null && custody != null && netAfterCapitalUsdc != null && netAfterCapitalUsdc > 0 && entryPrice != null) {
+    const priced = (size: number): number | null => {
+      const { vwapEntry } = oliveExecutionImpact({
+        kind: row.kind,
+        strike: row.strike,
+        size,
+        custody,
+        priceFill: { spot, vol: bq.iv!, tauYears: tau, quotedMark: bq.mark ?? 0, entryPrice },
+      });
+      return vwapEntry != null ? orderFees((netAfterCapitalUsdc - (vwapEntry - entryPrice)) * size) : null;
+    };
+    bestClip = bestOliveClip(priced, maxExecutableSize!);
+  }
   // Buying from Olive without a priced fill only has the quote-based total,
   // which assumes the rate stays put — mark it so headlines don't trust it.
   if (
@@ -413,6 +429,13 @@ function evaluatePair(
     expectedEntryUsdc: round(expectedEntryUsdc, 4),
     expectedNetAfterCapitalUsdc: round(expectedNetAfterCapitalUsdc, 4),
     expectedTotalNetUsdc: round(expectedTotalNetUsdc, 2),
+    ...(bestClip
+      ? {
+          bestClipSize: round(bestClip.bestSize, 4),
+          bestClipExpectedTotalUsdc: round(bestClip.bestTotal, 2),
+          maxProfitableSize: bestClip.maxProfitableSize != null ? round(bestClip.maxProfitableSize, 4) : null,
+        }
+      : {}),
     roiApyPct: round(roiApyPct, 2),
     settlementBasisUsdc: round(settlementBasisUsdc, 4),
     syntheticCrossCheckUsdc: round(syntheticCrossCheckUsdc, 4),

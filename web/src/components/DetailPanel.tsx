@@ -12,7 +12,7 @@ import {
 } from 'recharts';
 import { VENUE_ORDER, VENUE_SPECS, type MatchRow, type Signal } from '@options-arb/shared';
 import { fetchHistory, fetchPair, type HistoryResponse } from '../api';
-import { daysTo, expiryLabel, num, pairLabel, pct, usd } from '../format';
+import { daysTo, expiryLabel, fmtSize, num, pairLabel, pct, usd } from '../format';
 import { directionLabel, venueLabel } from '../venues';
 
 export function DetailPanel({
@@ -151,6 +151,18 @@ export function DetailPanel({
                       {signal.expectedTotalNetUsdc < (signal.totalNetUsdc ?? 0) ? ' (rate impact priced in)' : ''}
                     </span>
                   </div>
+                  {signal.bestClipSize != null && signal.bestClipExpectedTotalUsdc != null && (
+                    <div>
+                      <span className="k">Best clip (fill model)</span>
+                      <span
+                        className={`v mono ${signal.bestClipExpectedTotalUsdc >= 0 ? 'pos-val' : 'neg-val'}`}
+                        title="Smaller clips move the pool's rate less: the clip size, up to the cap, with the highest expected total (searched in 20 steps)"
+                      >
+                        {usd(signal.bestClipExpectedTotalUsdc, 2)} at {fmtSize(signal.bestClipSize)}
+                        {signal.maxProfitableSize != null ? ` · profitable up to ${fmtSize(signal.maxProfitableSize)}` : ' · no size nets positive'}
+                      </span>
+                    </div>
+                  )}
                 </>
               )}
               <div><span className="k">ROI APY on collateral</span><span className="v mono">{signal.roiApyPct != null ? `${signal.roiApyPct > 0 ? '+' : ''}${signal.roiApyPct.toFixed(1)}%` : '–'}</span></div>

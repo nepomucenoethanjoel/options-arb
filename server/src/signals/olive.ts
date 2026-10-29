@@ -84,3 +84,31 @@ export function oliveExecutionImpact(input: {
   }
   return { movesRate, vwapEntry: null };
 }
+
+/** Clip sizes tried between 0 and the cap (each costs one fill-model integration). */
+export const OLIVE_CLIP_SEARCH_STEPS = 20;
+
+/**
+ * Best clip under the fill model: the full-cap clip can lose while a smaller
+ * one nets positive (own impact grows with size). Scans `steps` evenly spaced
+ * sizes up to `maxSize` — resolution is maxSize/steps — and returns the
+ * size with the highest expected total, plus the largest size still > 0.
+ * `expectedTotal(size)` returns null when the model cannot price that size.
+ */
+export function bestOliveClip(
+  expectedTotal: (size: number) => number | null,
+  maxSize: number,
+  steps = OLIVE_CLIP_SEARCH_STEPS,
+): { bestSize: number; bestTotal: number; maxProfitableSize: number | null } | null {
+  if (!(maxSize > 0)) return null;
+  let best: { size: number; total: number } | null = null;
+  let maxProfitableSize: number | null = null;
+  for (let i = 1; i <= steps; i++) {
+    const size = (maxSize * i) / steps;
+    const total = expectedTotal(size);
+    if (total == null) continue;
+    if (best == null || total > best.total) best = { size, total };
+    if (total > 0) maxProfitableSize = size;
+  }
+  return best ? { bestSize: best.size, bestTotal: best.total, maxProfitableSize } : null;
+}

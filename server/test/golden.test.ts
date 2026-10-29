@@ -28,6 +28,9 @@ interface GoldenCase {
   signals: Array<Record<string, unknown>>;
 }
 
+/** Fields added after the recording (additive): compared by their own test below, not against the golden file. */
+const POST_RECORDING_FIELDS = ['bestClipSize', 'bestClipExpectedTotalUsdc', 'maxProfitableSize'] as const;
+
 /** Project a venue-keyed row onto the recorded two-leg shape. */
 function toLegacyRow(r: MatchRow): Record<string, unknown> {
   const { legs, ...rest } = r;
@@ -40,7 +43,8 @@ function toLegacyRow(r: MatchRow): Record<string, unknown> {
 
 /** The recorded two-venue direction from the venue pair. */
 function toLegacySignal(s: Signal): Record<string, unknown> {
-  const { buyVenue, sellVenue, alternatives: _alt, ...rest } = s;
+  const { buyVenue, sellVenue, alternatives: _alt, ...rest } = s as Signal & Record<string, unknown>;
+  for (const k of POST_RECORDING_FIELDS) delete rest[k];
   const direction =
     buyVenue === 'olive' && sellVenue === 'derive' ? 'buy_olive_sell_derive' : buyVenue === 'derive' && sellVenue === 'olive' ? 'buy_derive_sell_olive' : null;
   return { ...rest, direction };
@@ -82,4 +86,21 @@ describe('golden Olive × Derive cycle', () => {
       expect(signals.map(toLegacySignal)).toEqual(c.signals);
     });
   }
+
+  it('best Olive clip: never worse than the full clip, within the cap, only on fill-priced rows', () => {
+    let searched = 0;
+    for (const c of golden.cases) {
+      for (const s of replay(c).signals) {
+        if (s.bestClipSize == null) continue;
+        searched++;
+        expect(s.buyVenue).toBe('olive');
+        expect(s.expectedTotalNetUsdc).not.toBeNull();
+        expect(s.bestClipSize).toBeGreaterThan(0);
+        expect(s.bestClipSize).toBeLessThanOrEqual(s.maxExecutableSize! + 1e-9);
+        expect(s.bestClipExpectedTotalUsdc!).toBeGreaterThanOrEqual(s.expectedTotalNetUsdc! - 0.01);
+        if (s.maxProfitableSize != null) expect(s.maxProfitableSize).toBeLessThanOrEqual(s.maxExecutableSize! + 1e-9);
+      }
+    }
+    expect(searched).toBeGreaterThan(0);
+  });
 });

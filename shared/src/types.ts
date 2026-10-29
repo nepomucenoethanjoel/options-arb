@@ -206,6 +206,14 @@ export interface Signal {
   expectedNetAfterCapitalUsdc: number | null;
   /** expectedNetAfterCapitalUsdc × size − order fee — the honest clip total. */
   expectedTotalNetUsdc: number | null;
+  /** Buying from Olive: the clip size (≤ maxExecutableSize) with the highest
+   * fill-model total — smaller clips move the pool rate less. Null when the
+   * fill model did not price the row or nothing nets positive per contract. */
+  bestClipSize?: number | null;
+  /** Fill-model clip total at bestClipSize. */
+  bestClipExpectedTotalUsdc?: number | null;
+  /** Largest searched clip whose fill-model total is still > 0. */
+  maxProfitableSize?: number | null;
   /** Net-after-capital ROI on Olive's locked collateral, annualized %. */
   roiApyPct: number | null;
   /** ~1σ settlement basis risk between the two venues' settlement prices, per unit, USDC. A risk figure, not a cost. */
