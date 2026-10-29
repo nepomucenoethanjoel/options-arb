@@ -18,7 +18,7 @@ make a number look better.**
 
 ## Non-negotiable rules
 
-1. **The verification stack is load-bearing.** 188 tests (incl. a golden
+1. **The verification stack is load-bearing.** 225 tests (incl. a golden
    replay of a recorded live Olive × Derive cycle), typechecks in three
    workspaces, and `server/src/scripts/handcheck.ts` /
    `handcheck-books.ts` (live field
@@ -71,7 +71,15 @@ bash deploy/deploy.sh root@<vps>  # deploy: build locally + ship + restart
 - Adding a venue: adapter with `getChain` + fixture test from a captured live
   response, a `VENUE_SPECS` entry, a fee model, a raw fetcher in
   `handcheck-books.ts`, and DATA_SOURCES rows — same commit.
-- `server/src/scheduler.ts` — cycle orchestration + change-gated persistence.
+- `server/src/scheduler.ts` — cycle orchestration + change-gated persistence;
+  per-venue fee-adjusted prices on lite rows (`signals/bestVenue.ts`), surface
+  flags (`signals/surfaceChecks.ts`), parity (`signals/parity.ts`).
+- `server/src/episodes.ts` — gap episodes at cycle resolution (headline /
+  reference / quote_only / parity) → `/api/episodes/summary`; never pruned.
+- Reference-only venues (Deribit) carry `reference_venue` (headline-blocking);
+  informational flags (`smile_outlier`, `calendar_inversion`, parity rows) never
+  reach the KPI. The KPI may use the fill model's best smaller Olive clip
+  (`honestTotalNetUsdc`), never above the quoted full-clip total.
 - `test/golden.test.ts` — replays a recorded live Olive × Derive cycle; any
   change to those numbers fails it (re-record only with evidence).
 - `server/src/api/server.ts` — REST + WS + `buildKpis` (pool-aware Σ takes

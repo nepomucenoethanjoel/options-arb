@@ -156,6 +156,21 @@ never pinned snapshots.
 quotes the cycle used (drift reported), and every money field is recomputed
 from them with independently written fee formulas (`PAIR_KEY=…` to pick one).
 
+## Dashboard views
+
+| Tab | What it answers |
+|---|---|
+| Profit | Best vol-consistent venue pair per contract, honest clip totals |
+| Best venue | Cheapest place to buy / richest to sell each contract after per-contract fees |
+| Vol by venue | Each venue's IV vs the cross-venue median (rich / cheap), smile and calendar flags |
+| Parity | Cross-venue conversions / reversals hedged with Deribit dated futures (BTC/ETH, informational) |
+| Analysis | Smile and term structure |
+| Gaps | How often and how long gaps of each tier actually lasted (episodes) |
+
+The venue checkboxes filter every view for the viewer only; the KPI always counts every venue.
+`npm run alert:test -w server` proves alert delivery; `deploy/options-arb-handcheck.sh`
+re-runs both handchecks daily on the box.
+
 ## Caveats encoded in the app
 
 1. **Not risk-equivalent venues**: Olive is fully collateralized (calls backed
