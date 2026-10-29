@@ -1,7 +1,7 @@
 # AGENTS.md — how to work on this repo
 
 Multi-venue options arbitrage monitor (Derive, Olive, Coincall, Hypercall,
-Callput; Bybit/Binance deferred — geo-blocked from the US host). Read this before
+Callput, Deribit as reference only; Bybit/Binance deferred — geo-blocked from the US host). Read this before
 changing anything. The short version: **this app's value is that every
 number it shows is verified against venue reality — never weaken that to
 make a number look better.**
@@ -65,7 +65,7 @@ bash deploy/deploy.sh root@<vps>  # deploy: build locally + ship + restart
   per contract, keeps the best (shortable sell venue → clean book → honest
   total) plus `alternatives`. Per-venue fees in `signals/fees.ts`; Olive-only
   capacity caps + marginal-fill VWAP in `signals/olive.ts`.
-- `server/src/adapters/{coincall,hypercall,callput}.ts` — extra listed venues
+- `server/src/adapters/{coincall,hypercall,callput,deribit}.ts` — extra listed venues
   (`getChain`), enabled by `VENUES`; quote-level `flags` (`single_maker`,
   `indicative_quote`) keep unproven venues out of headline totals.
 - Adding a venue: adapter with `getChain` + fixture test from a captured live

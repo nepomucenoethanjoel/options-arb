@@ -10,7 +10,7 @@
 import { loadConfig } from '../config';
 
 const APP = process.env.APP_URL ?? 'http://127.0.0.1:8799';
-const BOOK_VENUES = ['derive', 'coincall', 'hypercall', 'callput'] as const;
+const BOOK_VENUES = ['derive', 'coincall', 'hypercall', 'callput', 'deribit'] as const;
 type BookVenue = (typeof BOOK_VENUES)[number];
 
 const n = (v: unknown): number | null => {
@@ -92,11 +92,27 @@ async function callputRaw(underlying: string, name: string): Promise<RawQuote> {
   };
 }
 
+async function deribitRaw(name: string): Promise<RawQuote> {
+  const body = (await (await fetch(`https://www.deribit.com/api/v2/public/ticker?instrument_name=${encodeURIComponent(name)}`)).json()) as any;
+  const t = body.result;
+  if (!t) throw new Error(`Deribit ${name} not found`);
+  // Inverse (BTC/ETH) prices are coin per coin → × index; USDC-linear are USDC per coin.
+  const fx = name.includes('_USDC') ? 1 : t.index_price;
+  const usd = (v: unknown) => (pos(v) != null ? pos(v)! * fx : null);
+  return { bid: usd(t.best_bid_price), bidSize: pos(t.best_bid_amount), ask: usd(t.best_ask_price), askSize: pos(t.best_ask_amount), mark: usd(t.mark_price), index: pos(t.index_price) };
+}
+
 /** Taker fee per contract, written from the venue docs (not fees.ts). */
 function feeOf(venue: BookVenue, legPrice: number | null, spot: number, underlying: string, kind: string, strike: number, tteDays: number, deriveBps: number, side: 'buy' | 'sell'): number {
   if (venue === 'derive') {
     const f = spot * (deriveBps / 10_000);
     return legPrice != null && legPrice > 0 ? Math.min(f, 0.125 * legPrice) : f;
+  }
+  if (venue === 'deribit') {
+    // taker_commission 0.0003 (live instrument spec) capped 12.5% premium; delivery 0.015% capped 12.5% intrinsic, none on dailies.
+    const trade = legPrice != null && legPrice > 0 ? Math.min(spot * 0.0003, 0.125 * legPrice) : spot * 0.0003;
+    const intrinsic = Math.max(0, kind === 'call' ? spot - strike : strike - spot);
+    return trade + (tteDays < 1 ? 0 : Math.min(spot * 0.00015, 0.125 * intrinsic));
   }
   if (venue === 'hypercall') return spot * (5 + 1.5) / 10_000; // published 5 bps taker + 1.5 bps settlement
   if (venue === 'callput') {
@@ -108,7 +124,7 @@ function feeOf(venue: BookVenue, legPrice: number | null, spot: number, underlyi
   const intrinsic = Math.max(0, kind === 'call' ? spot - strike : strike - spot);
   return trade + (tteDays < 1 ? 0 : Math.min(spot * 0.00015, 0.125 * intrinsic));
 }
-const ORDER_FEE: Record<BookVenue, number> = { derive: 0.5, coincall: 0, hypercall: 0, callput: 0 };
+const ORDER_FEE: Record<BookVenue, number> = { derive: 0.5, coincall: 0, hypercall: 0, callput: 0, deribit: 0 };
 
 async function main() {
   const cfg = loadConfig();
@@ -137,7 +153,9 @@ async function main() {
         ? coincallRaw(row.underlying, row.legs.coincall.instrumentId)
         : v === 'hypercall'
           ? hypercallRaw(row.underlying, row.legs.hypercall.instrumentId)
-          : callputRaw(row.underlying, row.legs.callput.instrumentId);
+          : v === 'callput'
+            ? callputRaw(row.underlying, row.legs.callput.instrumentId)
+            : deribitRaw(row.legs.deribit.instrumentId);
   const [freshB, freshS] = await Promise.all([raw(buy), raw(sell)]);
   // 1) Quote source: the fresh raw quote vs the quote the cycle used. RFQ
   //    makers re-quote every second or two, so allow drift; a wrong side,

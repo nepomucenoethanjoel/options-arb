@@ -5,6 +5,7 @@ import { DeriveAdapter } from './adapters/derive';
 import { CoincallAdapter } from './adapters/coincall';
 import { HypercallAdapter } from './adapters/hypercall';
 import { CallputAdapter } from './adapters/callput';
+import { DeribitAdapter } from './adapters/deribit';
 import { OliveAdapter } from './adapters/olive';
 import { OliveRealtimeClient } from './adapters/olive/realtime';
 import { SqliteStorage } from './storage/sqlite';
@@ -46,6 +47,7 @@ async function main(): Promise<void> {
     coincall: () => new CoincallAdapter(cfg.coincallBaseUrl),
     hypercall: () => new HypercallAdapter(cfg.hypercallBaseUrl),
     callput: () => new CallputAdapter(cfg.callputFeedUrl),
+    deribit: () => new DeribitAdapter(cfg.deribitBaseUrl),
   };
   const extraVenues = cfg.extraVenues.map((v) => extraAdapters[v]());
   const alerter = new Alerter(cfg);

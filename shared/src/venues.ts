@@ -26,6 +26,10 @@ export interface OptionsVenueAdapter {
    *  additional listed venues are polled. */
   getChain?(underlying: string): Promise<{ instruments: OptionInstrument[]; quotes: OptionQuote[] }>;
 
+  /** Optional size top-up: re-read these quotes with sizes (venues whose
+   *  chain read has none, e.g. Deribit) — called only for candidate rows. */
+  enrichQuotes?(quotes: OptionQuote[]): Promise<OptionQuote[]>;
+
   /** Optional batch form: all quotes for one underlying+expiry. */
   getTickers?(underlying: string, expiryDate: string): Promise<OptionQuote[]>;
 

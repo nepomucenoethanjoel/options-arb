@@ -10,6 +10,8 @@ export const HEADLINE_BLOCKING_FLAGS: ReadonlySet<string> = new Set([
   ...NON_EXECUTABLE_FLAGS, 'price_distortion', 'fill_model_skipped',
   // Unproven fillability: lifted per venue only with live-fill evidence.
   'single_maker', 'indicative_quote',
+  // A venue the user cannot trade (Deribit): shown for reference, never headline.
+  'reference_venue',
 ]);
 
 /**

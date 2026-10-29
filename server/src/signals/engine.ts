@@ -195,7 +195,7 @@ function evaluatePair(
   for (const v of pair) for (const f of row.legs[v]!.quote!.flags ?? []) flag(f);
   // Informational: the legs pay out in different assets (USDC / USDT / the
   // coin itself) — convergence holds in USD terms only at those rates.
-  if (VENUE_SPECS[buy].settlementAsset(row.kind) !== VENUE_SPECS[sell].settlementAsset(row.kind)) {
+  if (VENUE_SPECS[buy].settlementAsset(row.kind, row.underlying) !== VENUE_SPECS[sell].settlementAsset(row.kind, row.underlying)) {
     flag('settlement_asset_mismatch');
   }
 

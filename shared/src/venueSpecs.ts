@@ -26,7 +26,7 @@ export interface VenueSpec {
   canSell(underlying: string): boolean;
   /** Quotes inside this window before expiry are not tradable (trading halt / request cutoff). */
   tradingCutoffMs: number;
-  settlementAsset(kind: OptionKind): SettlementAsset;
+  settlementAsset(kind: OptionKind, underlying: string): SettlementAsset;
   /** Settlement averaging window, hours (0 = single print). */
   settlementWindowHours: number;
 }
@@ -46,6 +46,16 @@ export const VENUE_SPECS: Record<Venue, VenueSpec> = {
     settlementAsset: (kind) => (kind === 'call' ? 'underlying' : 'USDC'),
     settlementWindowHours: 0.5,
   },
+  // Reference only (user cannot trade Deribit): quotes carry reference_venue.
+  // BTC/ETH read from the inverse book (coin-settled); SOL from the USDC-linear book.
+  deribit: {
+    label: 'Deribit',
+    quoteKind: 'book',
+    canSell: always,
+    tradingCutoffMs: 0,
+    settlementAsset: (_kind, underlying) => (underlying === 'BTC' || underlying === 'ETH' ? 'underlying' : 'USDC'),
+    settlementWindowHours: 0.5,
+  },
   bybit: { label: 'Bybit', quoteKind: 'book', canSell: always, tradingCutoffMs: 0, settlementAsset: () => 'USDT', settlementWindowHours: 0.5 },
   binance: {
     label: 'Binance',
@@ -58,4 +68,4 @@ export const VENUE_SPECS: Record<Venue, VenueSpec> = {
 };
 
 /** Fixed venue order: deterministic pair enumeration and display. */
-export const VENUE_ORDER: Venue[] = ['derive', 'olive', 'coincall', 'hypercall', 'callput', 'bybit', 'binance'];
+export const VENUE_ORDER: Venue[] = ['derive', 'olive', 'coincall', 'hypercall', 'callput', 'deribit', 'bybit', 'binance'];

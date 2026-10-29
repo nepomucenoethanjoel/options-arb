@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import {
+  HEADLINE_BLOCKING_FLAGS,
   sampleSviSlice,
   type MatchRow,
   type MatchRowLite,
@@ -472,10 +473,7 @@ export class Orchestrator extends EventEmitter {
     });
     rows.push(...matched);
 
-    signals.push(
-      ...computeSignals(
-        matched,
-        {
+    const signalCfg = {
           ivSpreadThresholdVols: this.cfg.ivSpreadThresholdVols,
           minBookSize: this.cfg.minBookSize,
           maxRelBookWidth: this.cfg.maxRelBookWidth,
@@ -499,11 +497,44 @@ export class Orchestrator extends EventEmitter {
             const cap = oliveState ? this.olive.getCachedCapacity(underlying) : null;
             return cap ? { [underlying]: cap } : {};
           })(),
-        },
-        now,
-        { [underlying]: spot },
-      ),
-    );
+        };
+    const spots = { [underlying]: spot };
+    let computed = computeSignals(matched, signalCfg, now, spots);
+
+    // Size top-up: venues whose chain read carries no sizes re-read only the
+    // legs of pairs that net positive per contract, then those rows re-price.
+    const enrichers = this.extraVenues.filter((v) => v.enrichQuotes);
+    if (enrichers.length > 0) {
+      const rowsByKey = new Map(matched.map((r) => [r.pairKey, r]));
+      const touched = new Set<string>();
+      for (const v of enrichers) {
+        const candidates = computed
+          .flatMap((s) => [s, ...(s.alternatives ?? [])].map((p) => ({ s, p })))
+          .filter(({ p }) => (p.buyVenue === v.venue || p.sellVenue === v.venue) && (p.netAfterCapitalUsdc ?? 0) > 0)
+          // Only pairs a size could matter for: two-leg executable, no blocking flag besides the reference one.
+          .filter(({ p }) => !p.flags.includes('direction_limited') && !p.flags.some((fl) => fl !== 'reference_venue' && HEADLINE_BLOCKING_FLAGS.has(fl)))
+          .sort((a, b) => (b.p.netAfterCapitalUsdc ?? 0) - (a.p.netAfterCapitalUsdc ?? 0));
+        const quotes = [...new Set(candidates.map(({ s }) => s.pairKey))]
+          .map((k) => rowsByKey.get(k)?.legs[v.venue]?.quote)
+          .filter((q): q is OptionQuote => q != null && q.bidSize == null && q.askSize == null);
+        if (quotes.length === 0) continue;
+        const enriched = await v.enrichQuotes!(quotes).catch(() => quotes);
+        const byId = new Map(enriched.map((q) => [q.instrumentId, q]));
+        for (const row of matched) {
+          const leg = row.legs[v.venue];
+          const q = leg?.quote ? byId.get(leg.quote.instrumentId) : undefined;
+          if (leg && q && q !== leg.quote) {
+            leg.quote = q;
+            touched.add(row.pairKey);
+          }
+        }
+      }
+      if (touched.size > 0) {
+        const repriced = new Map(computeSignals(matched.filter((r) => touched.has(r.pairKey)), signalCfg, now, spots).map((s) => [s.pairKey, s]));
+        computed = computed.flatMap((s) => (touched.has(s.pairKey) ? (repriced.has(s.pairKey) ? [repriced.get(s.pairKey)!] : []) : [s]));
+      }
+    }
+    signals.push(...computed);
 
     return { underlying, rows, signals, spot, oliveCaveats };
   }

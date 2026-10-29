@@ -79,6 +79,20 @@ export function feeModels(cfg: FeeConfig): Partial<Record<Venue, VenueFeeModel>>
       perContract: ({ notional }) => notional * 0.0005 + notional * 0.00015,
       perOrder: 0,
     },
+    // Deribit (reference only): taker 0.03% of underlying per contract —
+    // taker_commission 0.0003 on every instrument (get_instruments, live
+    // 2026-10-29) — capped at 12.5% of premium; delivery min(0.015% ×
+    // index, 12.5% × intrinsic), none on dailies (cap + delivery: published
+    // schedule, not API-verifiable — DATA_SOURCES row 47).
+    deribit: {
+      perContract: ({ legPrice, notional, kind, strike, tteDays }) => {
+        const trade = legPrice != null && legPrice > 0 ? Math.min(notional * 0.0003, legPrice * 0.125) : notional * 0.0003;
+        const intrinsic = Math.max(0, kind === 'call' ? notional - strike : strike - notional);
+        const delivery = tteDays < 1 ? 0 : Math.min(notional * 0.00015, intrinsic * 0.125);
+        return trade + delivery;
+      },
+      perOrder: 0,
+    },
     // Callput (docs fees): open-buy 6 bps, open-sell 3 bps, settle 2 bps of
     // notional, each capped at 12.5% of premium. The keeper's native-token
     // execution fee is unpublished — quotes carry execution_fee_unknown.
