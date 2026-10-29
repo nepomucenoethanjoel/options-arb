@@ -8,7 +8,7 @@ export function num(v: number | null | undefined, dp = 2): string {
 }
 
 export function usd(v: number | null | undefined, dp = 2): string {
-  return v == null ? '–' : `$${v.toFixed(dp)}`;
+  return v == null || !Number.isFinite(v) ? '–' : `$${v.toFixed(dp)}`;
 }
 
 /** Contract count: whole units stay whole, fractional caps (e.g. custody

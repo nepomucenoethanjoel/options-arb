@@ -132,6 +132,14 @@ export interface LiteQuote {
   bid: number | null;
   ask: number | null;
   mark: number | null;
+  /** Buy price after per-contract fees (ask + fee; AMM: mark + fee). Null: not buyable now (no ask, stale, cutoff). */
+  buyEff?: number | null;
+  /** Sell price after per-contract fees (bid − fee). Null: not sellable (no bid, stale, cutoff, users cannot short). */
+  sellEff?: number | null;
+  askSize?: number | null;
+  bidSize?: number | null;
+  /** Quote-level caveats (reference_venue, indicative_quote, single_maker, …), when any. */
+  flags?: string[];
 }
 
 /** Compact row projection for the WS cycle push — everything the table/cards
@@ -148,6 +156,21 @@ export interface MatchRowLite {
   venues: Partial<Record<Venue, LiteQuote>>;
   note?: string;
   unmatchedReason?: string;
+}
+
+/** One side of the best-venue view: a venue's price for one contract. */
+export interface BestVenueQuote {
+  venue: Venue;
+  /** Quoted price (ask to buy, bid to sell; AMM: synthesized mark). */
+  price: number;
+  /** Price after this venue's per-contract fees (ask + fee, bid − fee). */
+  effectivePrice: number;
+  /** The venue's IV for this contract (mark IV). */
+  iv: number | null;
+  /** Size at that price (null: not published / AMM). */
+  size: number | null;
+  /** Quote-level caveats (reference_venue, indicative_quote, single_maker, …). */
+  flags: string[];
 }
 
 /** A runner-up venue pair for the same contract (compact). */

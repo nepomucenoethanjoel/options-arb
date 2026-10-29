@@ -216,3 +216,10 @@ footer { margin-top: 22px; color: var(--muted); font-size: 12px; text-align: cen
 .episodes h3 { margin: 0 0 2px; font-size: 15px; }
 .episodes p.small { margin: 0 0 8px; }
 .episodes td.num, .episodes th.num { text-align: right; }
+.venue-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 6px 0 10px; font-size: 13px; }
+.venue-filter .k { color: var(--muted); }
+.venue-filter label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.venue-filter label.off { color: var(--muted); text-decoration: line-through; }
+.venue-filter button.link { background: none; border: none; color: var(--accent); cursor: pointer; padding: 0; font-size: 12px; }
+.best-venue td.num, .best-venue th.num { text-align: right; }
+.best-venue .tag { color: var(--warn); font-size: 11px; }

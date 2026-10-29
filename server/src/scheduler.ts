@@ -15,12 +15,14 @@ import type { DeriveAdapter } from './adapters/derive';
 import type { OliveAdapter } from './adapters/olive';
 import { matchChain } from './matching/engine';
 import { computeSignals, isPersistWorthy } from './signals/engine';
+import { effectivePrices } from './signals/bestVenue';
+import { feeModels } from './signals/fees';
 import type { Storage } from './storage';
 import type { Alerter } from './alerts';
 import { EpisodeTracker } from './episodes';
 
 /** Compact projection for the WS push — full rows stay server-side. */
-export function toLiteRows(rows: MatchRow[]): MatchRowLite[] {
+export function toLiteRows(rows: MatchRow[], pricing?: Omit<Parameters<typeof effectivePrices>[2], 'spot'> & { spots: Record<string, number | null> }): MatchRowLite[] {
   return rows.map((r) => ({
     pairKey: r.pairKey,
     underlying: r.underlying,
@@ -30,10 +32,22 @@ export function toLiteRows(rows: MatchRow[]): MatchRowLite[] {
     kind: r.kind,
     matchType: r.matchType,
     venues: Object.fromEntries(
-      Object.entries(r.legs).map(([v, leg]) => [
-        v,
-        { iv: leg?.quote?.iv ?? null, bid: leg?.quote?.bid ?? null, ask: leg?.quote?.ask ?? null, mark: leg?.quote?.mark ?? null },
-      ]),
+      Object.entries(r.legs).map(([v, leg]) => {
+        const base = { iv: leg?.quote?.iv ?? null, bid: leg?.quote?.bid ?? null, ask: leg?.quote?.ask ?? null, mark: leg?.quote?.mark ?? null };
+        if (!pricing) return [v, base];
+        const eff = effectivePrices(r, v as Venue, { ...pricing, spot: pricing.spots[r.underlying] ?? null });
+        return [
+          v,
+          {
+            ...base,
+            buyEff: eff.buyEff != null ? Math.round(eff.buyEff * 1e4) / 1e4 : null,
+            sellEff: eff.sellEff != null ? Math.round(eff.sellEff * 1e4) / 1e4 : null,
+            askSize: leg?.quote?.askSize ?? null,
+            bidSize: leg?.quote?.bidSize ?? null,
+            ...(eff.flags.length > 0 ? { flags: eff.flags } : {}),
+          },
+        ];
+      }),
     ),
     note: r.legs.olive?.note,
     unmatchedReason: r.unmatchedReason,
@@ -352,7 +366,7 @@ export class Orchestrator extends EventEmitter {
       const payload: CyclePayload = {
         ts: Date.now(),
         durationMs: Date.now() - t0,
-        rows: toLiteRows(allRows),
+        rows: toLiteRows(allRows, { fees: feeModels(this.feeConfig()), spots, now, staleQuoteMs: this.staleQuoteMs() }),
         signals: allSignals,
         health,
         spots,
@@ -378,6 +392,14 @@ export class Orchestrator extends EventEmitter {
     } finally {
       this.busy = false;
     }
+  }
+
+  private staleQuoteMs(): number {
+    return Math.max(60_000, this.cfg.pollIntervalMs * 3);
+  }
+
+  private feeConfig() {
+    return { deriveTakerFeeBps: this.cfg.deriveTakerFeeBps, oliveFeeNotionalBps: 2.5, oliveFeePremiumPct: 10, solanaFeeUsdc: this.cfg.solanaFeeUsdc };
   }
 
   private async processUnderlying(underlying: string, now: number): Promise<UnderlyingResult> {
@@ -478,11 +500,8 @@ export class Orchestrator extends EventEmitter {
           minBookSize: this.cfg.minBookSize,
           maxRelBookWidth: this.cfg.maxRelBookWidth,
           nearExpiryDays: this.cfg.nearExpiryDays,
-          staleQuoteMs: Math.max(60_000, this.cfg.pollIntervalMs * 3),
-          deriveTakerFeeBps: this.cfg.deriveTakerFeeBps,
-          oliveFeeNotionalBps: 2.5,
-          oliveFeePremiumPct: 10,
-          solanaFeeUsdc: this.cfg.solanaFeeUsdc,
+          staleQuoteMs: this.staleQuoteMs(),
+          ...this.feeConfig(),
           capitalBorrowRateApr: this.cfg.capitalBorrowRateApr,
           // Live pool capacity from the market file wins; config pins are the fallback.
           poolLiquidityUsdByAsset: (() => {

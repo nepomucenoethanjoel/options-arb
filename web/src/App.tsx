@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { honestClipSize, honestTotalNetUsdc, type MatchRowLite, type Signal } from '@options-arb/shared';
+import { honestClipSize, honestTotalNetUsdc, VENUE_ORDER, VENUE_SPECS, type MatchRowLite, type Signal, type Venue } from '@options-arb/shared';
 import { useLiveOverview } from './api';
 import { Header } from './components/Header';
 import { CaveatBanner } from './components/CaveatBanner';
@@ -8,6 +8,8 @@ import { ProfitTable, rowClass, type ShowPreset } from './components/ProfitTable
 import { DetailPanel } from './components/DetailPanel';
 import { SmileView, type TermPoint } from './components/SmileView';
 import { EpisodesPanel } from './components/EpisodesPanel';
+import { BestVenueView } from './components/BestVenueView';
+import { filterRows, useVenueFilter, visibleSignal } from './venueFilter';
 import { pairLabel, usd, fmtSize } from './format';
 
 export default function App() {
@@ -16,12 +18,15 @@ export default function App() {
   const [preset, setPreset] = useState<ShowPreset>('profitable');
   const [kind, setKind] = useState<'all' | 'call' | 'put'>('all');
   const [selectedPair, setSelectedPair] = useState<string | null>(null);
-  const [tab, setTab] = useState<'profit' | 'analysis' | 'gaps'>('profit');
+  const [tab, setTab] = useState<'profit' | 'best' | 'analysis' | 'gaps'>('profit');
 
   // The hook fetches/subscribes to ONE underlying ('' → the server picks the
   // first configured); it ships only that underlying's rows/signals plus the
   // global KPI digest (header, KPI strip, top clips).
   const { data, connected } = useLiveOverview(underlying);
+  const venueFilter = useVenueFilter();
+  const { hidden } = venueFilter;
+  const liveVenues = useMemo(() => VENUE_ORDER.filter((v) => data?.health?.venues[v]), [data]);
 
   const underlyings = useMemo(() => [...new Set(data?.config?.underlyings ?? [])], [data]);
 
@@ -32,9 +37,12 @@ export default function App() {
 
   const signalsByPair = useMemo(() => {
     const map = new Map<string, Signal>();
-    for (const s of data?.signals ?? []) map.set(s.pairKey, s);
+    for (const s of data?.signals ?? []) {
+      const v = visibleSignal(s, hidden);
+      if (v) map.set(s.pairKey, v);
+    }
     return map;
-  }, [data]);
+  }, [data, hidden]);
 
   const expiries = useMemo(() => {
     const set = new Set<string>();
@@ -62,8 +70,8 @@ export default function App() {
     let list: MatchRowLite[] = (data?.rows ?? []).filter((r) => r.underlying === effectiveUnderlying);
     if (expiry !== 'all') list = list.filter((r) => r.expiryDate === expiry);
     if (kind !== 'all') list = list.filter((r) => r.kind === kind);
-    return list;
-  }, [data, effectiveUnderlying, expiry, kind]);
+    return filterRows(list, hidden);
+  }, [data, effectiveUnderlying, expiry, kind, hidden]);
 
   const term = useMemo<TermPoint[]>(() => {
     const spot = data?.spots?.[effectiveUnderlying] ?? null;
@@ -123,14 +131,32 @@ export default function App() {
         <div className="kpi"><span className="k">Σ best clip $ (per pool)</span><span className="v" title="Best single executable clip per underlying, summed across pools. When the clip's own fill moves the pool's borrow rate, the marginal-fill (expected) total is used — see Expected total in the row detail.">{usd(kpiSummary.totalDollars, 0)}</span></div>
         <div className="tabs">
           <button className={tab === 'profit' ? 'active' : ''} onClick={() => setTab('profit')}>Profit</button>
+          <button className={tab === 'best' ? 'active' : ''} onClick={() => setTab('best')} title="Cheapest venue to buy / richest to sell, after fees">Best venue</button>
           <button className={tab === 'analysis' ? 'active' : ''} onClick={() => setTab('analysis')}>Analysis</button>
           <button className={tab === 'gaps' ? 'active' : ''} onClick={() => setTab('gaps')} title="How often and how long gaps lasted">Gaps</button>
         </div>
       </div>
 
-      {tab === 'profit' ? (
+      <div className="venue-filter" title="View only — the headline KPI above always counts every venue">
+        <span className="k">Venues</span>
+        {liveVenues.map((v: Venue) => (
+          <label key={v} className={hidden.has(v) ? 'off' : ''}>
+            <input type="checkbox" checked={!hidden.has(v)} onChange={() => venueFilter.toggle(v)} />
+            <span className="venue-dot" style={{ background: `var(--${v})` }} />
+            {VENUE_SPECS[v].label}
+          </label>
+        ))}
+        {hidden.size > 0 && (
+          <>
+            <button className="link" onClick={venueFilter.showAll}>show all</button>
+            <span className="muted small">view only — KPI counts every venue</span>
+          </>
+        )}
+      </div>
+
+      {tab === 'profit' || tab === 'best' ? (
         <>
-          <TopClips clips={clips.slice(0, 3)} onSelect={setSelectedPair} />
+          {tab === 'profit' && <TopClips clips={clips.slice(0, 3)} onSelect={setSelectedPair} />}
           <div className="controls">
             <label>
               Underlying{' '}
@@ -145,14 +171,14 @@ export default function App() {
                 {expiries.map((e) => <option key={e} value={e}>{e}</option>)}
               </select>
             </label>
-            <label>
+            {tab === 'profit' && <label>
               Show{' '}
               <select value={preset} onChange={(e) => setPreset(e.target.value as ShowPreset)}>
                 <option value="profitable">Profitable only</option>
                 <option value="opportunities">Opportunities (≥ {data.config?.ivSpreadThresholdVols ?? 3} pts)</option>
                 <option value="all">Everything</option>
               </select>
-            </label>
+            </label>}
             <div className="kind-toggle">
               {(['all', 'call', 'put'] as const).map((k) => (
                 <button key={k} className={kind === k ? 'active' : ''} onClick={() => setKind(k)}>
@@ -161,7 +187,11 @@ export default function App() {
               ))}
             </div>
           </div>
-          <ProfitTable rows={rows} signalsByPair={signalsByPair} preset={preset} onSelect={setSelectedPair} />
+          {tab === 'profit' ? (
+            <ProfitTable rows={rows} signalsByPair={signalsByPair} preset={preset} onSelect={setSelectedPair} />
+          ) : (
+            <BestVenueView rows={rows} />
+          )}
         </>
       ) : tab === 'gaps' ? (
         <EpisodesPanel />
