@@ -108,4 +108,42 @@ describe('Orchestrator — extra listed venues', () => {
     expect(Object.keys(atm.venues).sort()).toEqual(['coincall', 'derive']);
     expect(o.latest!.health.venues.coincall?.status).toBe('ok');
   });
+
+  it('tops up sizes for a reference venue whose chain has none, then re-prices the row', async () => {
+    const derive = {
+      getInstruments: async () => [inst('derive', 3000)],
+      getTickers: async () => [{ ...quote('derive', 3000, 0.7), bid: 20, ask: 21, mark: 20.5 }],
+      getHealth: health('derive'),
+    };
+    const olive = {
+      getMarketState: async () => null, getAmmQuote: () => ({ rejected: 'no_olive_state' }), getHealth: health('olive'),
+      getRealtimeHealth: () => null, isVolLive: () => true, getCachedLiquidity: () => null, getCachedCapacity: () => null, onSpot: () => () => {},
+    };
+    // A Deribit-like chain: cheap ask, no sizes (→ thin_book until topped up).
+    const unsized = { ...quote('derive', 3000, 0.5), venue: 'deribit' as const, instrumentId: 'deribit-3000', bid: 9, ask: 10, bidSize: null, askSize: null, flags: ['reference_venue'] };
+    const enrichQuotes = vi.fn(async (qs: Array<typeof unsized>) => qs.map((q) => ({ ...q, bidSize: 4, askSize: 3 })));
+    const deribit = {
+      venue: 'deribit' as const,
+      getChain: async () => ({ instruments: [{ ...inst('derive', 3000), venue: 'deribit' as const, instrumentId: 'deribit-3000' }], quotes: [unsized] }),
+      enrichQuotes,
+      getHealth: health('deribit'),
+    };
+    const o = new Orchestrator(
+      { pollIntervalMs: 15_000, historyRetentionDays: 3, oliveVolOverrides: {}, oliveRealtimeSpotTriggerPct: 0, underlyings: ['ETH'],
+        deriveMaxExpiries: 0, matchExpiryToleranceDays: 1, matchMaxStrikeRelDist: 0.02, oliveMaxTenorDays: 365, ivSpreadThresholdVols: 3,
+        minBookSize: 1, maxRelBookWidth: 0.5, nearExpiryDays: 1, deriveTakerFeeBps: 3, solanaFeeUsdc: 0.05, capitalBorrowRateApr: 0.08,
+        olivePoolLiquidityUsd: {} } as unknown as AppConfig,
+      derive as never,
+      olive as never,
+      { recordSignals: () => {}, upsertHealth: () => {}, prune: () => {}, recordEpisodes: () => {} } as never,
+      undefined,
+      [deribit as never],
+    );
+    await o.runOnce();
+    expect(enrichQuotes).toHaveBeenCalledTimes(1);
+    const sig = o.latest!.signals.find((x) => x.strike === 3000)!;
+    expect(sig).toMatchObject({ buyVenue: 'deribit', sellVenue: 'derive', maxExecutableSize: 3 });
+    expect(sig.flags).toContain('reference_venue');
+    expect(sig.flags).not.toContain('thin_book');
+  });
 });

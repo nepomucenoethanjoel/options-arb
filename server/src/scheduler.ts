@@ -558,8 +558,11 @@ export class Orchestrator extends EventEmitter {
         const candidates = computed
           .flatMap((s) => [s, ...(s.alternatives ?? [])].map((p) => ({ s, p })))
           .filter(({ p }) => (p.buyVenue === v.venue || p.sellVenue === v.venue) && (p.netAfterCapitalUsdc ?? 0) > 0)
-          // Only pairs a size could matter for: two-leg executable, no blocking flag besides the reference one.
-          .filter(({ p }) => !p.flags.includes('direction_limited') && !p.flags.some((fl) => fl !== 'reference_venue' && HEADLINE_BLOCKING_FLAGS.has(fl)))
+          // Only pairs a size could matter for: two-leg executable, no blocking flag besides the
+          // reference one — and thin_book, which a missing size itself causes (size null counts as 0);
+          // after the top-up the re-priced row keeps thin_book only if the book really is thin.
+          .filter(({ p }) => !p.flags.includes('direction_limited'))
+          .filter(({ p }) => !p.flags.some((fl) => fl !== 'reference_venue' && fl !== 'thin_book' && HEADLINE_BLOCKING_FLAGS.has(fl)))
           .sort((a, b) => (b.p.netAfterCapitalUsdc ?? 0) - (a.p.netAfterCapitalUsdc ?? 0));
         const quotes = [...new Set(candidates.map(({ s }) => s.pairKey))]
           .map((k) => rowsByKey.get(k)?.legs[v.venue]?.quote)
