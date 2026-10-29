@@ -2,7 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { Venue, VenueHealth } from '@options-arb/shared';
-import type { SignalRecord, SpreadHistoryPoint, Storage } from './index';
+import type { EpisodeRecord, EpisodeTier, SignalRecord, SpreadHistoryPoint, Storage } from './index';
 
 /**
  * SQLite-backed Storage using Node's built-in `node:sqlite` (no native addon
@@ -65,6 +65,15 @@ export class SqliteStorage implements Storage {
         source TEXT PRIMARY KEY,
         last_success_ts INTEGER, last_error TEXT
       );
+      CREATE TABLE IF NOT EXISTS episodes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        pair_key TEXT NOT NULL, underlying TEXT NOT NULL,
+        buy_venue TEXT NOT NULL, sell_venue TEXT NOT NULL, tier TEXT NOT NULL,
+        start_ts INTEGER NOT NULL, end_ts INTEGER NOT NULL,
+        peak_honest_usdc REAL NOT NULL, peak_quoted_usdc REAL NOT NULL, peak_size REAL,
+        cycles INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_episodes_end ON episodes(end_ts);
     `);
     const columns: Array<[string, string]> = [
       ['costs_usdc', 'REAL'],
@@ -151,6 +160,50 @@ export class SqliteStorage implements Storage {
     return row.n;
   }
 
+  recordEpisodes(rows: EpisodeRecord[]): void {
+    if (rows.length === 0) return;
+    const stmt = this.db.prepare(
+      `INSERT INTO episodes (pair_key, underlying, buy_venue, sell_venue, tier, start_ts, end_ts,
+         peak_honest_usdc, peak_quoted_usdc, peak_size, cycles)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    this.db.exec('BEGIN');
+    try {
+      for (const e of rows) {
+        stmt.run(e.pairKey, e.underlying, e.buyVenue, e.sellVenue, e.tier, e.startTs, e.endTs,
+          e.peakHonestUsdc, e.peakQuotedUsdc, e.peakSize, e.cycles);
+      }
+      this.db.exec('COMMIT');
+    } catch (e) {
+      this.db.exec('ROLLBACK');
+      throw e;
+    }
+  }
+
+  getEpisodes(sinceTs: number): EpisodeRecord[] {
+    const rows = this.db
+      .prepare(
+        `SELECT pair_key, underlying, buy_venue, sell_venue, tier, start_ts, end_ts,
+           peak_honest_usdc, peak_quoted_usdc, peak_size, cycles
+         FROM episodes WHERE end_ts >= ? ORDER BY start_ts ASC`,
+      )
+      .all(sinceTs) as Array<Record<string, unknown>>;
+    return rows.map((r) => ({
+      pairKey: r.pair_key as string,
+      underlying: r.underlying as string,
+      buyVenue: r.buy_venue as Venue,
+      sellVenue: r.sell_venue as Venue,
+      tier: r.tier as EpisodeTier,
+      startTs: r.start_ts as number,
+      endTs: r.end_ts as number,
+      peakHonestUsdc: r.peak_honest_usdc as number,
+      peakQuotedUsdc: r.peak_quoted_usdc as number,
+      peakSize: (r.peak_size as number | null) ?? null,
+      cycles: r.cycles as number,
+    }));
+  }
+
+  /** Signals only: episodes are small and are the long-run evidence, so they are never pruned. */
   prune(olderThanTs: number): void {
     this.db.prepare('DELETE FROM signals WHERE ts < ?').run(olderThanTs);
     this.countCache = null;

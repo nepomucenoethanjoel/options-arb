@@ -62,6 +62,43 @@ export interface SurfaceResponse {
   oliveBounds: { lower: number; upper: number } | null;
 }
 
+export type EpisodeTier = 'headline' | 'reference' | 'quote_only' | 'parity';
+
+export interface EpisodeRecord {
+  pairKey: string;
+  underlying: string;
+  buyVenue: Venue;
+  sellVenue: Venue;
+  tier: EpisodeTier;
+  startTs: number;
+  endTs: number;
+  peakHonestUsdc: number;
+  peakQuotedUsdc: number;
+  peakSize: number | null;
+  cycles: number;
+}
+
+export interface EpisodeSummaryResponse {
+  days: number;
+  sinceTs: number;
+  pollIntervalMs: number;
+  /** When this server process started measuring (episodes are only seen while it runs). */
+  trackingSinceTs: number | null;
+  openCount: number;
+  rows: Array<{
+    tier: EpisodeTier;
+    underlying: string;
+    buyVenue: Venue;
+    sellVenue: Venue;
+    count: number;
+    medianCycles: number;
+    p90Cycles: number;
+    maxCycles: number;
+    sumPeakHonestUsdc: number;
+    best: EpisodeRecord;
+  }>;
+}
+
 async function getJson<T>(url: string): Promise<T> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`${url}: ${res.status}`);
@@ -79,6 +116,10 @@ export function fetchHistory(pairKey: string, hours: number): Promise<HistoryRes
 export function fetchSurface(underlying: string, expiry?: string): Promise<SurfaceResponse> {
   const q = expiry ? `&expiry=${expiry}` : '';
   return getJson(`/api/surface?underlying=${encodeURIComponent(underlying)}${q}`);
+}
+
+export function fetchEpisodeSummary(days: number): Promise<EpisodeSummaryResponse> {
+  return getJson(`/api/episodes/summary?days=${days}`);
 }
 
 function parseCycle(raw: string): OverviewResponse | null {

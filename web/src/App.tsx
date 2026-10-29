@@ -7,6 +7,7 @@ import { TopClips } from './components/OpportunityFeed';
 import { ProfitTable, rowClass, type ShowPreset } from './components/ProfitTable';
 import { DetailPanel } from './components/DetailPanel';
 import { SmileView, type TermPoint } from './components/SmileView';
+import { EpisodesPanel } from './components/EpisodesPanel';
 import { pairLabel, usd, fmtSize } from './format';
 
 export default function App() {
@@ -15,7 +16,7 @@ export default function App() {
   const [preset, setPreset] = useState<ShowPreset>('profitable');
   const [kind, setKind] = useState<'all' | 'call' | 'put'>('all');
   const [selectedPair, setSelectedPair] = useState<string | null>(null);
-  const [tab, setTab] = useState<'profit' | 'analysis'>('profit');
+  const [tab, setTab] = useState<'profit' | 'analysis' | 'gaps'>('profit');
 
   // The hook fetches/subscribes to ONE underlying ('' → the server picks the
   // first configured); it ships only that underlying's rows/signals plus the
@@ -123,6 +124,7 @@ export default function App() {
         <div className="tabs">
           <button className={tab === 'profit' ? 'active' : ''} onClick={() => setTab('profit')}>Profit</button>
           <button className={tab === 'analysis' ? 'active' : ''} onClick={() => setTab('analysis')}>Analysis</button>
+          <button className={tab === 'gaps' ? 'active' : ''} onClick={() => setTab('gaps')} title="How often and how long gaps lasted">Gaps</button>
         </div>
       </div>
 
@@ -161,6 +163,8 @@ export default function App() {
           </div>
           <ProfitTable rows={rows} signalsByPair={signalsByPair} preset={preset} onSelect={setSelectedPair} />
         </>
+      ) : tab === 'gaps' ? (
+        <EpisodesPanel />
       ) : (
         <SmileView underlying={effectiveUnderlying} expiry={expiry !== 'all' ? expiry : term[0]?.expiryDate ?? ''} rows={rows} term={term} />
       )}

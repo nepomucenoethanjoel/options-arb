@@ -8,6 +8,7 @@ import type WebSocket from 'ws';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { honestTotalNetUsdc, isHeadlineProfitable, isTwoLegExecutable, type Signal, type SignalKpis, type VenueHealthSnapshot } from '@options-arb/shared';
 import type { AppConfig } from '../config';
+import { summarizeEpisodes } from '../episodes';
 import type { Orchestrator } from '../scheduler';
 import type { Storage } from '../storage';
 
@@ -211,6 +212,15 @@ export async function buildServer(deps: ApiDeps): Promise<FastifyInstance> {
     const hours = Math.min(720, Math.max(1, Number(q.hours) || 24));
     const points = storage.getSpreadHistory(q.pairKey, Date.now() - hours * 3_600_000);
     return { pairKey: q.pairKey, hours, points };
+  });
+
+  app.get('/api/episodes/summary', async (req) => {
+    const q = req.query as { days?: string };
+    const days = Math.min(90, Math.max(1, Number(q.days) || 7));
+    const sinceTs = Date.now() - days * 86_400_000;
+    const open = orchestrator.episodes.snapshotOpen();
+    const episodes = [...storage.getEpisodes(sinceTs), ...open];
+    return { days, sinceTs, pollIntervalMs: cfg.pollIntervalMs, trackingSinceTs: orchestrator.startedAt, openCount: open.length, rows: summarizeEpisodes(episodes) };
   });
 
   app.get('/api/health', async () => {

@@ -97,7 +97,7 @@ describe('Orchestrator — extra listed venues', () => {
         olivePoolLiquidityUsd: {} } as unknown as AppConfig,
       derive as never,
       olive as never,
-      { recordSignals: () => {}, upsertHealth: () => {}, prune: () => {} } as never,
+      { recordSignals: () => {}, upsertHealth: () => {}, prune: () => {}, recordEpisodes: () => {} } as never,
       undefined,
       [coincall as never],
     );

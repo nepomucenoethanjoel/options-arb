@@ -35,6 +35,37 @@ export interface SpreadHistoryPoint {
   sellVenue: Venue | null;
 }
 
+export type EpisodeTier = 'headline' | 'reference' | 'quote_only' | 'parity';
+
+/** One continuous run of cycles in which a venue pair showed a gap of a tier. */
+export interface EpisodeRecord {
+  pairKey: string;
+  underlying: string;
+  buyVenue: Venue;
+  sellVenue: Venue;
+  tier: EpisodeTier;
+  startTs: number;
+  /** Last cycle the gap was seen (equals startTs for a one-cycle episode). */
+  endTs: number;
+  peakHonestUsdc: number;
+  peakQuotedUsdc: number;
+  peakSize: number | null;
+  cycles: number;
+}
+
+export interface EpisodeSummaryRow {
+  tier: EpisodeTier;
+  underlying: string;
+  buyVenue: Venue;
+  sellVenue: Venue;
+  count: number;
+  medianCycles: number;
+  p90Cycles: number;
+  maxCycles: number;
+  sumPeakHonestUsdc: number;
+  best: EpisodeRecord;
+}
+
 /**
  * Persistence seam — implemented by SqliteStorage today; a later
  * Postgres/Timescale swap only needs to implement this interface.
@@ -46,6 +77,8 @@ export interface Storage {
   upsertHealth(h: VenueHealth): void;
   getSpreadHistory(pairKey: string, sinceTs: number): SpreadHistoryPoint[];
   countSignals(): number;
+  recordEpisodes(rows: EpisodeRecord[]): void;
+  getEpisodes(sinceTs: number): EpisodeRecord[];
   prune(olderThanTs: number): void;
   close(): void;
 }

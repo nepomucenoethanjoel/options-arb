@@ -16,6 +16,7 @@ import { matchChain } from './matching/engine';
 import { computeSignals, isPersistWorthy } from './signals/engine';
 import type { Storage } from './storage';
 import type { Alerter } from './alerts';
+import { EpisodeTracker } from './episodes';
 
 /** Compact projection for the WS push — full rows stay server-side. */
 export function toLiteRows(rows: MatchRow[]): MatchRowLite[] {
@@ -120,6 +121,7 @@ export class Orchestrator extends EventEmitter {
   private timer: NodeJS.Timeout | null = null;
   private running = false;
   private pruneTimer: NodeJS.Timeout | null = null;
+  readonly episodes: EpisodeTracker;
 
   constructor(
     private readonly cfg: AppConfig,
@@ -131,14 +133,19 @@ export class Orchestrator extends EventEmitter {
     private readonly extraVenues: OptionsVenueAdapter[] = [],
   ) {
     super();
+    this.episodes = new EpisodeTracker(storage);
     // Static vol pins age — surface when they were set so the UI can nag.
     this.volPinnedAt = Object.keys(cfg.oliveVolOverrides).length > 0 ? Date.now() : null;
   }
 
   private readonly volPinnedAt: number | null;
 
+  /** Process start — episodes are only measured while the process runs. */
+  startedAt: number | null = null;
+
   start(): void {
     this.running = true;
+    this.startedAt = Date.now();
     void this.loop();
     const pruneMs = this.cfg.historyRetentionDays * 86_400_000;
     this.pruneTimer = setInterval(() => {
@@ -178,6 +185,11 @@ export class Orchestrator extends EventEmitter {
     this.pruneTimer = null;
     this.spotUnsub?.();
     this.spotUnsub = null;
+    try {
+      this.episodes.flush();
+    } catch (err) {
+      console.warn('[scheduler] episode flush failed:', err instanceof Error ? err.message : err);
+    }
   }
 
   /**
@@ -328,6 +340,11 @@ export class Orchestrator extends EventEmitter {
         for (const h of Object.values(health.venues)) if (h) this.storage.upsertHealth(h);
       } catch (err) {
         console.warn('[scheduler] persistence failed:', err instanceof Error ? err.message : err);
+      }
+      try {
+        this.episodes.observe(allSignals, now);
+      } catch (err) {
+        console.warn('[scheduler] episode tracking failed:', err instanceof Error ? err.message : err);
       }
 
       this.fullRows = new Map(allRows.map((r) => [r.pairKey, r]));
