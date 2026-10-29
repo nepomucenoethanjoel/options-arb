@@ -1,4 +1,4 @@
-import { honestTotalNetUsdc, isTwoLegExecutable, type Signal } from '@options-arb/shared';
+import { honestClipSize, honestTotalNetUsdc, isTwoLegExecutable, type Signal } from '@options-arb/shared';
 import type { AppConfig } from './config';
 import { fetchWithTimeout } from './util';
 
@@ -48,7 +48,7 @@ export class Alerter {
       const text = [
         `🎯 ${s.pairKey} — buy ${s.buyVenue} · sell ${s.sellVenue}`,
         `spread ${s.ivSpreadVols} vol pts (${s.ivSpreadBps} bps) · ${s.kind.toUpperCase()}`,
-        `net ${s.netAfterCapitalUsdc} USDC/ctr · size ${s.maxExecutableSize} · APY ${s.roiApyPct}%`,
+        `net ${s.netAfterCapitalUsdc} USDC/ctr · size ${honestClipSize(s)} · APY ${s.roiApyPct}%`,
         `total ${s.totalNetUsdc} USDC${expectedNote}`,
         s.flags.length > 0 ? `flags: ${s.flags.join(',')}` : '',
       ]

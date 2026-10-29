@@ -1,4 +1,4 @@
-import { honestTotalNetUsdc, isTwoLegExecutable, type Signal } from '@options-arb/shared';
+import { honestClipSize, honestTotalNetUsdc, isTwoLegExecutable, type Signal } from '@options-arb/shared';
 import { directionLabel } from '../venues';
 import { fmtSize, pairLabel, usd } from '../format';
 
@@ -26,7 +26,7 @@ export function TopClips({
             <div className={`clip-total ${exec ? 'pos' : 'muted-clip'}`}>{exec ? usd(honestTotalNetUsdc(s), 0) : `${usd(honestTotalNetUsdc(s), 0)} ⚠`}</div>
             <div className="opp-pair">{pairLabel(s.pairKey)}</div>
             <div className="opp-meta">
-              {usd(s.netAfterCapitalUsdc)}/ctr × {fmtSize(s.maxExecutableSize)} · APY {s.roiApyPct != null ? `${s.roiApyPct > 0 ? '+' : ''}${s.roiApyPct.toFixed(0)}%` : '–'}
+              {usd(s.netAfterCapitalUsdc)}/ctr × {fmtSize(honestClipSize(s))} · APY {s.roiApyPct != null ? `${s.roiApyPct > 0 ? '+' : ''}${s.roiApyPct.toFixed(0)}%` : '–'}
             </div>
             <div className={`opp-dir ${exec ? '' : 'warn'}`}>{exec ? directionLabel(s) : `${directionLabel(s)} · LP-only ⚠`}</div>
           </button>

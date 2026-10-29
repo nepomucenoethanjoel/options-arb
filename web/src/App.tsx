@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { honestTotalNetUsdc, type MatchRowLite, type Signal } from '@options-arb/shared';
+import { honestClipSize, honestTotalNetUsdc, type MatchRowLite, type Signal } from '@options-arb/shared';
 import { useLiveOverview } from './api';
 import { Header } from './components/Header';
 import { CaveatBanner } from './components/CaveatBanner';
@@ -105,7 +105,7 @@ export default function App() {
           <div className="kpi main">
             <span className="k">Best executable clip</span>
             <span className="v total pos">{usd(honestTotalNetUsdc(kpiSummary.best), 0)}</span>
-            <span className="sub">{pairLabel(kpiSummary.best.pairKey)} · {usd(kpiSummary.best.netAfterCapitalUsdc)} × {fmtSize(kpiSummary.best.maxExecutableSize)}</span>
+            <span className="sub">{pairLabel(kpiSummary.best.pairKey)} · {usd(kpiSummary.best.netAfterCapitalUsdc)} × {fmtSize(honestClipSize(kpiSummary.best))}</span>
           </div>
         ) : (
           <div className="kpi main">

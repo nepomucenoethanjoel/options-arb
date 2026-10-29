@@ -26,3 +26,20 @@ describe('bestOliveClip', () => {
     expect(bestOliveClip(total(1), 0)).toBeNull();
   });
 });
+
+describe('honest total with a best clip', () => {
+  it('uses the best clip when it beats the full clip, never above the quoted total', async () => {
+    const { honestTotalNetUsdc, honestClipSize } = await import('@options-arb/shared');
+    const base = { totalNetUsdc: 4.21, expectedTotalNetUsdc: -8.52, maxExecutableSize: 0.6868 };
+    expect(honestTotalNetUsdc(base)).toBe(-8.52);
+    const withBest = { ...base, bestClipSize: 0.1717, bestClipExpectedTotalUsdc: 0.9 };
+    expect(honestTotalNetUsdc(withBest)).toBe(0.9);
+    expect(honestClipSize(withBest)).toBe(0.1717);
+    // The full clip is best: unchanged, and the size stays the cap.
+    const fullBest = { ...base, expectedTotalNetUsdc: 2, bestClipSize: 0.6868, bestClipExpectedTotalUsdc: 2 };
+    expect(honestTotalNetUsdc(fullBest)).toBe(2);
+    expect(honestClipSize(fullBest)).toBe(0.6868);
+    // Clamp: never above the quoted full-clip total.
+    expect(honestTotalNetUsdc({ ...withBest, bestClipExpectedTotalUsdc: 9 })).toBe(4.21);
+  });
+});

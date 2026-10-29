@@ -14,14 +14,31 @@ export const HEADLINE_BLOCKING_FLAGS: ReadonlySet<string> = new Set([
   'reference_venue',
 ]);
 
+type ClipFields = Pick<Signal, 'totalNetUsdc' | 'expectedTotalNetUsdc' | 'maxExecutableSize'> &
+  Partial<Pick<Signal, 'bestClipSize' | 'bestClipExpectedTotalUsdc'>>;
+
 /**
  * The clip total a fill would actually net: when the marginal-fill model
  * priced the clip's own rate impact, the lower of quote and expected —
- * fills can only hurt the buyer of the cheap leg.
+ * fills can only hurt the buyer of the cheap leg. When the fill model found
+ * a better (smaller) clip, that clip's expected total: it is the same
+ * model at a smaller size, and never above the quoted full-clip total
+ * (per-contract net only falls with size).
  */
-export function honestTotalNetUsdc(s: Pick<Signal, 'totalNetUsdc' | 'expectedTotalNetUsdc'>): number | null {
+export function honestTotalNetUsdc(s: Partial<ClipFields> & Pick<Signal, 'totalNetUsdc' | 'expectedTotalNetUsdc'>): number | null {
+  if (s.bestClipExpectedTotalUsdc != null && s.bestClipSize != null && s.expectedTotalNetUsdc != null) {
+    return Math.min(s.totalNetUsdc ?? s.bestClipExpectedTotalUsdc, Math.max(s.expectedTotalNetUsdc, s.bestClipExpectedTotalUsdc));
+  }
   if (s.expectedTotalNetUsdc != null) return Math.min(s.totalNetUsdc ?? s.expectedTotalNetUsdc, s.expectedTotalNetUsdc);
   return s.totalNetUsdc;
+}
+
+/** The clip size honestTotalNetUsdc refers to. */
+export function honestClipSize(s: Partial<ClipFields>): number | null {
+  if (s.bestClipExpectedTotalUsdc != null && s.bestClipSize != null && s.expectedTotalNetUsdc != null && s.bestClipExpectedTotalUsdc > s.expectedTotalNetUsdc) {
+    return s.bestClipSize;
+  }
+  return s.maxExecutableSize ?? null;
 }
 
 /** Both legs are user-executable: the sell venue lets users short (not an LP-only role). */
