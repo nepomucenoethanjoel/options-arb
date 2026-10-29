@@ -78,6 +78,28 @@ export class Alerter {
     await Promise.allSettled(sends);
   }
 
+  /**
+   * One clearly labelled test message through EVERY configured transport
+   * (not just the preferred one) — proves delivery end to end. Ignores
+   * ALERTS_ENABLED: it is an explicit operator action (npm run alert:test).
+   */
+  async sendTest(text = '🧪 options-arb alert test — delivery check, not a signal'): Promise<Array<{ transport: string; ok: boolean; error?: string }>> {
+    const targets: Array<[string, string, unknown]> = [];
+    if (this.cfg.discordWebhookUrl) targets.push(['discord', this.cfg.discordWebhookUrl, { username: 'options-arb', content: text }]);
+    if (this.cfg.telegramBotToken && this.cfg.telegramChatId) {
+      targets.push(['telegram', `https://api.telegram.org/bot${this.cfg.telegramBotToken}/sendMessage`, { chat_id: this.cfg.telegramChatId, text }]);
+    }
+    if (this.cfg.alertWebhookUrl) targets.push(['webhook', this.cfg.alertWebhookUrl, { type: 'test', text, ts: new Date().toISOString() }]);
+    return Promise.all(
+      targets.map(([transport, url, payload]) =>
+        this.post(url, payload).then(
+          () => ({ transport, ok: true }),
+          (err: unknown) => ({ transport, ok: false, error: err instanceof Error ? err.message : String(err) }),
+        ),
+      ),
+    );
+  }
+
   private async post(url: string, payload: unknown): Promise<void> {
     const res = await fetchWithTimeout(url, {
       method: 'POST',

@@ -20,7 +20,8 @@
     "compare:sweep": "tsx src/scripts/compare-sweep.ts",
     "probe:coverage": "tsx src/scripts/probe-coverage.ts",
     "check:trades": "tsx src/scripts/check-trades.ts",
-    "handcheck:books": "tsx src/scripts/handcheck-books.ts"
+    "handcheck:books": "tsx src/scripts/handcheck-books.ts",
+    "alert:test": "tsx src/scripts/alert-test.ts"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",

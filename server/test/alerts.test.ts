@@ -159,3 +159,25 @@ describe('Alerter — transports and gating', () => {
     expect(fetchMock.mock.calls).toHaveLength(2);
   });
 });
+
+describe('Alerter.sendTest', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('posts to every configured transport, even with alerts disabled, and reports each outcome', async () => {
+    const fetchMock = vi.fn(async (url: string) => ({ ok: !url.includes('hook.example'), status: url.includes('hook.example') ? 500 : 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const results = await new Alerter({
+      ...base, alertsEnabled: false, discordWebhookUrl: 'https://discord.example/x', alertWebhookUrl: 'https://hook.example/y',
+    }).sendTest('hello');
+    expect(results).toEqual([
+      { transport: 'discord', ok: true },
+      { transport: 'webhook', ok: false, error: 'HTTP 500' },
+    ]);
+    expect(JSON.parse((fetchMock.mock.calls[0] as unknown as [string, { body: string }])[1].body)).toEqual({ username: 'options-arb', content: 'hello' });
+  });
+
+  it('nothing configured → no sends', async () => {
+    vi.stubGlobal('fetch', vi.fn());
+    expect(await new Alerter(base).sendTest()).toEqual([]);
+  });
+});
