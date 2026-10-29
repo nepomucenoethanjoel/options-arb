@@ -1,4 +1,4 @@
-import { HEADLINE_BLOCKING_FLAGS, honestTotalNetUsdc, type Signal, type Venue } from '@options-arb/shared';
+import { HEADLINE_BLOCKING_FLAGS, honestTotalNetUsdc, type ParitySignal, type Signal, type Venue } from '@options-arb/shared';
 import type { EpisodeRecord, EpisodeSummaryRow, EpisodeTier, Storage } from './storage';
 
 /** The fields a tier decision needs — present on both a Signal and its alternatives. */
@@ -52,41 +52,26 @@ export class EpisodeTracker {
 
   constructor(private readonly storage: Pick<Storage, 'recordEpisodes'>) {}
 
-  observe(signals: Signal[], ts: number): void {
+  observe(signals: Signal[], ts: number, parity: ParitySignal[] = []): void {
     this.cycle++;
     for (const s of signals) {
       for (const p of pairsOf(s)) {
         const tier = classifyPair(p);
         if (!tier) continue;
-        const key = `${s.pairKey}|${p.buyVenue}|${p.sellVenue}|${tier}`;
-        const honest = p.honestTotalNetUsdc ?? 0;
-        const e = this.open.get(key);
-        if (e) {
-          e.endTs = ts;
-          e.cycles++;
-          e.seenCycle = this.cycle;
-          if (honest > e.peakHonestUsdc) {
-            e.peakHonestUsdc = honest;
-            e.peakQuotedUsdc = p.totalNetUsdc ?? 0;
-            e.peakSize = p.maxExecutableSize;
-          }
-        } else {
-          this.open.set(key, {
-            pairKey: s.pairKey,
-            underlying: s.underlying,
-            buyVenue: p.buyVenue!,
-            sellVenue: p.sellVenue!,
-            tier,
-            startTs: ts,
-            endTs: ts,
-            peakHonestUsdc: honest,
-            peakQuotedUsdc: p.totalNetUsdc ?? 0,
-            peakSize: p.maxExecutableSize,
-            cycles: 1,
-            seenCycle: this.cycle,
-          });
-        }
+        this.see(`${s.pairKey}|${p.buyVenue}|${p.sellVenue}|${tier}`, ts, {
+          pairKey: s.pairKey, underlying: s.underlying, buyVenue: p.buyVenue!, sellVenue: p.sellVenue!, tier,
+          honest: p.honestTotalNetUsdc ?? 0, quoted: p.totalNetUsdc ?? 0, size: p.maxExecutableSize,
+        });
       }
+    }
+    // Parity gaps are measured PER CONTRACT (the hedge future's size is not read).
+    for (const p of parity) {
+      if (!(p.netPerUnitUsdc > 0) || p.flags.some((f) => HEADLINE_BLOCKING_FLAGS.has(f) && f !== 'reference_venue')) continue;
+      const [buyVenue, sellVenue] = p.strategy === 'conversion' ? [p.callVenue, p.putVenue] : [p.putVenue, p.callVenue];
+      this.see(`${p.key}|${buyVenue}|${sellVenue}|parity`, ts, {
+        pairKey: p.key, underlying: p.underlying, buyVenue, sellVenue, tier: 'parity',
+        honest: p.netPerUnitUsdc, quoted: p.netPerUnitUsdc, size: p.size,
+      });
     }
     const closed: EpisodeRecord[] = [];
     for (const [key, e] of this.open) {
@@ -95,6 +80,39 @@ export class EpisodeTracker {
       closed.push(strip(e));
     }
     if (closed.length > 0) this.storage.recordEpisodes(closed);
+  }
+
+  private see(
+    key: string,
+    ts: number,
+    o: { pairKey: string; underlying: string; buyVenue: Venue; sellVenue: Venue; tier: EpisodeTier; honest: number; quoted: number; size: number | null },
+  ): void {
+    const e = this.open.get(key);
+    if (e) {
+      e.endTs = ts;
+      e.cycles++;
+      e.seenCycle = this.cycle;
+      if (o.honest > e.peakHonestUsdc) {
+        e.peakHonestUsdc = o.honest;
+        e.peakQuotedUsdc = o.quoted;
+        e.peakSize = o.size;
+      }
+      return;
+    }
+    this.open.set(key, {
+      pairKey: o.pairKey,
+      underlying: o.underlying,
+      buyVenue: o.buyVenue,
+      sellVenue: o.sellVenue,
+      tier: o.tier,
+      startTs: ts,
+      endTs: ts,
+      peakHonestUsdc: o.honest,
+      peakQuotedUsdc: o.quoted,
+      peakSize: o.size,
+      cycles: 1,
+      seenCycle: this.cycle,
+    });
   }
 
   /** Close everything still open (shutdown) — an episode cut short is still evidence. */

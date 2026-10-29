@@ -224,3 +224,4 @@ footer { margin-top: 22px; color: var(--muted); font-size: 12px; text-align: cen
 .best-venue td.num, .best-venue th.num { text-align: right; }
 .best-venue .tag { color: var(--warn); font-size: 11px; }
 .vol-compare td.num, .vol-compare th.num { text-align: right; }
+.parity td.num, .parity th.num { text-align: right; }

@@ -10,6 +10,7 @@ import { SmileView, type TermPoint } from './components/SmileView';
 import { EpisodesPanel } from './components/EpisodesPanel';
 import { BestVenueView } from './components/BestVenueView';
 import { VolCompareView } from './components/VolCompareView';
+import { ParityView } from './components/ParityView';
 import { filterRows, useVenueFilter, visibleSignal } from './venueFilter';
 import { pairLabel, usd, fmtSize } from './format';
 
@@ -19,7 +20,7 @@ export default function App() {
   const [preset, setPreset] = useState<ShowPreset>('profitable');
   const [kind, setKind] = useState<'all' | 'call' | 'put'>('all');
   const [selectedPair, setSelectedPair] = useState<string | null>(null);
-  const [tab, setTab] = useState<'profit' | 'best' | 'vols' | 'analysis' | 'gaps'>('profit');
+  const [tab, setTab] = useState<'profit' | 'best' | 'vols' | 'parity' | 'analysis' | 'gaps'>('profit');
 
   // The hook fetches/subscribes to ONE underlying ('' → the server picks the
   // first configured); it ships only that underlying's rows/signals plus the
@@ -134,6 +135,7 @@ export default function App() {
           <button className={tab === 'profit' ? 'active' : ''} onClick={() => setTab('profit')}>Profit</button>
           <button className={tab === 'best' ? 'active' : ''} onClick={() => setTab('best')} title="Cheapest venue to buy / richest to sell, after fees">Best venue</button>
           <button className={tab === 'vols' ? 'active' : ''} onClick={() => setTab('vols')} title="Which venue is rich or cheap, contract by contract">Vol by venue</button>
+          <button className={tab === 'parity' ? 'active' : ''} onClick={() => setTab('parity')} title="Conversions / reversals across venues, future-hedged">Parity</button>
           <button className={tab === 'analysis' ? 'active' : ''} onClick={() => setTab('analysis')}>Analysis</button>
           <button className={tab === 'gaps' ? 'active' : ''} onClick={() => setTab('gaps')} title="How often and how long gaps lasted">Gaps</button>
         </div>
@@ -197,6 +199,8 @@ export default function App() {
             <VolCompareView rows={rows} />
           )}
         </>
+      ) : tab === 'parity' ? (
+        <ParityView underlying={effectiveUnderlying} />
       ) : tab === 'gaps' ? (
         <EpisodesPanel />
       ) : (

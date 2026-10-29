@@ -4,7 +4,9 @@ import {
   sampleSviSlice,
   type MatchRow,
   type MatchRowLite,
+  type FutureQuote,
   type OptionQuote,
+  type ParitySignal,
   type Signal,
   type Venue,
   type VenueHealthSnapshot,
@@ -17,6 +19,7 @@ import { matchChain } from './matching/engine';
 import { computeSignals, isPersistWorthy } from './signals/engine';
 import { effectivePrices } from './signals/bestVenue';
 import { surfaceFlags } from './signals/surfaceChecks';
+import { computeParity } from './signals/parity';
 import { feeModels } from './signals/fees';
 import type { Storage } from './storage';
 import type { Alerter } from './alerts';
@@ -60,6 +63,8 @@ export interface CyclePayload {
   durationMs: number;
   rows: MatchRowLite[];
   signals: Signal[];
+  /** Cross-venue put-call parity (served by /api/parity, not pushed over WS). */
+  parity: ParitySignal[];
   health: VenueHealthSnapshot;
   spots: Record<string, number | null>;
   /** Olive socket.io ticker stream status (null when disabled). */
@@ -89,6 +94,7 @@ interface UnderlyingResult {
   underlying: string;
   rows: MatchRow[];
   signals: Signal[];
+  parity: ParitySignal[];
   spot: number | null;
   oliveCaveats: string[];
 }
@@ -260,12 +266,14 @@ export class Orchestrator extends EventEmitter {
 
       const allRows: MatchRow[] = [];
       const allSignals: Signal[] = [];
+      const allParity: ParitySignal[] = [];
       const spots: Record<string, number | null> = {};
       const oliveCaveats = new Set<string>();
       for (const r of results) {
         if (!r) continue;
         allRows.push(...r.rows);
         allSignals.push(...r.signals);
+        allParity.push(...r.parity);
         spots[r.underlying] = r.spot;
         for (const c of r.oliveCaveats) oliveCaveats.add(c);
       }
@@ -358,7 +366,7 @@ export class Orchestrator extends EventEmitter {
         console.warn('[scheduler] persistence failed:', err instanceof Error ? err.message : err);
       }
       try {
-        this.episodes.observe(allSignals, now);
+        this.episodes.observe(allSignals, now, allParity);
       } catch (err) {
         console.warn('[scheduler] episode tracking failed:', err instanceof Error ? err.message : err);
       }
@@ -369,6 +377,7 @@ export class Orchestrator extends EventEmitter {
         durationMs: Date.now() - t0,
         rows: toLiteRows(allRows, { fees: feeModels(this.feeConfig()), spots, now, staleQuoteMs: this.staleQuoteMs() }),
         signals: allSignals,
+        parity: allParity,
         health,
         spots,
         realtime: this.olive.getRealtimeHealth(),
@@ -408,7 +417,7 @@ export class Orchestrator extends EventEmitter {
     const signals: Signal[] = [];
     const oliveCaveats: string[] = [];
 
-    const [instruments, oliveState, extraChains] = await Promise.all([
+    const [instruments, oliveState, extraChains, futures] = await Promise.all([
       this.derive.getInstruments(underlying).catch((err) => {
         console.warn(`[scheduler] Derive instruments ${underlying} failed:`, err instanceof Error ? err.message : err);
         return [];
@@ -427,10 +436,18 @@ export class Orchestrator extends EventEmitter {
           return { venue: v.venue, instruments: chain?.instruments ?? [], quotes: new Map((chain?.quotes ?? []).map((q) => [q.instrumentId, q])) };
         }),
       ),
+      Promise.all(
+        this.extraVenues.map((v) =>
+          (v.getFutures?.(underlying) ?? Promise.resolve([] as FutureQuote[])).catch((err) => {
+            console.warn(`[scheduler] ${v.venue} futures ${underlying} failed:`, err instanceof Error ? err.message : err);
+            return [] as FutureQuote[];
+          }),
+        ),
+      ).then((lists) => lists.flat()),
     ]);
     oliveCaveats.push(...(oliveState?.caveats ?? []));
     if (instruments.length === 0 && extraChains.every((c) => c.instruments.length === 0)) {
-      return { underlying, rows, signals, spot: null, oliveCaveats };
+      return { underlying, rows, signals, parity: [], spot: null, oliveCaveats };
     }
 
     const expiryDates = [...new Set(instruments.map((i) => i.expiryDate))].sort();
@@ -566,7 +583,18 @@ export class Orchestrator extends EventEmitter {
     }
     signals.push(...computed);
 
-    return { underlying, rows, signals, spot, oliveCaveats };
+    // Parity: only where a venue publishes dated futures to hedge with.
+    const parity = futures.length > 0
+      ? computeParity(matched, futures, {
+          fees: feeModels(this.feeConfig()),
+          spot,
+          now,
+          staleQuoteMs: this.staleQuoteMs(),
+          capitalBorrowRateApr: this.cfg.capitalBorrowRateApr,
+          nearExpiryDays: this.cfg.nearExpiryDays,
+        })
+      : [];
+    return { underlying, rows, signals, parity, spot, oliveCaveats };
   }
 
   /** Chart payload: Derive quote smile + SVI curve vs Olive flat model vol. */

@@ -1,5 +1,6 @@
 import type { SviSlice } from './math/svi';
 import type {
+  FutureQuote,
   IVSurfacePoint,
   OptionInstrument,
   OptionQuote,
@@ -29,6 +30,9 @@ export interface OptionsVenueAdapter {
   /** Optional size top-up: re-read these quotes with sizes (venues whose
    *  chain read has none, e.g. Deribit) — called only for candidate rows. */
   enrichQuotes?(quotes: OptionQuote[]): Promise<OptionQuote[]>;
+
+  /** Optional dated futures for an underlying (parity hedge leg). */
+  getFutures?(underlying: string): Promise<FutureQuote[]>;
 
   /** Optional batch form: all quotes for one underlying+expiry. */
   getTickers?(underlying: string, expiryDate: string): Promise<OptionQuote[]>;

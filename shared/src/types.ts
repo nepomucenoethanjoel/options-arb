@@ -158,6 +158,51 @@ export interface MatchRowLite {
   unmatchedReason?: string;
 }
 
+/** A dated future (hedge leg for parity), USD per 1 coin. */
+export interface FutureQuote {
+  venue: Venue;
+  instrumentId: string;
+  underlying: string;
+  expiryTs: number;
+  bid: number | null;
+  ask: number | null;
+  mark: number | null;
+  indexPrice: number | null;
+  ts: number;
+}
+
+/**
+ * Put-call parity across venues, hedged with a dated future at the same
+ * expiry. Conversion: buy call + sell put + sell future → locks F − K.
+ * Reversal: sell call + buy put + buy future → locks K − F. Prices are per
+ * contract after per-contract fees.
+ */
+export interface ParitySignal {
+  key: string;
+  underlying: string;
+  expiryTs: number;
+  expiryDate: string;
+  strike: number;
+  strategy: 'conversion' | 'reversal';
+  callVenue: Venue;
+  /** Effective call price (buy: ask + fee; sell: bid − fee). */
+  callPriceUsdc: number;
+  putVenue: Venue;
+  putPriceUsdc: number;
+  futureVenue: Venue;
+  futureId: string;
+  /** Effective future price (sell: bid − fees; buy: ask + fees). */
+  futurePriceUsdc: number;
+  /** Locked payoff − net premium − collateral drag, per contract. */
+  netPerUnitUsdc: number;
+  capitalCostUsdc: number;
+  /** Option-leg size (the future's size is not read); null when a leg publishes none. */
+  size: number | null;
+  totalNetUsdc: number | null;
+  flags: string[];
+  ts: number;
+}
+
 /** One side of the best-venue view: a venue's price for one contract. */
 export interface BestVenueQuote {
   venue: Venue;

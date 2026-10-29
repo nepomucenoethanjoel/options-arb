@@ -214,6 +214,16 @@ export async function buildServer(deps: ApiDeps): Promise<FastifyInstance> {
     return { pairKey: q.pairKey, hours, points };
   });
 
+  app.get('/api/parity', async (req, reply) => {
+    const q = req.query as { underlying?: string };
+    const underlying = (q.underlying ?? '').trim().toUpperCase();
+    if (q.underlying !== undefined && !cfg.underlyings.includes(underlying)) {
+      return reply.code(400).send({ error: `unknown underlying (configured: ${cfg.underlyings.join(', ')})` });
+    }
+    const all = orchestrator.latest?.parity ?? [];
+    return { ts: orchestrator.latest?.ts ?? null, parity: q.underlying !== undefined ? all.filter((p) => p.underlying === underlying) : all };
+  });
+
   app.get('/api/episodes/summary', async (req) => {
     const q = req.query as { days?: string };
     const days = Math.min(90, Math.max(1, Number(q.days) || 7));

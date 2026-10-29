@@ -1,4 +1,5 @@
 import type {
+  FutureQuote,
   IVSurfacePoint,
   OptionInstrument,
   OptionQuote,
@@ -128,6 +129,35 @@ export function mapDeribitSummary(raw: { result?: RawSummary[] }, underlying: st
   return { instruments, quotes };
 }
 
+const FUTURE_RE = /^([A-Z]+)-(\d{1,2})([A-Z]{3})(\d{2})$/;
+
+/**
+ * Dated INVERSE futures (BTC/ETH only — SOL_USDC dated futures are too thin
+ * to hedge with: 50.75 / 304.7 on 2026-10-29). Prices are USD per 1 coin;
+ * expiry 08:00 UTC on the named date; perpetuals are skipped.
+ */
+export function mapDeribitFutures(raw: { result?: RawSummary[] }, underlying: string): FutureQuote[] {
+  if (underlying !== 'BTC' && underlying !== 'ETH') return [];
+  const out: FutureQuote[] = [];
+  for (const r of raw.result ?? []) {
+    const m = r.instrument_name ? FUTURE_RE.exec(r.instrument_name) : null;
+    const month = m ? MONTHS.indexOf(m[3]!) : -1;
+    if (!m || m[1] !== underlying || month < 0) continue;
+    out.push({
+      venue: 'deribit',
+      instrumentId: r.instrument_name!,
+      underlying,
+      expiryTs: Date.UTC(2000 + Number(m[4]), month, Number(m[2]), 8),
+      bid: px(r.bid_price),
+      ask: px(r.ask_price),
+      mark: px(r.mark_price),
+      indexPrice: px(r.estimated_delivery_price),
+      ts: num(r.creation_timestamp) ?? Date.now(),
+    });
+  }
+  return out;
+}
+
 /** A ticker read: fresh top of book WITH sizes, same units as the summary mapping. */
 export function mapDeribitTicker(raw: { result?: RawTicker }, linear: boolean): Partial<OptionQuote> | null {
   const t = raw.result;
@@ -209,6 +239,12 @@ export class DeribitAdapter implements OptionsVenueAdapter {
       }
     }
     return out.concat(quotes.slice(DERIBIT_MAX_ENRICH));
+  }
+
+  async getFutures(underlying: string): Promise<FutureQuote[]> {
+    if (underlying !== 'BTC' && underlying !== 'ETH') return [];
+    const raw = await this.get<{ result?: RawSummary[] }>(`/public/get_book_summary_by_currency?currency=${underlying}&kind=future`);
+    return mapDeribitFutures(raw, underlying);
   }
 
   async getInstruments(underlying: string): Promise<OptionInstrument[]> {

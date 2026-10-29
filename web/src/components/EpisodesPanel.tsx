@@ -12,7 +12,7 @@ const TIER_LABEL: Record<EpisodeTier, string> = {
 
 const TIER_HELP: Record<EpisodeTier, string> = {
   headline: 'Honest clip total > 0 on clean books, both legs user-executable — what the KPI counts.',
-  parity: 'Conversion / reversal across venues with a dated-future hedge.',
+  parity: 'Conversion / reversal across venues with a dated-future hedge (reference only). Measured per contract — the future size is not read.',
   reference: 'Would be headline, but a leg is on a venue you cannot trade (Deribit).',
   quote_only: 'Quoted clip total > 0, but the marginal-fill (expected) total is ≤ 0 — the gap your own trade closes.',
 };
@@ -73,7 +73,7 @@ export function EpisodesPanel() {
               <tr>
                 <th>Underlying</th><th>Pair</th><th className="num">Episodes</th>
                 <th className="num">Median</th><th className="num">p90</th><th className="num">Longest</th>
-                <th className="num">{tier === 'quote_only' ? 'Best quoted' : 'Σ peak honest'}</th><th>Best episode</th>
+                <th className="num">{tier === 'quote_only' ? 'Best quoted' : tier === 'parity' ? 'Σ peak / ctr' : 'Σ peak honest'}</th><th>Best episode</th>
               </tr>
             </thead>
             <tbody>

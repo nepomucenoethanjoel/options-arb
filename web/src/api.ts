@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { MatchRow, MatchRowLite, Signal, SignalKpis, Venue, VenueHealthSnapshot } from '@options-arb/shared';
+import type { MatchRow, MatchRowLite, ParitySignal, Signal, SignalKpis, Venue, VenueHealthSnapshot } from '@options-arb/shared';
 
 export interface OverviewConfig {
   ivSpreadThresholdVols: number;
@@ -120,6 +120,10 @@ export function fetchSurface(underlying: string, expiry?: string): Promise<Surfa
 
 export function fetchEpisodeSummary(days: number): Promise<EpisodeSummaryResponse> {
   return getJson(`/api/episodes/summary?days=${days}`);
+}
+
+export function fetchParity(underlying: string): Promise<{ ts: number | null; parity: ParitySignal[] }> {
+  return getJson(`/api/parity?underlying=${encodeURIComponent(underlying)}`);
 }
 
 function parseCycle(raw: string): OverviewResponse | null {
