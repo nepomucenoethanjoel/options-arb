@@ -9,6 +9,7 @@ import { DetailPanel } from './components/DetailPanel';
 import { SmileView, type TermPoint } from './components/SmileView';
 import { EpisodesPanel } from './components/EpisodesPanel';
 import { BestVenueView } from './components/BestVenueView';
+import { VolCompareView } from './components/VolCompareView';
 import { filterRows, useVenueFilter, visibleSignal } from './venueFilter';
 import { pairLabel, usd, fmtSize } from './format';
 
@@ -18,7 +19,7 @@ export default function App() {
   const [preset, setPreset] = useState<ShowPreset>('profitable');
   const [kind, setKind] = useState<'all' | 'call' | 'put'>('all');
   const [selectedPair, setSelectedPair] = useState<string | null>(null);
-  const [tab, setTab] = useState<'profit' | 'best' | 'analysis' | 'gaps'>('profit');
+  const [tab, setTab] = useState<'profit' | 'best' | 'vols' | 'analysis' | 'gaps'>('profit');
 
   // The hook fetches/subscribes to ONE underlying ('' → the server picks the
   // first configured); it ships only that underlying's rows/signals plus the
@@ -132,6 +133,7 @@ export default function App() {
         <div className="tabs">
           <button className={tab === 'profit' ? 'active' : ''} onClick={() => setTab('profit')}>Profit</button>
           <button className={tab === 'best' ? 'active' : ''} onClick={() => setTab('best')} title="Cheapest venue to buy / richest to sell, after fees">Best venue</button>
+          <button className={tab === 'vols' ? 'active' : ''} onClick={() => setTab('vols')} title="Which venue is rich or cheap, contract by contract">Vol by venue</button>
           <button className={tab === 'analysis' ? 'active' : ''} onClick={() => setTab('analysis')}>Analysis</button>
           <button className={tab === 'gaps' ? 'active' : ''} onClick={() => setTab('gaps')} title="How often and how long gaps lasted">Gaps</button>
         </div>
@@ -154,7 +156,7 @@ export default function App() {
         )}
       </div>
 
-      {tab === 'profit' || tab === 'best' ? (
+      {tab === 'profit' || tab === 'best' || tab === 'vols' ? (
         <>
           {tab === 'profit' && <TopClips clips={clips.slice(0, 3)} onSelect={setSelectedPair} />}
           <div className="controls">
@@ -189,8 +191,10 @@ export default function App() {
           </div>
           {tab === 'profit' ? (
             <ProfitTable rows={rows} signalsByPair={signalsByPair} preset={preset} onSelect={setSelectedPair} />
-          ) : (
+          ) : tab === 'best' ? (
             <BestVenueView rows={rows} />
+          ) : (
+            <VolCompareView rows={rows} />
           )}
         </>
       ) : tab === 'gaps' ? (

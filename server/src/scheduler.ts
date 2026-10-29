@@ -16,6 +16,7 @@ import type { OliveAdapter } from './adapters/olive';
 import { matchChain } from './matching/engine';
 import { computeSignals, isPersistWorthy } from './signals/engine';
 import { effectivePrices } from './signals/bestVenue';
+import { surfaceFlags } from './signals/surfaceChecks';
 import { feeModels } from './signals/fees';
 import type { Storage } from './storage';
 import type { Alerter } from './alerts';
@@ -493,6 +494,16 @@ export class Orchestrator extends EventEmitter {
         maxStrikeRelDist: this.cfg.matchMaxStrikeRelDist,
       },
     });
+    // Informational surface flags on each venue's own smile/term structure;
+    // copies, since adapters may cache the quote objects.
+    const matchedByKey = new Map(matched.map((r) => [r.pairKey, r]));
+    for (const [pairKey, byVenue] of surfaceFlags(matched, now)) {
+      const row = matchedByKey.get(pairKey);
+      for (const [v, flags] of byVenue) {
+        const leg = row?.legs[v];
+        if (leg?.quote) leg.quote = { ...leg.quote, flags: [...(leg.quote.flags ?? []), ...flags] };
+      }
+    }
     rows.push(...matched);
 
     const signalCfg = {
