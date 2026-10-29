@@ -108,6 +108,28 @@ install -m 755 /opt/options-arb/deploy/options-arb-watchdog.sh /usr/local/bin/
 cp /opt/options-arb/deploy/options-arb-watchdog.cron /etc/cron.d/options-arb-watchdog
 ```
 
+### Daily live handchecks + alert test
+
+`npm run alert:test -w server` sends one labelled test message through every
+configured transport and prints each outcome — run it once after setting up
+alerts (or after changing `.env`):
+
+```bash
+cd /opt/options-arb/server && npm run alert:test
+```
+
+The **handcheck cron** (`deploy/options-arb-handcheck.sh` + `.cron`) re-runs
+`handcheck.ts` (one Olive × Derive signal) and `handcheck-books.ts` (one
+book-venue pair) daily at 06:30 UTC against fresh venue data. A check that
+fails all 3 attempts (a minute apart — quote drift can fail one) alerts via
+the same transports; "nothing to check right now" is logged, not alerted.
+Log: `/var/log/options-arb-handcheck.log`. Install on the box:
+
+```bash
+install -m 755 /opt/options-arb/deploy/options-arb-handcheck.sh /usr/local/bin/
+cp /opt/options-arb/deploy/options-arb-handcheck.cron /etc/cron.d/options-arb-handcheck
+```
+
 ### Auto-deploy loop (phone-driven)
 
 ```
