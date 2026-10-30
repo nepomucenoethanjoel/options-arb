@@ -141,7 +141,7 @@ describe('Alerter — transports and gating', () => {
     expect(fetchMock.mock.calls).toHaveLength(2);
   });
 
-  it('sends a cycle’s alerts concurrently, and a send in flight is not duplicated', async () => {
+  it('packs a cycle into ONE message, best honest total first; a cycle mid-send skips', async () => {
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
     const fetchMock = vi.fn(async () => {
@@ -149,14 +149,86 @@ describe('Alerter — transports and gating', () => {
       return { ok: true };
     });
     vi.stubGlobal('fetch', fetchMock);
-    const alerter = new Alerter({ ...base, telegramBotToken: 'T0K', telegramChatId: '1' });
-    const first = alerter.process([sig({ pairKey: 'A', expectedTotalNetUsdc: null }), sig({ pairKey: 'B', expectedTotalNetUsdc: null })]);
+    const alerter = new Alerter({ ...base, discordWebhookUrl: 'https://discord.com/api/webhooks/1/abc' });
+    const first = alerter.process([
+      sig({ pairKey: 'LOW', totalNetUsdc: 3, expectedTotalNetUsdc: null }),
+      sig({ pairKey: 'HIGH', totalNetUsdc: 9, expectedTotalNetUsdc: null }),
+    ]);
     await Promise.resolve();
-    expect(fetchMock.mock.calls).toHaveLength(2); // both started before either finished
-    const second = alerter.process([sig({ pairKey: 'A', expectedTotalNetUsdc: null })]); // A still in flight
+    expect(fetchMock.mock.calls).toHaveLength(1); // one post for the whole cycle
+    const second = alerter.process([sig({ pairKey: 'C', expectedTotalNetUsdc: null })]); // previous digest still posting
     release();
     await Promise.all([first, second]);
+    expect(fetchMock.mock.calls).toHaveLength(1);
+    const content = String(lastPost().body.content);
+    expect(content).toMatch(/^options-arb — 2 new opportunities/);
+    expect(content.indexOf('HIGH')).toBeLessThan(content.indexOf('LOW'));
+    // both delivered → both cooled down; C was skipped, not dropped
+    await alerter.process([
+      sig({ pairKey: 'LOW', expectedTotalNetUsdc: null }),
+      sig({ pairKey: 'HIGH', expectedTotalNetUsdc: null }),
+      sig({ pairKey: 'C', expectedTotalNetUsdc: null }),
+    ]);
     expect(fetchMock.mock.calls).toHaveLength(2);
+    expect(String(lastPost().body.content)).toMatch(/^🎯 C — /); // a lone pair keeps the single-alert format
+  });
+
+  it('keeps each message under the transport limit; pairs that don’t fit go next cycle', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal('fetch', fetchMock);
+    const alerter = new Alerter({ ...base, discordWebhookUrl: 'https://discord.com/api/webhooks/1/abc' });
+    const many = Array.from({ length: 30 }, (_, i) => sig({ pairKey: `P${i}`, expectedTotalNetUsdc: null }));
+    const sent: string[] = [];
+    for (let cycle = 0; cycle < 10 && sent.length < 30; cycle++) {
+      await alerter.process(many);
+      const content = String(lastPost().body.content);
+      expect(content.length).toBeLessThanOrEqual(2000);
+      sent.push(...[...content.matchAll(/🎯 (P\d+) /g)].map((m) => m[1]!));
+    }
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(1);
+    expect(new Set(sent).size).toBe(30); // every pair delivered exactly once
+    expect(sent).toHaveLength(30);
+  });
+
+  it('a 429 with Retry-After pauses ALL sending until it expires', async () => {
+    vi.useFakeTimers({ now: 1_000_000 });
+    try {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce({ ok: false, status: 429, headers: new Headers({ 'retry-after': '30' }) })
+        .mockResolvedValue({ ok: true });
+      vi.stubGlobal('fetch', fetchMock);
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const alerter = new Alerter({ ...base, discordWebhookUrl: 'https://discord.com/api/webhooks/1/abc' });
+      await alerter.process([sig({ pairKey: 'A', expectedTotalNetUsdc: null })]);
+      await alerter.process([sig({ pairKey: 'B', expectedTotalNetUsdc: null })]); // a different pair, still paused
+      expect(fetchMock.mock.calls).toHaveLength(1);
+      vi.setSystemTime(1_000_000 + 31_000);
+      await alerter.process([sig({ pairKey: 'A', expectedTotalNetUsdc: null }), sig({ pairKey: 'B', expectedTotalNetUsdc: null })]);
+      expect(fetchMock.mock.calls).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reads Telegram’s retry_after from the 429 body', async () => {
+    vi.useFakeTimers({ now: 5_000_000 });
+    try {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce({ ok: false, status: 429, headers: new Headers(), json: async () => ({ ok: false, parameters: { retry_after: 12 } }) })
+        .mockResolvedValue({ ok: true });
+      vi.stubGlobal('fetch', fetchMock);
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const alerter = new Alerter({ ...base, telegramBotToken: 'T0K', telegramChatId: '1' });
+      await alerter.process([sig({ pairKey: 'A', expectedTotalNetUsdc: null })]);
+      vi.setSystemTime(5_000_000 + 11_000);
+      await alerter.process([sig({ pairKey: 'A', expectedTotalNetUsdc: null })]);
+      expect(fetchMock.mock.calls).toHaveLength(1);
+      vi.setSystemTime(5_000_000 + 13_000);
+      await alerter.process([sig({ pairKey: 'A', expectedTotalNetUsdc: null })]);
+      expect(fetchMock.mock.calls).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

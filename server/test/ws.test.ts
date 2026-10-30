@@ -1,9 +1,9 @@
 import { EventEmitter } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import WebSocket from 'ws';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Signal } from '@options-arb/shared';
-import { buildHealthRollup, buildKpis, buildServer } from '../src/api/server';
+import { WS_MAX_BUFFERED_BYTES, WS_STUCK_FRAMES, buildHealthRollup, buildKpis, buildServer, sendOrSkip } from '../src/api/server';
 import type { AppConfig } from '../src/config';
 import type { Orchestrator } from '../src/scheduler';
 import type { Storage } from '../src/storage';
@@ -212,6 +212,28 @@ describe('/ws per-underlying subscription', () => {
     expect((await fetch(`http://127.0.0.1:${port}/api/surface?underlying=junk123`)).status).toBe(400);
     expect((await fetch(`http://127.0.0.1:${port}/api/surface?underlying=eth`)).status).toBe(200);
     expect(asked).toEqual(['ETH']);
+  });
+});
+
+describe('sendOrSkip — /ws backpressure', () => {
+  const socket = (bufferedAmount: number) => ({ bufferedAmount, send: vi.fn(), terminate: vi.fn() });
+
+  it('sends to a client that keeps up and resets its lag', () => {
+    const s = socket(0);
+    const state = { lagging: 5 };
+    sendOrSkip(s, state, 'frame');
+    expect(s.send).toHaveBeenCalledWith('frame');
+    expect(state.lagging).toBe(0);
+  });
+
+  it('skips frames for a client still holding the last one, then drops it when stuck', () => {
+    const s = socket(WS_MAX_BUFFERED_BYTES + 1);
+    const state = { lagging: 0 };
+    for (let i = 0; i < WS_STUCK_FRAMES - 1; i++) sendOrSkip(s, state, 'frame');
+    expect(s.send).not.toHaveBeenCalled();
+    expect(s.terminate).not.toHaveBeenCalled();
+    sendOrSkip(s, state, 'frame');
+    expect(s.terminate).toHaveBeenCalledTimes(1);
   });
 });
 

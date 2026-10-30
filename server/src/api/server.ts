@@ -118,6 +118,29 @@ export function buildKpis(signals: Signal[]): SignalKpis {
   };
 }
 
+/** A socket with more than this still queued hasn't read the previous frame. */
+export const WS_MAX_BUFFERED_BYTES = 1 << 20;
+/** Frames skipped in a row before a non-reading client is dropped. */
+export const WS_STUCK_FRAMES = 20;
+
+type WsSendTarget = Pick<WebSocket, 'bufferedAmount' | 'send' | 'terminate'>;
+
+/**
+ * ws queues every frame in this process for a client that stops reading, so
+ * one stuck socket on the public /ws could grow the heap to its 256 MB cap.
+ * Each cycle frame is a full snapshot for its underlying (no deltas), so
+ * skipping frames for a lagging client loses nothing; one that stays behind
+ * for WS_STUCK_FRAMES is terminated (its 'close' handler unregisters it).
+ */
+export function sendOrSkip(socket: WsSendTarget, state: { lagging: number }, msg: string): void {
+  if (socket.bufferedAmount > WS_MAX_BUFFERED_BYTES) {
+    if (++state.lagging >= WS_STUCK_FRAMES) socket.terminate();
+    return;
+  }
+  state.lagging = 0;
+  socket.send(msg);
+}
+
 export async function buildServer(deps: ApiDeps): Promise<FastifyInstance> {
   const { cfg, orchestrator, storage, olive } = deps;
   const app = Fastify({ logger: false });
@@ -259,7 +282,7 @@ export async function buildServer(deps: ApiDeps): Promise<FastifyInstance> {
   // rows/signals plus the global KPI digest (header/KPI strip/top clips).
   // Browsers don't support WebSocket compression, so sending less is the
   // only effective fix.
-  const clients = new Map<WebSocket, { underlying: string | null }>();
+  const clients = new Map<WebSocket, { underlying: string | null; lagging: number }>();
 
   const cycleMessage = (latest: NonNullable<Orchestrator['latest']>, underlying: string): string =>
     JSON.stringify({
@@ -282,9 +305,10 @@ export async function buildServer(deps: ApiDeps): Promise<FastifyInstance> {
     });
 
   app.get('/ws', { websocket: true }, (socket: WebSocket) => {
-    clients.set(socket, { underlying: null });
+    const state = { underlying: null as string | null, lagging: 0 };
+    clients.set(socket, state);
     const latest = orchestrator.latest;
-    if (latest) socket.send(digestMessage(latest));
+    if (latest) sendOrSkip(socket, state, digestMessage(latest));
     socket.on('message', (data) => {
       const sub = clients.get(socket);
       if (!sub) return;
@@ -295,7 +319,8 @@ export async function buildServer(deps: ApiDeps): Promise<FastifyInstance> {
         if (!cfg.underlyings.includes(u)) return; // ignore invalid; keep the previous subscription
         sub.underlying = u;
         const cur = orchestrator.latest;
-        if (cur) socket.send(cycleMessage(cur, u));
+        // a subscribe flood from a non-reading client is backpressured like the broadcast
+        if (cur) sendOrSkip(socket, sub, cycleMessage(cur, u));
       } catch {
         // ignore malformed frames
       }
@@ -310,7 +335,7 @@ export async function buildServer(deps: ApiDeps): Promise<FastifyInstance> {
     for (const [socket, sub] of clients) {
       if (socket.readyState !== socket.OPEN) continue;
       if (!sub.underlying) {
-        socket.send(digest);
+        sendOrSkip(socket, sub, digest);
         continue;
       }
       let msg = byUnderlying.get(sub.underlying);
@@ -318,7 +343,7 @@ export async function buildServer(deps: ApiDeps): Promise<FastifyInstance> {
         msg = cycleMessage(payload, sub.underlying);
         byUnderlying.set(sub.underlying, msg);
       }
-      socket.send(msg);
+      sendOrSkip(socket, sub, msg);
     }
   });
 
