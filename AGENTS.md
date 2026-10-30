@@ -18,7 +18,7 @@ make a number look better.**
 
 ## Non-negotiable rules
 
-1. **The verification stack is load-bearing.** 228 tests (incl. a golden
+1. **The verification stack is load-bearing.** 237 tests (incl. a golden
    replay of a recorded live Olive × Derive cycle), typechecks in three
    workspaces, and `server/src/scripts/handcheck.ts` /
    `handcheck-books.ts` (live field

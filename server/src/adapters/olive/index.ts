@@ -43,6 +43,26 @@ export interface OliveAdapterOptions {
 
 const STATE_CACHE_TTL_MS = 10_000;
 const MARKET_FILE_CACHE_TTL_MS = 10_000;
+/**
+ * A brief market-file outage reuses the last live vol, not the pins: live
+ * vol drifted 0.446 → 0.467 (ETH) over 32 h in ≤0.005 steps, while the pins
+ * sat 6.5 vols away (DATA_SOURCES row 51).
+ */
+export const LAST_LIVE_VOL_MAX_AGE_MS = 15 * 60_000;
+
+/** Model vol for one state build: live file → recent live → pinned/on-chain. */
+export function pickModelVol(
+  fileVol: number | null | undefined,
+  lastLive: { vol: number; ts: number } | undefined,
+  fallback: { vol: number | null } | { reason: string } | null,
+  now: number,
+): { vol: number | null; caveat: string } {
+  if (fileVol != null) return { vol: fileVol, caveat: 'model_vol_live' };
+  if (lastLive && now - lastLive.ts <= LAST_LIVE_VOL_MAX_AGE_MS) return { vol: lastLive.vol, caveat: 'model_vol_last_live' };
+  if (fallback && 'vol' in fallback && fallback.vol != null) return { vol: fallback.vol, caveat: 'model_vol_manual_override' };
+  if (fallback && 'reason' in fallback) return { vol: null, caveat: `model_vol_unavailable_${fallback.reason}` };
+  return { vol: null, caveat: 'model_vol_unavailable_oracle_error' };
+}
 
 /**
  * Olive data adapter.
@@ -67,6 +87,7 @@ export class OliveAdapter implements OptionsVenueAdapter {
   /** Underlyings whose last fetched market file was frozen (asOf too old). */
   private staleMarketFiles = new Set<string>();
   private lastDetail: string | null = null;
+  private lastLiveVol = new Map<string, { vol: number; ts: number }>();
   /** True when at least one underlying's vol comes from the live market file. */
   private volLive = false;
 
@@ -227,21 +248,14 @@ export class OliveAdapter implements OptionsVenueAdapter {
       spot = oracle.lastPrice;
       caveats.push(oracle.fresh ? 'spot_from_onchain_oracle' : 'spot_from_stale_onchain_oracle');
     }
-    const vol = file?.vol ?? (volResult && 'vol' in volResult ? volResult.vol : null);
+    if (file?.vol != null) this.lastLiveVol.set(u, { vol: file.vol, ts: Date.now() });
+    const picked = pickModelVol(file?.vol, this.lastLiveVol.get(u), volResult, Date.now());
+    const vol = picked.vol;
+    caveats.push(picked.caveat);
 
     if (file) this.onchainHealth.ok();
     else if (volResult != null) this.onchainHealth.ok();
     else this.onchainHealth.fail(new Error('market file + on-chain read failed'));
-
-    if (file?.vol != null) {
-      caveats.push('model_vol_live');
-    } else if (volResult && 'vol' in volResult && volResult.vol != null) {
-      caveats.push('model_vol_manual_override');
-    } else if (volResult && 'reason' in volResult) {
-      caveats.push(`model_vol_unavailable_${volResult.reason}`);
-    } else {
-      caveats.push('model_vol_unavailable_oracle_error');
-    }
 
     // Pricing rates: live from the market file's per-custody borrow curves
     // at current utilization (their UI's "Fixed Rate (L/S)") when present;
