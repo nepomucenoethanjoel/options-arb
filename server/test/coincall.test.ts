@@ -67,6 +67,49 @@ describe('CoincallAdapter.getChain', () => {
     expect(a.getHealth().status).toBe('ok');
   });
 
+  it('re-asks a replayed snapshot, stamps quotes when the snapshot first appeared, flags old replays stale', async () => {
+    let clock = 1_800_000_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    const fresh = structuredClone(fixture.chain);
+    fresh.data[0].callOption ? (fresh.data[0].callOption.markPrice += 0.01) : (fresh.data[0].putOption.markPrice += 0.01);
+    let served: object[] = [];
+    let chainReads = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        clock += 300; // clears the 250 ms request spacing
+        if (String(url).includes('getInstruments')) return { ok: true, json: async () => fixture.instruments };
+        chainReads++;
+        return { ok: true, json: async () => served.shift() ?? fixture.chain };
+      }),
+    );
+    const a = new CoincallAdapter('https://x');
+
+    served = [fixture.chain];
+    const t0 = clock;
+    let { quotes } = await a.getChain('SOL');
+    expect(chainReads).toBe(1);
+    expect(quotes[0].ts).toBeGreaterThan(t0);
+    expect(quotes[0].flags).toBeUndefined();
+    const firstSeen = quotes[0].ts;
+
+    clock += 30_000;
+    chainReads = 0;
+    served = [fixture.chain, fixture.chain, fixture.chain];
+    ({ quotes } = await a.getChain('SOL'));
+    expect(chainReads).toBe(3);
+    expect(quotes.every((q) => q.ts === firstSeen && q.flags?.includes('stale'))).toBe(true);
+
+    clock += 30_000;
+    chainReads = 0;
+    served = [fixture.chain, fresh];
+    ({ quotes } = await a.getChain('SOL'));
+    expect(chainReads).toBe(2);
+    expect(quotes[0].ts).toBe(clock);
+    expect(quotes[0].flags).toBeUndefined();
+    vi.restoreAllMocks();
+  });
+
   it('an HTTP error fails health and throws', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 503 })));
     const a = new CoincallAdapter('https://x');

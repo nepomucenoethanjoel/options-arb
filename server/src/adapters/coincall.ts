@@ -21,11 +21,20 @@ import { HealthTracker, RateLimiter, fetchWithTimeout } from '../util';
  *    per 1 coin (multiplier 1). Unlisted bases (ZEC) answer code 40034.
  *  - The options WebSocket needs a signed key → polling only. Rate limits
  *    for these endpoints are undocumented: one chain read per underlying per
- *    cycle, instruments cached.
+ *    cycle (up to SNAPSHOT_ATTEMPTS when replayed), instruments cached.
+ *  - The chain is served from cache replicas of different ages and carries no
+ *    timestamp: from the VPS 41 of 51 reads replayed a snapshot already seen,
+ *    up to ~59 s old (row 50). A replayed snapshot is re-asked; quotes are
+ *    stamped with when their snapshot first appeared (a lower bound on age),
+ *    and one older than SNAPSHOT_FRESH_MS carries `stale`.
  */
 
 export const COINCALL_BASE_URL = 'https://api.coincall.com';
 const INSTRUMENT_CACHE_TTL_MS = 10 * 60_000;
+/** The backend published a new snapshot every ~11 s in the row-50 sample. */
+const SNAPSHOT_FRESH_MS = 20_000;
+const SNAPSHOT_ATTEMPTS = 3;
+const SNAPSHOT_MEMORY_MS = 10 * 60_000;
 const SYMBOL_RE = /^([A-Z0-9]+)USD-(\d{1,2})([A-Z]{3})(\d{2})-([\d.]+)-([CP])$/;
 
 interface RawInstrument {
@@ -53,6 +62,16 @@ interface RawOption {
   vega?: number | null;
   theta?: number | null;
   rho?: number | null;
+}
+
+type ChainEntry = { callOption?: RawOption | null; putOption?: RawOption | null };
+
+/** Every mark, book and forward in the chain: any republish changes at least one. */
+function snapshotFingerprint(data: ChainEntry[]): string {
+  return data
+    .flatMap((e) => [e.callOption, e.putOption])
+    .map((o) => (o ? `${o.symbol}:${o.markPrice}:${o.bid}:${o.ask}:${o.underlyingPrice}` : '-'))
+    .join('|');
 }
 
 interface Envelope<T> {
@@ -114,6 +133,8 @@ export class CoincallAdapter implements OptionsVenueAdapter {
   // Undocumented limits: stay well under the documented 10 req / 2 s on config endpoints.
   private readonly limiter = new RateLimiter(250, 2_000, 5);
   private instrumentCache = new Map<string, { ts: number; list: OptionInstrument[] }>();
+  /** underlying → snapshot fingerprint → when it was first served. */
+  private snapshotsSeen = new Map<string, Map<string, number>>();
 
   constructor(private readonly baseUrl: string = COINCALL_BASE_URL) {}
 
@@ -148,15 +169,13 @@ export class CoincallAdapter implements OptionsVenueAdapter {
         this.health.ok();
         return { instruments, quotes: [] };
       }
-      const env = await this.get<Array<{ callOption?: RawOption | null; putOption?: RawOption | null }>>(
-        `/open/option/get/v1/${underlying}USD`,
-      );
-      if (env.code !== 0 || !Array.isArray(env.data)) throw new Error(`Coincall chain ${underlying}: code ${env.code} ${env.msg ?? ''}`);
-      const now = Date.now();
+      const { data, ts } = await this.freshestChain(underlying);
+      const stale = Date.now() - ts > SNAPSHOT_FRESH_MS;
       const quotes: OptionQuote[] = [];
-      for (const entry of env.data) {
+      for (const entry of data) {
         for (const raw of [entry.callOption, entry.putOption]) {
-          const q = raw ? mapCoincallOption(raw, now) : null;
+          const q = raw ? mapCoincallOption(raw, ts) : null;
+          if (q && stale) q.flags = [...(q.flags ?? []), 'stale'];
           if (q) quotes.push(q);
         }
       }
@@ -166,6 +185,25 @@ export class CoincallAdapter implements OptionsVenueAdapter {
       this.health.fail(err);
       throw err;
     }
+  }
+
+  /** The newest snapshot within SNAPSHOT_ATTEMPTS reads, with when it first appeared. */
+  private async freshestChain(underlying: string): Promise<{ data: ChainEntry[]; ts: number }> {
+    const seen = this.snapshotsSeen.get(underlying) ?? new Map<string, number>();
+    this.snapshotsSeen.set(underlying, seen);
+    let best: { data: ChainEntry[]; ts: number } | null = null;
+    for (let i = 0; i < SNAPSHOT_ATTEMPTS; i++) {
+      const env = await this.get<ChainEntry[]>(`/open/option/get/v1/${underlying}USD`);
+      if (env.code !== 0 || !Array.isArray(env.data)) throw new Error(`Coincall chain ${underlying}: code ${env.code} ${env.msg ?? ''}`);
+      const now = Date.now();
+      const fp = snapshotFingerprint(env.data);
+      const first = seen.get(fp) ?? now;
+      seen.set(fp, first);
+      if (best == null || first > best.ts) best = { data: env.data, ts: first };
+      if (now - best.ts <= SNAPSHOT_FRESH_MS) break;
+    }
+    for (const [fp, t] of seen) if (Date.now() - t > SNAPSHOT_MEMORY_MS) seen.delete(fp);
+    return best!;
   }
 
   async getTicker(instrumentId: string): Promise<OptionQuote | null> {
