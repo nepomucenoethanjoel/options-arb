@@ -230,7 +230,7 @@ export async function buildServer(deps: ApiDeps): Promise<FastifyInstance> {
     const sinceTs = Date.now() - days * 86_400_000;
     const open = orchestrator.episodes.snapshotOpen();
     const episodes = [...storage.getEpisodes(sinceTs), ...open];
-    return { days, sinceTs, pollIntervalMs: cfg.pollIntervalMs, trackingSinceTs: orchestrator.startedAt, openCount: open.length, rows: summarizeEpisodes(episodes) };
+    return { days, sinceTs, pollIntervalMs: cfg.pollIntervalMs, trackingSinceTs: orchestrator.startedAt, openCount: open.length, rows: summarizeEpisodes(episodes, cfg.pollIntervalMs * 1.5) };
   });
 
   app.get('/api/health', async () => {

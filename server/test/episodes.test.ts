@@ -83,6 +83,20 @@ describe('EpisodeTracker', () => {
 });
 
 describe('episode storage + summary', () => {
+  it('merges overlapping and back-to-back episodes of a route into one window (best peak, not the sum)', () => {
+    const e = (pairKey: string, startTs: number, endTs: number, peak: number): EpisodeRecord => ({
+      pairKey, underlying: 'ETH', buyVenue: 'olive', sellVenue: 'coincall', tier: 'headline',
+      startTs, endTs, peakHonestUsdc: peak, peakQuotedUsdc: peak, peakSize: 0.5, cycles: 1 + (endTs - startTs) / 15_000,
+    });
+    const eps = [
+      e('ETH-A', 0, 30_000, 4), e('ETH-B', 15_000, 15_000, 5), e('ETH-C', 45_000, 45_000, 2), // one window: overlap, then next cycle
+      e('ETH-A', 300_000, 300_000, 3), // a later, separate window
+    ];
+    expect(summarizeEpisodes(eps, 22_500)[0]).toMatchObject({ count: 4, windows: 2, sumWindowPeakUsdc: 8 });
+    expect(summarizeEpisodes(eps)[0]).toMatchObject({ windows: 3, sumWindowPeakUsdc: 10 }); // no join gap: ETH-C stands alone
+  });
+
+
   it('round-trips through SQLite and summarizes per tier and venue pair', () => {
     const dir = mkdtempSync(join(tmpdir(), 'options-arb-episodes-'));
     const storage = new SqliteStorage(join(dir, 'e.db'));
@@ -97,7 +111,7 @@ describe('episode storage + summary', () => {
       expect(all[1]).toEqual(e(4, 3, 100_000));
       expect(storage.getEpisodes(150_000)).toHaveLength(1);
       const [row] = summarizeEpisodes(all);
-      expect(row).toMatchObject({ tier: 'headline', count: 3, medianCycles: 2, maxCycles: 4, sumPeakHonestUsdc: 4.5 });
+      expect(row).toMatchObject({ tier: 'headline', count: 3, medianCycles: 2, maxCycles: 4, windows: 3, sumWindowPeakUsdc: 4.5 });
       expect(row!.best.peakHonestUsdc).toBe(3);
       storage.prune(Number.MAX_SAFE_INTEGER);
       expect(storage.getEpisodes(0)).toHaveLength(3); // episodes are never pruned

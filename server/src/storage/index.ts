@@ -62,7 +62,10 @@ export interface EpisodeSummaryRow {
   medianCycles: number;
   p90Cycles: number;
   maxCycles: number;
-  sumPeakHonestUsdc: number;
+  /** Overlapping / back-to-back episodes merged (see summarizeEpisodes). */
+  windows: number;
+  /** Best peak honest per window, summed — at most one clip per window. */
+  sumWindowPeakUsdc: number;
   best: EpisodeRecord;
 }
 

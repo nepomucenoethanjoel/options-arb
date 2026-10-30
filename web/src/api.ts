@@ -94,7 +94,8 @@ export interface EpisodeSummaryResponse {
     medianCycles: number;
     p90Cycles: number;
     maxCycles: number;
-    sumPeakHonestUsdc: number;
+    windows: number;
+    sumWindowPeakUsdc: number;
     best: EpisodeRecord;
   }>;
 }

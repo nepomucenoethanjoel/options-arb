@@ -138,7 +138,23 @@ function quantile(sorted: number[], q: number): number {
 }
 
 /** Per (tier, underlying, venue pair): how often a gap appeared, how long it lasted (cycles), what it peaked at. */
-export function summarizeEpisodes(episodes: EpisodeRecord[]): EpisodeSummaryRow[] {
+/**
+ * Episodes of one route that overlap in time (or follow on the next cycle,
+ * within joinGapMs) are one window: they share pools and books, so taking one
+ * clip closes the rest. Σ = best peak per window — not a sum over contracts.
+ */
+function windowPeaks(g: EpisodeRecord[], joinGapMs: number): number[] {
+  const peaks: number[] = [];
+  let end = -Infinity;
+  for (const e of [...g].sort((a, b) => a.startTs - b.startTs)) {
+    if (e.startTs > end + joinGapMs) peaks.push(0);
+    peaks[peaks.length - 1] = Math.max(peaks[peaks.length - 1]!, e.peakHonestUsdc);
+    end = Math.max(end, e.endTs);
+  }
+  return peaks;
+}
+
+export function summarizeEpisodes(episodes: EpisodeRecord[], joinGapMs = 0): EpisodeSummaryRow[] {
   const groups = new Map<string, EpisodeRecord[]>();
   for (const e of episodes) {
     const k = `${e.tier}|${e.underlying}|${e.buyVenue}|${e.sellVenue}`;
@@ -159,7 +175,8 @@ export function summarizeEpisodes(episodes: EpisodeRecord[]): EpisodeSummaryRow[
       medianCycles: quantile(cycles, 0.5),
       p90Cycles: quantile(cycles, 0.9),
       maxCycles: cycles[cycles.length - 1]!,
-      sumPeakHonestUsdc: Math.round(g.reduce((a, e) => a + Math.max(0, e.peakHonestUsdc), 0) * 100) / 100,
+      windows: windowPeaks(g, joinGapMs).length,
+      sumWindowPeakUsdc: Math.round(windowPeaks(g, joinGapMs).reduce((a, p) => a + Math.max(0, p), 0) * 100) / 100,
       best,
     });
   }

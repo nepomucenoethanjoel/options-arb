@@ -71,9 +71,9 @@ export function EpisodesPanel() {
           <div className="table-wrap"><table>
             <thead>
               <tr>
-                <th>Underlying</th><th>Pair</th><th className="num">Episodes</th>
+                <th>Underlying</th><th>Pair</th><th className="num" title="Contract-level episodes">Episodes</th><th className="num" title="Overlapping or back-to-back episodes merged: one clip per window">Windows</th>
                 <th className="num">Median</th><th className="num">p90</th><th className="num">Longest</th>
-                <th className="num">{tier === 'quote_only' ? 'Best quoted' : tier === 'parity' ? 'Σ peak / ctr' : 'Σ peak honest'}</th><th>Best episode</th>
+                <th className="num">{tier === 'quote_only' ? 'Best quoted' : tier === 'parity' ? 'Σ best / window / ctr' : 'Σ best / window'}</th><th>Best episode</th>
               </tr>
             </thead>
             <tbody>
@@ -82,10 +82,11 @@ export function EpisodesPanel() {
                   <td>{r.underlying}</td>
                   <td>buy {venueLabel(r.buyVenue)} · sell {venueLabel(r.sellVenue)}</td>
                   <td className="num">{r.count}</td>
+                  <td className="num">{r.windows}</td>
                   <td className="num">{duration(r.medianCycles, poll)}</td>
                   <td className="num">{duration(r.p90Cycles, poll)}</td>
                   <td className="num">{duration(r.maxCycles, poll)}</td>
-                  <td className="num">{tier === 'quote_only' ? usd(r.best.peakQuotedUsdc) : usd(r.sumPeakHonestUsdc)}</td>
+                  <td className="num">{tier === 'quote_only' ? usd(r.best.peakQuotedUsdc) : usd(r.sumWindowPeakUsdc)}</td>
                   <td>
                     {pairLabel(r.best.pairKey)} · {tier === 'quote_only' ? `${usd(r.best.peakQuotedUsdc)} quoted / ${usd(r.best.peakHonestUsdc)} expected` : usd(r.best.peakHonestUsdc)} · {ago(r.best.startTs)}
                   </td>
