@@ -1,4 +1,4 @@
-import { honestClipSize, honestTotalNetUsdc, isTwoLegExecutable, type Signal } from '@options-arb/shared';
+import { HEADLINE_BLOCKING_FLAGS, honestClipSize, honestTotalNetUsdc, isTwoLegExecutable, type Signal } from '@options-arb/shared';
 import type { AppConfig } from './config';
 import { fetchWithTimeout } from './util';
 
@@ -9,7 +9,9 @@ import { fetchWithTimeout } from './util';
  *  - generic JSON webhook (ALERT_WEBHOOK_URL) — Slack/relays etc.
  *
  * Gating: isOpportunity rows only, executable direction only (writing to
- * Olive's pool is an LP role), price-distortion noise skipped, and — when
+ * Olive's pool is an LP role), no headline-blocking flag (reference venues,
+ * unpriced Olive fills, unproven or broken books — what the KPI excludes, an
+ * alert must too), and — when
  * ALERT_MIN_TOTAL_USDC > 0 — the clip's HONEST total (expected/marginal-fill
  * aware: min(quoted, expected), the same basis as the KPI Σ) must clear the
  * threshold. Deduped per pair with a cooldown so a persistently crossed pair
@@ -44,7 +46,7 @@ export class Alerter {
     for (const s of signals) {
       if (!s.isOpportunity) continue;
       if (this.cfg.alertsExecutableOnly && !isTwoLegExecutable(s)) continue;
-      if (s.flags.includes('price_distortion')) continue;
+      if (s.flags.some((f) => HEADLINE_BLOCKING_FLAGS.has(f))) continue;
       const honest = honestTotalNetUsdc(s) ?? 0;
       if (this.cfg.alertMinTotalUsdc > 0 && honest < this.cfg.alertMinTotalUsdc) continue;
       if (this.lastAlertPerPair.has(s.pairKey)) continue;

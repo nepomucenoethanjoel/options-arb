@@ -115,6 +115,17 @@ describe('Alerter — transports and gating', () => {
     expect(body.honestTotalUsdc).toBe(-0.4); // min(2.45, -0.4)
   });
 
+  it('never alerts a row the headline excludes (reference venue, unpriced Olive fill)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal('fetch', fetchMock);
+    // The 2026-11-01 alert: olive→deribit, Deribit book size, no Olive fill model — "total 8817 USDC".
+    await new Alerter({ ...base, telegramBotToken: 'T0K', telegramChatId: '1' }).process([
+      sig({ pairKey: 'R1', sellVenue: 'deribit', flags: ['amm_pool_depth_unknown', 'reference_venue', 'settlement_asset_mismatch', 'fill_model_skipped'], expectedTotalNetUsdc: null }),
+      sig({ pairKey: 'R2', flags: ['amm_pool_depth_unknown', 'fill_model_skipped'], expectedTotalNetUsdc: null }),
+    ]);
+    expect(fetchMock.mock.calls).toHaveLength(0);
+  });
+
   it('skips non-opportunities, LP-only directions, distorted books; cooldown dedupes', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal('fetch', fetchMock);
