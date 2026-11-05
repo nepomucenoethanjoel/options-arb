@@ -94,7 +94,7 @@ describe('Orchestrator — extra listed venues', () => {
       { pollIntervalMs: 15_000, historyRetentionDays: 3, oliveVolOverrides: {}, oliveRealtimeSpotTriggerPct: 0, underlyings: ['ETH'],
         deriveMaxExpiries: 0, matchExpiryToleranceDays: 1, matchMaxStrikeRelDist: 0.02, oliveMaxTenorDays: 365, ivSpreadThresholdVols: 3,
         minBookSize: 1, maxRelBookWidth: 0.5, nearExpiryDays: 1, deriveTakerFeeBps: 3, solanaFeeUsdc: 0.05, capitalBorrowRateApr: 0.08,
-        olivePoolLiquidityUsd: {} } as unknown as AppConfig,
+        olivePoolLiquidityUsd: {}, referenceVenues: [] } as unknown as AppConfig,
       derive as never,
       olive as never,
       { recordSignals: () => {}, upsertHealth: () => {}, prune: () => {}, recordEpisodes: () => {} } as never,
@@ -119,8 +119,8 @@ describe('Orchestrator — extra listed venues', () => {
       getMarketState: async () => null, getAmmQuote: () => ({ rejected: 'no_olive_state' }), getHealth: health('olive'),
       getRealtimeHealth: () => null, isVolLive: () => true, getCachedLiquidity: () => null, getCachedCapacity: () => null, onSpot: () => () => {},
     };
-    // A Deribit-like chain: cheap ask, no sizes (→ thin_book until topped up).
-    const unsized = { ...quote('derive', 3000, 0.5), venue: 'deribit' as const, instrumentId: 'deribit-3000', bid: 9, ask: 10, bidSize: null, askSize: null, flags: ['reference_venue'] };
+    // A Deribit-like chain listed in REFERENCE_VENUES: cheap ask, no sizes (→ thin_book until topped up).
+    const unsized = { ...quote('derive', 3000, 0.5), venue: 'deribit' as const, instrumentId: 'deribit-3000', bid: 9, ask: 10, bidSize: null, askSize: null };
     const enrichQuotes = vi.fn(async (qs: Array<typeof unsized>) => qs.map((q) => ({ ...q, bidSize: 4, askSize: 3 })));
     const deribit = {
       venue: 'deribit' as const,
@@ -132,7 +132,7 @@ describe('Orchestrator — extra listed venues', () => {
       { pollIntervalMs: 15_000, historyRetentionDays: 3, oliveVolOverrides: {}, oliveRealtimeSpotTriggerPct: 0, underlyings: ['ETH'],
         deriveMaxExpiries: 0, matchExpiryToleranceDays: 1, matchMaxStrikeRelDist: 0.02, oliveMaxTenorDays: 365, ivSpreadThresholdVols: 3,
         minBookSize: 1, maxRelBookWidth: 0.5, nearExpiryDays: 1, deriveTakerFeeBps: 3, solanaFeeUsdc: 0.05, capitalBorrowRateApr: 0.08,
-        olivePoolLiquidityUsd: {} } as unknown as AppConfig,
+        olivePoolLiquidityUsd: {}, referenceVenues: ['deribit'] } as unknown as AppConfig,
       derive as never,
       olive as never,
       { recordSignals: () => {}, upsertHealth: () => {}, prune: () => {}, recordEpisodes: () => {} } as never,

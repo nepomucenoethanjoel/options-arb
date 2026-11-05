@@ -446,6 +446,11 @@ export class Orchestrator extends EventEmitter {
       ).then((lists) => lists.flat()),
     ]);
     oliveCaveats.push(...(oliveState?.caveats ?? []));
+    // A venue the user cannot trade is shown for reference only: headline-blocking on every quote.
+    for (const c of extraChains) {
+      if (!this.cfg.referenceVenues.includes(c.venue)) continue;
+      for (const q of c.quotes.values()) q.flags = [...new Set([...(q.flags ?? []), 'reference_venue'])];
+    }
     if (instruments.length === 0 && extraChains.every((c) => c.instruments.length === 0)) {
       return { underlying, rows, signals, parity: [], spot: null, oliveCaveats };
     }
@@ -595,6 +600,7 @@ export class Orchestrator extends EventEmitter {
           staleQuoteMs: this.staleQuoteMs(),
           capitalBorrowRateApr: this.cfg.capitalBorrowRateApr,
           nearExpiryDays: this.cfg.nearExpiryDays,
+          referenceVenues: this.cfg.referenceVenues,
         })
       : [];
     return { underlying, rows, signals, parity, spot, oliveCaveats };

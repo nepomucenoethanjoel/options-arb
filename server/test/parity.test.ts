@@ -36,7 +36,11 @@ describe('computeParity', () => {
     const fut = F * (DERIBIT_FUTURE_TAKER + DERIBIT_FUTURE_DELIVERY);
     expect(out.map((p) => p.strategy).sort()).toEqual(['conversion', 'reversal']);
     for (const p of out) expect(p.netPerUnitUsdc).toBeCloseTo(-fut, 3);
-    expect(out[0]!.flags).toEqual(expect.arrayContaining(['reference_venue', 'hedge_size_unverified', 'settlement_basis']));
+    expect(out[0]!.flags).toEqual(expect.arrayContaining(['hedge_size_unverified', 'settlement_basis']));
+    expect(out[0]!.flags).not.toContain('reference_venue');
+    // A hedge venue listed in REFERENCE_VENUES marks every row reference-only.
+    const ref = computeParity(rows, [future], { ...ctx, referenceVenues: ['deribit'] });
+    expect(ref.every((p) => p.flags.includes('reference_venue'))).toBe(true);
   });
 
   it('a cheap call on one venue shows up as a positive conversion', () => {

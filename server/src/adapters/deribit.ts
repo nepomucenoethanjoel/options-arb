@@ -11,9 +11,9 @@ import { HealthTracker, RateLimiter, fetchWithTimeout } from '../util';
 
 /**
  * Deribit options — public JSON-RPC over GET, no key (verified live from the
- * US host 2026-10-29, DATA_SOURCES.md rows 43-48). REFERENCE ONLY: the user
- * cannot trade Deribit, so every quote carries `reference_venue` (headline
- * blocking) — its prices inform the table, views and episodes, never the KPI.
+ * US host 2026-10-29, DATA_SOURCES.md rows 43-48). Tradeable since
+ * 2026-11-05 (row 48); REFERENCE_VENUES=deribit turns it back into a
+ * reference-only venue.
  *  - GET /api/v2/public/get_book_summary_by_currency?currency=C&kind=option
  *    → whole chain, no sizes. BTC/ETH use the INVERSE book (currency=BTC|ETH:
  *    prices in coin per 1 coin, × index → USD; the liquid Deribit market);
@@ -123,7 +123,6 @@ export function mapDeribitSummary(raw: { result?: RawSummary[] }, underlying: st
       ivSource: 'market',
       openInterest: num(r.open_interest),
       source: 'deribit:rest',
-      flags: ['reference_venue'],
     });
   }
   return { instruments, quotes };

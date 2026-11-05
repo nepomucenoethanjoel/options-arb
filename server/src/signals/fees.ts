@@ -79,7 +79,7 @@ export function feeModels(cfg: FeeConfig): Partial<Record<Venue, VenueFeeModel>>
       perContract: ({ notional }) => notional * 0.0005 + notional * 0.00015,
       perOrder: 0,
     },
-    // Deribit (reference only): taker 0.03% of underlying per contract —
+    // Deribit: taker 0.03% of underlying per contract —
     // taker_commission 0.0003 on every instrument (get_instruments, live
     // 2026-10-29) — capped at 12.5% of premium; delivery min(0.015% ×
     // index, 12.5% × intrinsic), none on dailies (cap + delivery: published

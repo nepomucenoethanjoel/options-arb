@@ -15,6 +15,8 @@ export interface ParityContext {
   staleQuoteMs: number;
   capitalBorrowRateApr: number;
   nearExpiryDays: number;
+  /** Venues the user cannot trade; a hedge there adds reference_venue. */
+  referenceVenues?: Venue[];
 }
 
 interface Side {
@@ -50,9 +52,9 @@ const minSize = (a: number | null, b: number | null): number | null => (a == nul
  * Option prices are per-contract after fees (effectivePrices); the future
  * pays taker + delivery. Drag = the short option's collateral (put: K, call:
  * spot — conservative, as the pair engine) plus any net premium paid, at the
- * capital rate to expiry. Every row carries reference_venue (the hedge is on
- * Deribit) and hedge_size_unverified (future sizes are not read), so parity
- * is informational — never headline. AMM legs add fill_model_skipped (their
+ * capital rate to expiry. Every row carries hedge_size_unverified (future
+ * sizes are not read), so parity is informational — never headline; a hedge
+ * on a reference venue adds reference_venue. AMM legs add fill_model_skipped (their
  * own price impact is not priced here), which keeps them out of episodes.
  */
 export function computeParity(rows: MatchRow[], futures: FutureQuote[], ctx: ParityContext): ParitySignal[] {
@@ -75,7 +77,8 @@ export function computeParity(rows: MatchRow[], futures: FutureQuote[], ctx: Par
     const spot = ctx.spot ?? fut.indexPrice ?? K;
     const c = bestSides(call, ctx);
     const p = bestSides(put, ctx);
-    const baseFlags = ['reference_venue', 'hedge_size_unverified'];
+    const baseFlags = ['hedge_size_unverified'];
+    if (ctx.referenceVenues?.includes(fut.venue)) baseFlags.push('reference_venue');
     if (tau * 365 < ctx.nearExpiryDays) baseFlags.push('near_expiry');
     const emit = (strategy: ParitySignal['strategy'], cs: Side, ps: Side, futPrice: number, locked: number, premium: number, collateral: number) => {
       const capital = (collateral + Math.max(0, -premium)) * ctx.capitalBorrowRateApr * tau;

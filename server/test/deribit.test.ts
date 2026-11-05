@@ -24,13 +24,14 @@ describe('Deribit names', () => {
 });
 
 describe('Deribit summary mapping (live fixtures)', () => {
-  it('converts inverse coin prices to USD at the index; no sizes; reference flag', () => {
+  it('converts inverse coin prices to USD at the index; no sizes; tradeable (no reference flag)', () => {
     const { instruments, quotes } = mapDeribitSummary(btc, 'BTC');
     expect(instruments).toHaveLength(3);
     const c = quotes.find((q) => q.instrumentId === 'BTC-27NOV26-80000-C')!;
     expect(c.bid).toBeCloseTo(0.043 * 80232.76, 9);
     expect(c.ask).toBeCloseTo(0.044 * 80232.76, 9);
-    expect(c).toMatchObject({ bidSize: null, askSize: null, iv: expect.closeTo(0.3535, 9), indexPrice: 80232.76, forward: 80579.31, ts: 1793251760959, flags: ['reference_venue'] });
+    expect(c).toMatchObject({ bidSize: null, askSize: null, iv: expect.closeTo(0.3535, 9), indexPrice: 80232.76, forward: 80579.31, ts: 1793251760959 });
+    expect(c.flags).toBeUndefined();
     const oneSided = quotes.find((q) => q.instrumentId === 'BTC-31OCT26-87000-C')!;
     expect(oneSided.bid).toBeNull();
     expect(oneSided.ask).toBeCloseTo(0.0002 * 80232.76, 9);
@@ -62,7 +63,7 @@ describe('DeribitAdapter.enrichQuotes', () => {
     vi.stubGlobal('fetch', fetchMock);
     const { quotes } = mapDeribitSummary(btc, 'BTC');
     const out = await new DeribitAdapter('https://x').enrichQuotes(quotes.slice(0, 2));
-    expect(out[0]).toMatchObject({ instrumentId: 'BTC-27NOV26-80000-C', bidSize: 9.7, askSize: 35.4, source: 'deribit:ticker', flags: ['reference_venue'] });
+    expect(out[0]).toMatchObject({ instrumentId: 'BTC-27NOV26-80000-C', bidSize: 9.7, askSize: 35.4, source: 'deribit:ticker' });
     expect(out[1]).toBe(quotes[1]);
   });
 });

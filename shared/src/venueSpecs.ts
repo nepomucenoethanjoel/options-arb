@@ -46,7 +46,7 @@ export const VENUE_SPECS: Record<Venue, VenueSpec> = {
     settlementAsset: (kind) => (kind === 'call' ? 'underlying' : 'USDC'),
     settlementWindowHours: 0.5,
   },
-  // Reference only (user cannot trade Deribit): quotes carry reference_venue.
+  // Tradeable since 2026-11-05 (row 48); REFERENCE_VENUES can make it reference-only.
   // BTC/ETH read from the inverse book (coin-settled); SOL from the USDC-linear book.
   deribit: {
     label: 'Deribit',

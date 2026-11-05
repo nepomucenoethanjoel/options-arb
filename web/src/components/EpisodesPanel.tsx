@@ -12,8 +12,8 @@ const TIER_LABEL: Record<EpisodeTier, string> = {
 
 const TIER_HELP: Record<EpisodeTier, string> = {
   headline: 'Honest clip total > 0 on clean books, both legs user-executable — what the KPI counts.',
-  parity: 'Conversion / reversal across venues with a dated-future hedge (reference only). Measured per contract — the future size is not read.',
-  reference: 'Would be headline, but a leg is on a venue you cannot trade (Deribit).',
+  parity: 'Conversion / reversal across venues with a dated-future hedge (informational). Measured per contract — the future size is not read.',
+  reference: 'Would be headline, but a leg is on a venue you cannot trade (REFERENCE_VENUES; Deribit until 2026-11-05).',
   quote_only: 'Quoted clip total > 0, but the marginal-fill (expected) total is ≤ 0 — the gap your own trade closes.',
 };
 

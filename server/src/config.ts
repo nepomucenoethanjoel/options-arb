@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import type { Venue } from '@options-arb/shared';
 
 function str(name: string, def: string): string {
   const v = process.env[name];
@@ -48,6 +49,8 @@ export interface AppConfig {
   pollIntervalMs: number;
   /** Listed venues polled alongside Derive/Olive (VENUES). */
   extraVenues: ExtraVenue[];
+  /** Venues the user cannot trade (REFERENCE_VENUES): quotes carry reference_venue. */
+  referenceVenues: Venue[];
   coincallBaseUrl: string;
   hypercallBaseUrl: string;
   callputFeedUrl: string;
@@ -183,6 +186,7 @@ export function loadConfig(): AppConfig {
     underlyings: list('UNDERLYINGS', ['SOL', 'BTC', 'ETH']),
     pollIntervalMs: Math.max(5000, num('POLL_INTERVAL_MS', 15000)),
     extraVenues: extraVenueList(),
+    referenceVenues: list('REFERENCE_VENUES', []).map((v) => v.toLowerCase() as Venue),
     coincallBaseUrl: str('COINCALL_BASE_URL', 'https://api.coincall.com'),
     hypercallBaseUrl: str('HYPERCALL_BASE_URL', 'https://api.hypercall.xyz'),
     deribitBaseUrl: str('DERIBIT_BASE_URL', 'https://www.deribit.com/api/v2'),

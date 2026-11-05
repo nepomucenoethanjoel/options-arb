@@ -1,7 +1,7 @@
 # AGENTS.md — how to work on this repo
 
 Multi-venue options arbitrage monitor (Derive, Olive, Coincall, Hypercall,
-Callput, Deribit as reference only; Bybit/Binance deferred — geo-blocked from the US host). Read this before
+Callput, Deribit; Bybit/Binance deferred — geo-blocked from the US host). Read this before
 changing anything. The short version: **this app's value is that every
 number it shows is verified against venue reality — never weaken that to
 make a number look better.**
@@ -76,7 +76,7 @@ bash deploy/deploy.sh root@<vps>  # deploy: build locally + ship + restart
   flags (`signals/surfaceChecks.ts`), parity (`signals/parity.ts`).
 - `server/src/episodes.ts` — gap episodes at cycle resolution (headline /
   reference / quote_only / parity) → `/api/episodes/summary`; never pruned.
-- Reference-only venues (Deribit) carry `reference_venue` (headline-blocking);
+- Reference-only venues (`REFERENCE_VENUES`, default none) carry `reference_venue` (headline-blocking);
   informational flags (`smile_outlier`, `calendar_inversion`, parity rows) never
   reach the KPI. The KPI may use the fill model's best smaller Olive clip
   (`honestTotalNetUsdc`), never above the quoted full-clip total.

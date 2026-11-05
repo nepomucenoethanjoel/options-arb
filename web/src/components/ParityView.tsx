@@ -6,8 +6,8 @@ import { venueLabel } from '../venues';
 
 /**
  * Cross-venue put-call parity hedged with the dated future at the same
- * expiry. Informational: the hedge leg is on a reference-only venue and its
- * size is not read, so these never reach the headline.
+ * expiry. Informational: the hedge leg's size is not read, so these never
+ * reach the headline.
  */
 export function ParityView({ underlying }: { underlying: string }) {
   const [rows, setRows] = useState<ParitySignal[] | null>(null);
@@ -33,7 +33,7 @@ export function ParityView({ underlying }: { underlying: string }) {
       <p className="muted small">
         Conversion = buy call + sell put + sell future (locks F − K); reversal = sell call + buy put + buy future (locks K − F).
         Option legs at their best venue after per-contract fees; the future pays taker + delivery; minus collateral drag on the short option.
-        The hedge is a Deribit dated future (reference only, size not read) — informational, never headline. BTC/ETH only (no liquid SOL dated future).
+        The hedge is a Deribit dated future (size not read) — informational, never headline. BTC/ETH only (no liquid SOL dated future).
       </p>
       {error && <p className="muted">Could not load: {error}</p>}
       {rows && rows.length === 0 && <p className="muted">No parity rows for {underlying} (needs a dated future at the option expiry).</p>}
