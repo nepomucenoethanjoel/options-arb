@@ -10,7 +10,7 @@
 import { loadConfig } from '../config';
 
 const APP = process.env.APP_URL ?? 'http://127.0.0.1:8799';
-const BOOK_VENUES = ['derive', 'coincall', 'hypercall', 'callput', 'deribit', 'okx'] as const;
+const BOOK_VENUES = ['derive', 'coincall', 'hypercall', 'callput', 'deribit', 'okx', 'gate'] as const;
 type BookVenue = (typeof BOOK_VENUES)[number];
 
 const n = (v: unknown): number | null => {
@@ -119,6 +119,16 @@ async function okxRaw(instId: string): Promise<RawQuote> {
   return { bid: bid != null ? bid * idx : null, bidSize: bid != null ? n(t.bidSz)! * coin : null, ask: ask != null ? ask * idx : null, askSize: ask != null ? n(t.askSz)! * coin : null, mark: pos(m?.markPx) != null ? pos(m.markPx)! * idx : null, index: idx };
 }
 
+async function gateRaw(underlying: string, name: string): Promise<RawQuote> {
+  const get = async (path: string) => (await (await fetch(`https://api.gateio.ws/api/v4${path}`)).json()) as any;
+  const [t, c] = await Promise.all([get(`/options/tickers?underlying=${underlying}_USDT`).then((l: any[]) => l.find((x) => x.name === name)), get(`/options/contracts/${name}`)]);
+  if (!t || !c?.multiplier) throw new Error(`Gate ${name} not found`);
+  // Prices USDT per 1 coin; sizes are contracts × multiplier coin.
+  const coin = n(c.multiplier)!;
+  const bid = pos(t.bid1_price), ask = pos(t.ask1_price);
+  return { bid, bidSize: bid != null ? n(t.bid1_size)! * coin : null, ask, askSize: ask != null ? n(t.ask1_size)! * coin : null, mark: pos(t.mark_price), index: pos(t.index_price) };
+}
+
 /** Taker fee per contract, written from the venue docs (not fees.ts). */
 function feeOf(venue: BookVenue, legPrice: number | null, spot: number, underlying: string, kind: string, strike: number, tteDays: number, deriveBps: number, side: 'buy' | 'sell'): number {
   if (venue === 'derive') {
@@ -137,6 +147,13 @@ function feeOf(venue: BookVenue, legPrice: number | null, spot: number, underlyi
     const intrinsic = Math.max(0, kind === 'call' ? spot - strike : strike - spot);
     return trade + Math.min(spot * 0.0002, 0.07 * intrinsic);
   }
+  if (venue === 'gate') {
+    // Live contract fields: taker 3 bps BTC/ETH else 5 bps, cap 12.5% premium; settle 1.5 bps cap 12.5% intrinsic, charged every expiry.
+    const rate = underlying === 'BTC' || underlying === 'ETH' ? 0.0003 : 0.0005;
+    const trade = legPrice != null && legPrice > 0 ? Math.min(spot * rate, 0.125 * legPrice) : spot * rate;
+    const intrinsic = Math.max(0, kind === 'call' ? spot - strike : strike - spot);
+    return trade + Math.min(spot * 0.00015, 0.125 * intrinsic);
+  }
   if (venue === 'hypercall') return spot * (5 + 1.5) / 10_000; // published 5 bps taker + 1.5 bps settlement
   if (venue === 'callput') {
     const capped = (bps: number) => (legPrice != null && legPrice > 0 ? Math.min(spot * bps / 10_000, 0.125 * legPrice) : spot * bps / 10_000);
@@ -147,7 +164,7 @@ function feeOf(venue: BookVenue, legPrice: number | null, spot: number, underlyi
   const intrinsic = Math.max(0, kind === 'call' ? spot - strike : strike - spot);
   return trade + (tteDays < 1 ? 0 : Math.min(spot * 0.00015, 0.125 * intrinsic));
 }
-const ORDER_FEE: Record<BookVenue, number> = { derive: 0.5, coincall: 0, hypercall: 0, callput: 0, deribit: 0, okx: 0 };
+const ORDER_FEE: Record<BookVenue, number> = { derive: 0.5, coincall: 0, hypercall: 0, callput: 0, deribit: 0, okx: 0, gate: 0 };
 
 /** Exit codes (scheduled runs, deploy/options-arb-handcheck.sh): 0 all ✓, 1 a
  *  money field ✗ or an error, 3 nothing to check right now. Quote drift
@@ -186,7 +203,9 @@ async function main() {
             ? callputRaw(row.underlying, row.legs.callput.instrumentId)
             : v === 'okx'
               ? okxRaw(row.legs.okx.instrumentId)
-              : deribitRaw(row.legs.deribit.instrumentId);
+              : v === 'gate'
+                ? gateRaw(row.underlying, row.legs.gate.instrumentId)
+                : deribitRaw(row.legs.deribit.instrumentId);
   const [freshB, freshS] = await Promise.all([raw(buy), raw(sell)]);
   // 1) Quote source: the fresh raw quote vs the quote the cycle used. RFQ
   //    makers re-quote every second or two, so allow drift; a wrong side,

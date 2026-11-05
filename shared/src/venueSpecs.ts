@@ -67,6 +67,10 @@ export const VENUE_SPECS: Record<Venue, VenueSpec> = {
     settlementAsset: () => 'underlying',
     settlementWindowHours: 0.5,
   },
+  // USDT-margined (one {U}_USDT family per underlying). Settlement averaging
+  // and any pre-expiry halt are not documented in what we could read: 0.5 h
+  // and a conservative 30 min cutoff are assumptions (DATA_SOURCES row 60).
+  gate: { label: 'Gate', quoteKind: 'book', canSell: always, tradingCutoffMs: 30 * 60_000, settlementAsset: () => 'USDT', settlementWindowHours: 0.5 },
   bybit: { label: 'Bybit', quoteKind: 'book', canSell: always, tradingCutoffMs: 0, settlementAsset: () => 'USDT', settlementWindowHours: 0.5 },
   binance: {
     label: 'Binance',
@@ -79,4 +83,4 @@ export const VENUE_SPECS: Record<Venue, VenueSpec> = {
 };
 
 /** Fixed venue order: deterministic pair enumeration and display. */
-export const VENUE_ORDER: Venue[] = ['derive', 'olive', 'coincall', 'hypercall', 'callput', 'deribit', 'okx', 'bybit', 'binance'];
+export const VENUE_ORDER: Venue[] = ['derive', 'olive', 'coincall', 'hypercall', 'callput', 'deribit', 'okx', 'gate', 'bybit', 'binance'];

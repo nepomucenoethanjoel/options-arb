@@ -7,6 +7,7 @@ import { HypercallAdapter } from './adapters/hypercall';
 import { CallputAdapter } from './adapters/callput';
 import { DeribitAdapter } from './adapters/deribit';
 import { OkxAdapter } from './adapters/okx';
+import { GateAdapter } from './adapters/gate';
 import { OliveAdapter } from './adapters/olive';
 import { OliveRealtimeClient } from './adapters/olive/realtime';
 import { SqliteStorage } from './storage/sqlite';
@@ -50,6 +51,7 @@ async function main(): Promise<void> {
     callput: () => new CallputAdapter(cfg.callputFeedUrl, cfg.callputMinIntervalMs),
     deribit: () => new DeribitAdapter(cfg.deribitBaseUrl),
     okx: () => new OkxAdapter(cfg.okxBaseUrl),
+    gate: () => new GateAdapter(cfg.gateBaseUrl),
   };
   const extraVenues = cfg.extraVenues.map((v) => extraAdapters[v]());
   const alerter = new Alerter(cfg);
