@@ -78,6 +78,18 @@ export class HealthTracker {
   }
 }
 
+/**
+ * Rejects once ms pass. The work itself is not cancelled — its own request
+ * deadlines end it — but the caller stops waiting for it.
+ */
+export function withDeadline<T>(work: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${what}: no answer within ${ms} ms`)), ms);
+  });
+  return Promise.race([work, deadline]).finally(() => clearTimeout(timer));
+}
+
 /** Default per-request deadline for outbound HTTP (headers AND body). */
 export const FETCH_TIMEOUT_MS = 8_000;
 

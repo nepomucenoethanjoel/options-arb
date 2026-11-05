@@ -21,6 +21,7 @@ import { effectivePrices } from './signals/bestVenue';
 import { surfaceFlags } from './signals/surfaceChecks';
 import { computeParity } from './signals/parity';
 import { feeModels } from './signals/fees';
+import { withDeadline } from './util';
 import type { Storage } from './storage';
 import type { Alerter } from './alerts';
 import { EpisodeTracker } from './episodes';
@@ -426,10 +427,11 @@ export class Orchestrator extends EventEmitter {
         console.warn(`[scheduler] Olive state ${underlying} failed:`, err instanceof Error ? err.message : err);
         return null;
       }),
-      // A failing extra venue only empties its own chain (its health says why).
+      // A failing or slow extra venue only empties its own chain for this cycle.
       Promise.all(
         this.extraVenues.map(async (v) => {
-          const chain = await v.getChain?.(underlying).catch((err) => {
+          const read = v.getChain?.(underlying);
+          const chain = await (read ? withDeadline(read, this.cfg.venueChainTimeoutMs ?? 12_000, `${v.venue} chain ${underlying}`) : Promise.resolve(undefined)).catch((err) => {
             console.warn(`[scheduler] ${v.venue} chain ${underlying} failed:`, err instanceof Error ? err.message : err);
             return null;
           });

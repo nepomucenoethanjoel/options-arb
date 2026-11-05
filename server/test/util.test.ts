@@ -1,7 +1,16 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
-import { fetchWithTimeout } from '../src/util';
+import { fetchWithTimeout, withDeadline } from '../src/util';
+
+describe('withDeadline', () => {
+  it('passes a prompt answer through and rejects a slow one at the deadline', async () => {
+    await expect(withDeadline(Promise.resolve(7), 50, 'fast')).resolves.toBe(7);
+    const t0 = Date.now();
+    await expect(withDeadline(new Promise(() => {}), 50, 'okx chain BTC')).rejects.toThrow('okx chain BTC: no answer within 50 ms');
+    expect(Date.now() - t0).toBeLessThan(1_000);
+  });
+});
 
 let server: Server | null = null;
 afterEach(() => new Promise<void>((r) => (server ? server.close(() => r()) : r())));
