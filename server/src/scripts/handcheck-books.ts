@@ -106,7 +106,7 @@ async function okxRaw(instId: string): Promise<RawQuote> {
   const family = instId.split('-').slice(0, 2).join('-');
   const get = async (path: string) => ((await (await fetch(`https://www.okx.com${path}`)).json()) as any).data ?? [];
   const [inst, [t], [m], [i]] = await Promise.all([
-    get(`/api/v5/public/instruments?instType=OPTION&instId=${instId}`),
+    get(`/api/v5/public/instruments?instType=OPTION&instFamily=${family}&instId=${instId}`),
     get(`/api/v5/market/ticker?instId=${instId}`),
     get(`/api/v5/public/mark-price?instType=OPTION&instId=${instId}`),
     get(`/api/v5/market/index-tickers?instId=${family}`),
