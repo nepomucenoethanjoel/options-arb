@@ -5,7 +5,8 @@
  *   GET https://olive.exchange/public/market/{SYM}%2FUSDC.json
  *
  * Plain CDN file, no auth, regenerated every ~5s by their reader-2 service.
- * Carries: all Stork ticker prices, the projected EWMA model vol
+ * Carries: the Stork execution-oracle price (the `ticker` list went empty
+ * 2026-10-31), the projected EWMA model vol
  * (`snapshot.volatility` — their backend blends the on-chain state forward
  * with live prices, which is why the UI vol ticks while chain state is
  * stale), pool AUM / entry claims (liquidity capacity), perp borrow curves,
@@ -66,10 +67,15 @@ export function parseOliveMarketFile(json: any, underlying: string): OliveMarket
     const n = typeof v === 'string' ? Number(v) : typeof v === 'number' ? v : NaN;
     return Number.isFinite(n) ? n : null;
   };
-  const ticker = (json.ticker ?? []).find((t: any) => t?.symbol === `${u}/USD`);
-  const spot = num(ticker?.price);
-
   const snap = json.state?.payload?.snapshot;
+  const ticker = (json.ticker ?? []).find((t: any) => t?.symbol === `${u}/USD`);
+  // Since ~2026-10-31 06:00 UTC the file ships `ticker: []`; the Stork price
+  // Olive executes against is `snapshot.executionOracle.base` (row 52), used
+  // only while Olive itself marks it fresh.
+  const oracle = snap?.executionOracle?.base;
+  const oracleSpot = oracle?.label === `${u}/USD` && oracle?.isFresh === true ? num(oracle.price) : null;
+  const spot = num(ticker?.price) ?? oracleSpot;
+
   const volObj = snap?.volatility;
   const vol = num(volObj?.volatility);
   const volOnChainMs = num(volObj?.timestamp) != null ? num(volObj.timestamp)! * 1000 : null;

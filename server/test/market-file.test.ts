@@ -28,6 +28,18 @@ const fixture = {
 };
 
 describe('parseOliveMarketFile', () => {
+  it('takes spot from the fresh execution oracle when the ticker list is empty (live shape 2026-11-05)', () => {
+    const oracle = (over: object) => ({
+      ...fixture,
+      ticker: [],
+      state: { payload: { snapshot: { ...fixture.state.payload.snapshot, executionOracle: { base: { label: 'SOL/USD', price: 96.534655625, status: 'fresh', isFresh: true, ...over } } } } },
+    });
+    expect(parseOliveMarketFile(oracle({}), 'SOL')!.spot).toBeCloseTo(96.534655625, 8);
+    expect(parseOliveMarketFile(oracle({ isFresh: false, status: 'stale' }), 'SOL')!.spot).toBeNull();
+    expect(parseOliveMarketFile(oracle({ label: 'BTC/USD' }), 'SOL')!.spot).toBeNull();
+  });
+
+
   it('extracts spot, live vol, and the liquidity proxy', () => {
     const d = parseOliveMarketFile(fixture, 'SOL')!;
     expect(d.venue).toBe('olive');

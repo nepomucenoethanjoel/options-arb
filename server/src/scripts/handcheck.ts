@@ -63,7 +63,9 @@ async function fetchMarketFile(sym: string): Promise<MarketFile> {
       const tk = (j.ticker ?? []).find((t: any) => t?.symbol === `${sym}/USD`);
       const snap = j.state?.payload?.snapshot;
       const vol = n(snap?.volatility?.volatility);
-      const spot = n(tk?.price);
+      // ticker went empty ~2026-10-31; the fresh execution oracle is the same Stork feed (row 52).
+      const ob = snap?.executionOracle?.base;
+      const spot = n(tk?.price) ?? (ob?.label === `${sym}/USD` && ob?.isFresh === true ? n(ob.price) : null);
       if (spot == null || vol == null) throw new Error('spot or vol missing from file');
       const custodyFree = (c: any): number | null => {
         const owned = n(c?.tokenOwned);
