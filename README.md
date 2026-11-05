@@ -12,6 +12,7 @@ a signal tool — it does not route or execute orders.
 | **Hypercall** (HyperEVM) | RFQ makers | BTC ETH | `options-summary` RFQ provider quotes | ✗ `single_maker` |
 | **Callput** (Base) | vault, keeper-filled | BTC ETH | app S3 feed, mark ± risk premium | ✗ `indicative_quote` |
 | **Deribit** | order book | SOL BTC ETH | public REST summary (+ ticker sizes for candidate pairs) | ✓ (`REFERENCE_VENUES=deribit` makes it reference-only) |
+| **OKX** | order book | BTC ETH | public REST tickers + opt-summary + mark + index (coin-margined) | ✓ |
 | Bybit, Binance | order book | — | deferred: they geo-block the US host | — |
 
 Every contract (same underlying, 08:00 UTC expiry, strike, kind) is compared

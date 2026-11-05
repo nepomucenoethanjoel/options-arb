@@ -10,7 +10,7 @@
 import { loadConfig } from '../config';
 
 const APP = process.env.APP_URL ?? 'http://127.0.0.1:8799';
-const BOOK_VENUES = ['derive', 'coincall', 'hypercall', 'callput', 'deribit'] as const;
+const BOOK_VENUES = ['derive', 'coincall', 'hypercall', 'callput', 'deribit', 'okx'] as const;
 type BookVenue = (typeof BOOK_VENUES)[number];
 
 const n = (v: unknown): number | null => {
@@ -102,6 +102,23 @@ async function deribitRaw(name: string): Promise<RawQuote> {
   return { bid: usd(t.best_bid_price), bidSize: pos(t.best_bid_amount), ask: usd(t.best_ask_price), askSize: pos(t.best_ask_amount), mark: usd(t.mark_price), index: pos(t.index_price) };
 }
 
+async function okxRaw(instId: string): Promise<RawQuote> {
+  const family = instId.split('-').slice(0, 2).join('-');
+  const get = async (path: string) => ((await (await fetch(`https://www.okx.com${path}`)).json()) as any).data ?? [];
+  const [inst, [t], [m], [i]] = await Promise.all([
+    get(`/api/v5/public/instruments?instType=OPTION&instId=${instId}`),
+    get(`/api/v5/market/ticker?instId=${instId}`),
+    get(`/api/v5/public/mark-price?instType=OPTION&instId=${instId}`),
+    get(`/api/v5/market/index-tickers?instId=${family}`),
+  ]);
+  if (!t || !inst[0]) throw new Error(`OKX ${instId} not found`);
+  // Prices: coin per 1 coin → × index. Sizes: contracts × ctVal × ctMult coin.
+  const idx = pos(i?.idxPx)!;
+  const coin = n(inst[0].ctVal)! * n(inst[0].ctMult)!;
+  const bid = pos(t.bidPx), ask = pos(t.askPx);
+  return { bid: bid != null ? bid * idx : null, bidSize: bid != null ? n(t.bidSz)! * coin : null, ask: ask != null ? ask * idx : null, askSize: ask != null ? n(t.askSz)! * coin : null, mark: pos(m?.markPx) != null ? pos(m.markPx)! * idx : null, index: idx };
+}
+
 /** Taker fee per contract, written from the venue docs (not fees.ts). */
 function feeOf(venue: BookVenue, legPrice: number | null, spot: number, underlying: string, kind: string, strike: number, tteDays: number, deriveBps: number, side: 'buy' | 'sell'): number {
   if (venue === 'derive') {
@@ -114,6 +131,12 @@ function feeOf(venue: BookVenue, legPrice: number | null, spot: number, underlyi
     const intrinsic = Math.max(0, kind === 'call' ? spot - strike : strike - spot);
     return trade + (tteDays < 1 ? 0 : Math.min(spot * 0.00015, 0.125 * intrinsic));
   }
+  if (venue === 'okx') {
+    // FAQ: taker 0.03% notional capped 7% premium; exercise min(0.02% notional, 7% settlement value), charged on every expiry.
+    const trade = legPrice != null && legPrice > 0 ? Math.min(spot * 0.0003, 0.07 * legPrice) : spot * 0.0003;
+    const intrinsic = Math.max(0, kind === 'call' ? spot - strike : strike - spot);
+    return trade + Math.min(spot * 0.0002, 0.07 * intrinsic);
+  }
   if (venue === 'hypercall') return spot * (5 + 1.5) / 10_000; // published 5 bps taker + 1.5 bps settlement
   if (venue === 'callput') {
     const capped = (bps: number) => (legPrice != null && legPrice > 0 ? Math.min(spot * bps / 10_000, 0.125 * legPrice) : spot * bps / 10_000);
@@ -124,7 +147,7 @@ function feeOf(venue: BookVenue, legPrice: number | null, spot: number, underlyi
   const intrinsic = Math.max(0, kind === 'call' ? spot - strike : strike - spot);
   return trade + (tteDays < 1 ? 0 : Math.min(spot * 0.00015, 0.125 * intrinsic));
 }
-const ORDER_FEE: Record<BookVenue, number> = { derive: 0.5, coincall: 0, hypercall: 0, callput: 0, deribit: 0 };
+const ORDER_FEE: Record<BookVenue, number> = { derive: 0.5, coincall: 0, hypercall: 0, callput: 0, deribit: 0, okx: 0 };
 
 /** Exit codes (scheduled runs, deploy/options-arb-handcheck.sh): 0 all ✓, 1 a
  *  money field ✗ or an error, 3 nothing to check right now. Quote drift
@@ -161,7 +184,9 @@ async function main() {
           ? hypercallRaw(row.underlying, row.legs.hypercall.instrumentId)
           : v === 'callput'
             ? callputRaw(row.underlying, row.legs.callput.instrumentId)
-            : deribitRaw(row.legs.deribit.instrumentId);
+            : v === 'okx'
+              ? okxRaw(row.legs.okx.instrumentId)
+              : deribitRaw(row.legs.deribit.instrumentId);
   const [freshB, freshS] = await Promise.all([raw(buy), raw(sell)]);
   // 1) Quote source: the fresh raw quote vs the quote the cycle used. RFQ
   //    makers re-quote every second or two, so allow drift; a wrong side,

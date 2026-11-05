@@ -30,11 +30,11 @@ function list(name: string, def: string[]): string[] {
 
 /** Venues with an adapter that can be enabled via VENUES (Bybit/Binance:
  *  deferred — geo-blocked from the US host, see DATA_SOURCES row 32). */
-export const EXTRA_VENUES = ['coincall', 'hypercall', 'callput', 'deribit'] as const;
+export const EXTRA_VENUES = ['coincall', 'hypercall', 'callput', 'deribit', 'okx'] as const;
 export type ExtraVenue = (typeof EXTRA_VENUES)[number];
 
 function extraVenueList(): ExtraVenue[] {
-  const requested = list('VENUES', ['COINCALL', 'HYPERCALL', 'CALLPUT', 'DERIBIT']).map((v) => v.toLowerCase());
+  const requested = list('VENUES', ['COINCALL', 'HYPERCALL', 'CALLPUT', 'DERIBIT', 'OKX']).map((v) => v.toLowerCase());
   const known = requested.filter((v): v is ExtraVenue => (EXTRA_VENUES as readonly string[]).includes(v));
   for (const v of requested) {
     if (!known.includes(v as ExtraVenue) && v !== 'derive' && v !== 'olive') console.warn(`[config] VENUES: no adapter for "${v}" — ignored`);
@@ -58,6 +58,7 @@ export interface AppConfig {
   callputFeedUrl: string;
   callputMinIntervalMs: number;
   deribitBaseUrl: string;
+  okxBaseUrl: string;
 
   deriveBaseUrl: string;
   deriveLegacyUrl: string;
@@ -193,6 +194,7 @@ export function loadConfig(): AppConfig {
     coincallBaseUrl: str('COINCALL_BASE_URL', 'https://api.coincall.com'),
     hypercallBaseUrl: str('HYPERCALL_BASE_URL', 'https://api.hypercall.xyz'),
     deribitBaseUrl: str('DERIBIT_BASE_URL', 'https://www.deribit.com/api/v2'),
+    okxBaseUrl: str('OKX_BASE_URL', 'https://www.okx.com'),
     callputMinIntervalMs: Math.max(15_000, num('CALLPUT_MIN_INTERVAL_MS', 60_000)),
     callputFeedUrl: str('CALLPUT_FEED_URL', 'https://app-data-base.s3.ap-southeast-1.amazonaws.com/market-data.json'),
 

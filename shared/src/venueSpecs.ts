@@ -56,6 +56,17 @@ export const VENUE_SPECS: Record<Venue, VenueSpec> = {
     settlementAsset: (_kind, underlying) => (underlying === 'BTC' || underlying === 'ETH' ? 'underlying' : 'USDC'),
     settlementWindowHours: 0.5,
   },
+  // Coin-margined BTC/ETH (settleCcy BTC/ETH). Settlement averaging and any
+  // pre-expiry halt are not documented in what we could read: 0.5 h and a
+  // conservative 30 min cutoff are assumptions (DATA_SOURCES row 56).
+  okx: {
+    label: 'OKX',
+    quoteKind: 'book',
+    canSell: always,
+    tradingCutoffMs: 30 * 60_000,
+    settlementAsset: () => 'underlying',
+    settlementWindowHours: 0.5,
+  },
   bybit: { label: 'Bybit', quoteKind: 'book', canSell: always, tradingCutoffMs: 0, settlementAsset: () => 'USDT', settlementWindowHours: 0.5 },
   binance: {
     label: 'Binance',
@@ -68,4 +79,4 @@ export const VENUE_SPECS: Record<Venue, VenueSpec> = {
 };
 
 /** Fixed venue order: deterministic pair enumeration and display. */
-export const VENUE_ORDER: Venue[] = ['derive', 'olive', 'coincall', 'hypercall', 'callput', 'deribit', 'bybit', 'binance'];
+export const VENUE_ORDER: Venue[] = ['derive', 'olive', 'coincall', 'hypercall', 'callput', 'deribit', 'okx', 'bybit', 'binance'];

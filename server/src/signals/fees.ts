@@ -93,6 +93,19 @@ export function feeModels(cfg: FeeConfig): Partial<Record<Venue, VenueFeeModel>>
       },
       perOrder: 0,
     },
+    // OKX (help center "Trading Fee Rules FAQ", updated 2026-09-09; cap 7% since
+    // 2025-05-15): taker 0.03% of underlying notional, capped at 7% of premium;
+    // exercise fee min(0.02% × notional, 7% × settlement value) on ITM options.
+    // Dailies (non-Friday expiries) are exempt, but the context carries no
+    // weekday, so it is charged on every expiry — conservative (row 55).
+    okx: {
+      perContract: ({ legPrice, notional, kind, strike }) => {
+        const trade = legPrice != null && legPrice > 0 ? Math.min(notional * 0.0003, legPrice * 0.07) : notional * 0.0003;
+        const intrinsic = Math.max(0, kind === 'call' ? notional - strike : strike - notional);
+        return trade + Math.min(notional * 0.0002, intrinsic * 0.07);
+      },
+      perOrder: 0,
+    },
     // Callput (docs fees): open-buy 6 bps, open-sell 3 bps, settle 2 bps of
     // notional, each capped at 12.5% of premium. The keeper's native-token
     // execution fee is unpublished — quotes carry execution_fee_unknown.
