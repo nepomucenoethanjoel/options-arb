@@ -10,8 +10,11 @@ export const HEADLINE_BLOCKING_FLAGS: ReadonlySet<string> = new Set([
   ...NON_EXECUTABLE_FLAGS, 'price_distortion', 'fill_model_skipped',
   // Unproven fillability: lifted per venue only with live-fill evidence.
   'single_maker', 'indicative_quote',
-  // A venue the user cannot trade (Deribit): shown for reference, never headline.
+  // A venue the user cannot trade (REFERENCE_VENUES): shown for reference, never headline.
   'reference_venue',
+  // Stock underlyings outside the NYSE session; an Olive wrapper (xStock, PAXG)
+  // hedged with a different instrument (the stock, XAUT) — unverified basis.
+  'market_closed', 'wrapper_basis',
 ]);
 
 type ClipFields = Pick<Signal, 'totalNetUsdc' | 'expectedTotalNetUsdc' | 'maxExecutableSize'> &

@@ -39,6 +39,8 @@ export interface OliveAdapterOptions {
    * market-file spot while fresh. */
   realtime?: OliveRealtimeClient;
   realtimeMaxSpotAgeMs?: number;
+  /** Underlying → Olive market symbol where they differ (TSLA → TSLAX, XAUT → PAXG). */
+  symbolMap?: Record<string, string>;
 }
 
 const STATE_CACHE_TTL_MS = 10_000;
@@ -95,7 +97,7 @@ export class OliveAdapter implements OptionsVenueAdapter {
   private async getMarketFile(underlying: string): Promise<OliveMarketFileData | null> {
     const cached = this.marketFileCache.get(underlying);
     if (cached && Date.now() - cached.ts < MARKET_FILE_CACHE_TTL_MS) return cached.data;
-    const fetched = await fetchOliveMarketFile(OLIVE_MARKET_FILE_BASE, underlying).catch(() => null);
+    const fetched = await fetchOliveMarketFile(OLIVE_MARKET_FILE_BASE, this.oliveSymbol(underlying)).catch(() => null);
     // A frozen file must not feed spot/vol/custody as if live — drop it so
     // every consumer takes the on-chain/Pyth fallback path instead.
     const stale = fetched != null && !isMarketFileFresh(fetched, Date.now());
@@ -168,6 +170,12 @@ export class OliveAdapter implements OptionsVenueAdapter {
   }
 
   /** Per-custody fixed rates for an asset (fallback: the global pair). */
+  /** Olive's own market symbol for an underlying (feeds, oracles and files are keyed by it). */
+  private oliveSymbol(underlying: string): string {
+    const u = underlying.toUpperCase();
+    return this.opts.symbolMap?.[u] ?? u;
+  }
+
   private ratesFor(underlying: string): { tokenApr: number; usdcApr: number } {
     const u = underlying.toUpperCase();
     const o = this.opts.rateOverrides[u];
@@ -234,14 +242,14 @@ export class OliveAdapter implements OptionsVenueAdapter {
     const file = await this.getMarketFile(u).catch(() => null);
     if (this.staleMarketFiles.has(u)) caveats.push('market_file_stale');
     const [pythSpot, volResult] = await Promise.all([
-      file?.spot != null ? Promise.resolve(null) : getPythSpot(u).catch(() => null),
-      file?.vol != null ? Promise.resolve(null) : this.onchain.readModelVol(u, this.opts.volOverrides[u]).catch(() => null),
+      file?.spot != null ? Promise.resolve(null) : getPythSpot(this.oliveSymbol(u)).catch(() => null),
+      file?.vol != null ? Promise.resolve(null) : this.onchain.readModelVol(this.oliveSymbol(u), this.opts.volOverrides[u]).catch(() => null),
     ]);
 
     const oracle = volResult?.oracle;
     // Spot priority: realtime socket (~1 s) → market file (~5 s) → Pyth →
     // on-chain oracle lastPrice (stale-flagged).
-    const rt = this.opts.realtime?.getSpot(u);
+    const rt = this.opts.realtime?.getSpot(this.oliveSymbol(u));
     let spot = rt?.price ?? file?.spot ?? pythSpot;
     if (rt) caveats.push('spot_realtime_socket');
     if (spot == null && oracle?.lastPrice != null) {

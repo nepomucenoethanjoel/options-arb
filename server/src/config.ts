@@ -19,6 +19,17 @@ function bool(name: string, def: boolean): boolean {
   return /^(1|true|yes|on)$/i.test(v.trim());
 }
 
+function jsonStringMap(name: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  try {
+    const parsed = JSON.parse(process.env[name] ?? '{}');
+    for (const [k, v] of Object.entries(parsed ?? {})) if (typeof v === 'string' && v.trim() !== '') out[k.toUpperCase()] = v.trim().toUpperCase();
+  } catch {
+    console.warn(`[config] ${name}: not valid JSON — ignored`);
+  }
+  return out;
+}
+
 function list(name: string, def: string[]): string[] {
   const v = process.env[name];
   if (v == null || v.trim() === '') return def;
@@ -80,6 +91,10 @@ export interface AppConfig {
   oliveUsdcRateApr: number;
   /** Manual per-asset vol overrides (JSON), used when on-chain decode is unavailable. */
   oliveVolOverrides: Record<string, number>;
+  /** Underlyings that trade only in the NYSE session (STOCK_UNDERLYINGS). */
+  stockUnderlyings: string[];
+  /** Underlying → Olive market symbol (OLIVE_SYMBOL_MAP JSON merges over DEFAULT_OLIVE_SYMBOL_MAP). */
+  oliveSymbolMap: Record<string, string>;
   /** Per-asset fixed rates (JSON {"SOL":{"token":0.1507,"usdc":0.02}}) — rates
    * are per-custody on Olive (verified via their UI 2026-09-27). */
   oliveRateOverrides: Record<string, { token: number; usdc: number }>;
@@ -135,6 +150,16 @@ export interface AppConfig {
    *  0 = alert on any isOpportunity row (legacy behavior). */
   alertMinTotalUsdc: number;
 }
+
+/**
+ * Underlying → Olive market symbol where they differ: Olive lists tokenized
+ * stocks (xStocks) and PAXG gold, the hedge venues list the stock / XAUT.
+ * Different instruments — rows carry wrapper_basis (DATA_SOURCES row 63).
+ */
+export const DEFAULT_OLIVE_SYMBOL_MAP: Record<string, string> = {
+  XAUT: 'PAXG', SPY: 'SPYX', QQQ: 'QQQX', TSLA: 'TSLAX', NVDA: 'NVDAX', META: 'METAX', GOOGL: 'GOOGLX', AAPL: 'AAPLX',
+  AMZN: 'AMZNX', MSFT: 'MSFTX', COIN: 'COINX', HOOD: 'HOODX', CRCL: 'CRCLX', MU: 'MUX', SKHY: 'SKHY', SPCX: 'SPCXX',
+};
 
 export function loadConfig(): AppConfig {
   let oliveVolOverrides: Record<string, number> = {};
@@ -223,6 +248,8 @@ export function loadConfig(): AppConfig {
     oliveTokenRateApr: num('OLIVE_TOKEN_RATE_APR', 0),
     oliveUsdcRateApr: num('OLIVE_USDC_RATE_APR', 0),
     oliveVolOverrides,
+    oliveSymbolMap: { ...DEFAULT_OLIVE_SYMBOL_MAP, ...jsonStringMap('OLIVE_SYMBOL_MAP') },
+    stockUnderlyings: list('STOCK_UNDERLYINGS', ['SPY', 'QQQ', 'TSLA', 'NVDA', 'META', 'GOOGL', 'AAPL', 'AMZN', 'MSFT', 'COIN', 'HOOD', 'CRCL', 'MU', 'SKHY', 'SPCX', 'EWY', 'PLTR', 'SNDK', 'DRAM']),
     oliveRateOverrides,
     olivePoolLiquidityUsd,
 

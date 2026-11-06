@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import {
   HEADLINE_BLOCKING_FLAGS,
+  isUsEquitySessionOpen,
   sampleSviSlice,
   type MatchRow,
   type MatchRowLite,
@@ -591,7 +592,7 @@ export class Orchestrator extends EventEmitter {
         computed = computed.flatMap((s) => (touched.has(s.pairKey) ? (repriced.has(s.pairKey) ? [repriced.get(s.pairKey)!] : []) : [s]));
       }
     }
-    signals.push(...computed);
+    signals.push(...underlyingFlags(computed, underlying, now, this.cfg));
 
     // Parity: only where a venue publishes dated futures to hedge with.
     const parity = futures.length > 0
@@ -659,4 +660,25 @@ export class Orchestrator extends EventEmitter {
     }
     return payload;
   }
+}
+
+/**
+ * Per-underlying headline blocks: stock rows outside the NYSE session
+ * (market_closed), and Olive legs whose Olive market is a different
+ * instrument from the hedge's (wrapper_basis: TSLAX vs TSLA, PAXG vs XAUT).
+ */
+export function underlyingFlags(
+  signals: Signal[],
+  underlying: string,
+  now: number,
+  cfg: Pick<AppConfig, 'stockUnderlyings' | 'oliveSymbolMap'>,
+): Signal[] {
+  const closed = (cfg.stockUnderlyings ?? []).includes(underlying) && !isUsEquitySessionOpen(now);
+  const wrapped = (cfg.oliveSymbolMap?.[underlying] ?? underlying) !== underlying;
+  if (!closed && !wrapped) return signals;
+  const add = <T extends { flags: string[]; buyVenue: string | null; sellVenue: string | null }>(p: T): T => {
+    const extra = [...(closed ? ['market_closed'] : []), ...(wrapped && (p.buyVenue === 'olive' || p.sellVenue === 'olive') ? ['wrapper_basis'] : [])];
+    return extra.length ? { ...p, flags: [...new Set([...p.flags, ...extra])] } : p;
+  };
+  return signals.map((s) => ({ ...add(s), alternatives: s.alternatives?.map(add) }));
 }

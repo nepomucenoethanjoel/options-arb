@@ -42,6 +42,7 @@ async function main(): Promise<void> {
     rateOverrides: cfg.oliveRateOverrides,
     oliveMaxTenorDays: cfg.oliveMaxTenorDays,
     volOverrides: cfg.oliveVolOverrides,
+    symbolMap: cfg.oliveSymbolMap,
     strikeBoundSigmas: cfg.oliveStrikeBoundSigmas,
     realtime: oliveRealtime,
     realtimeMaxSpotAgeMs: cfg.oliveRealtimeMaxSpotAgeMs,
