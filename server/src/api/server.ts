@@ -9,6 +9,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { honestTotalNetUsdc, isHeadlineProfitable, isTwoLegExecutable, type Signal, type SignalKpis, type VenueHealthSnapshot } from '@options-arb/shared';
 import type { AppConfig } from '../config';
 import { summarizeEpisodes } from '../episodes';
+import type { OlivePoolSnapshot } from '../olivePools';
 import type { Orchestrator } from '../scheduler';
 import type { Storage } from '../storage';
 
@@ -19,6 +20,7 @@ export interface ApiDeps {
   olive?: {
     getRealtimeHealth(): RealtimeHealthLike | null;
   };
+  olivePools?: { latest(): OlivePoolSnapshot[] };
 }
 
 type RealtimeHealthLike = { status: string; statusSinceMs?: number; lastFrameAgeMs: number | null; assets: string[] };
@@ -236,6 +238,9 @@ export async function buildServer(deps: ApiDeps): Promise<FastifyInstance> {
     const points = storage.getSpreadHistory(q.pairKey, Date.now() - hours * 3_600_000);
     return { pairKey: q.pairKey, hours, points };
   });
+
+  // Every Olive market's free capacity and hedge venues (watcher sweep, ~10 min old at most).
+  app.get('/api/olive-pools', async () => ({ pools: deps.olivePools?.latest() ?? [], thresholdUsd: cfg.olivePoolAlertUsd }));
 
   app.get('/api/parity', async (req, reply) => {
     const q = req.query as { underlying?: string };

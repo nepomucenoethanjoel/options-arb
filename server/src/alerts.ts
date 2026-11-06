@@ -100,6 +100,31 @@ export class Alerter {
     }
   }
 
+  /**
+   * One free-text notice (not a signal) through the preferred transport, e.g.
+   * an Olive pool getting funded. Same gates as signal alerts: ALERTS_ENABLED,
+   * a configured transport, and any Retry-After pause.
+   */
+  async notify(text: string): Promise<boolean> {
+    const transport = this.transport();
+    if (!this.cfg.alertsEnabled || !transport || Date.now() < this.pausedUntil) return false;
+    const body = text.slice(0, MAX_TEXT_CHARS[transport.kind]);
+    const payload =
+      transport.kind === 'discord'
+        ? { username: 'options-arb', content: body }
+        : transport.kind === 'telegram'
+          ? { chat_id: this.cfg.telegramChatId, text: body }
+          : { type: 'notice', text: body, ts: new Date().toISOString() };
+    try {
+      await this.post(transport.url, payload);
+      return true;
+    } catch (err) {
+      if (err instanceof RateLimitedError && err.retryAfterMs != null) this.pausedUntil = Date.now() + Math.min(err.retryAfterMs, MAX_PAUSE_MS);
+      console.warn(`[alerter] notice failed: ${err instanceof Error ? err.message : String(err)}`);
+      return false;
+    }
+  }
+
   /** First configured transport wins: Discord, then Telegram, then the generic webhook. */
   private transport(): { kind: keyof typeof MAX_TEXT_CHARS; url: string } | null {
     if (this.cfg.discordWebhookUrl) return { kind: 'discord', url: this.cfg.discordWebhookUrl };

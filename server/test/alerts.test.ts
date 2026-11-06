@@ -264,3 +264,21 @@ describe('Alerter.sendTest', () => {
     expect(await new Alerter(base).sendTest()).toEqual([]);
   });
 });
+
+describe('Alerter.notify — free-text notices', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('posts once through the preferred transport, only when alerts are enabled', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
+    expect(await new Alerter({ ...base, discordWebhookUrl: 'https://discord.example/w' }).notify('🌱 pool funded')).toBe(true);
+    expect(lastPost()).toEqual({ url: 'https://discord.example/w', body: { username: 'options-arb', content: '🌱 pool funded' } });
+    expect(await new Alerter({ ...base, alertsEnabled: false, discordWebhookUrl: 'https://discord.example/w' }).notify('x')).toBe(false);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('a failed post reports false instead of throwing', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500 }));
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(await new Alerter({ ...base, discordWebhookUrl: 'https://discord.example/w' }).notify('x')).toBe(false);
+  });
+});

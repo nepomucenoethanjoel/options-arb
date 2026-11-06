@@ -49,6 +49,10 @@ export interface AppConfig {
   pollIntervalMs: number;
   /** Listed venues polled alongside Derive/Olive (VENUES). */
   extraVenues: ExtraVenue[];
+  /** Olive pool watcher (OLIVE_POOL_WATCH): sweep interval and the free-capacity alert threshold. */
+  olivePoolWatch: boolean;
+  olivePoolSweepMs: number;
+  olivePoolAlertUsd: number;
   /** One extra venue's whole chain read may take this long before the cycle drops it (VENUE_CHAIN_TIMEOUT_MS). */
   venueChainTimeoutMs: number;
   /** Venues the user cannot trade (REFERENCE_VENUES): quotes carry reference_venue. */
@@ -192,6 +196,9 @@ export function loadConfig(): AppConfig {
     extraVenues: extraVenueList(),
     referenceVenues: list('REFERENCE_VENUES', []).map((v) => v.toLowerCase() as Venue),
     venueChainTimeoutMs: Math.max(2_000, num('VENUE_CHAIN_TIMEOUT_MS', 12_000)),
+    olivePoolWatch: bool('OLIVE_POOL_WATCH', true),
+    olivePoolSweepMs: Math.max(60_000, num('OLIVE_POOL_SWEEP_MS', 10 * 60_000)),
+    olivePoolAlertUsd: num('OLIVE_POOL_ALERT_USD', 1_000),
     coincallBaseUrl: str('COINCALL_BASE_URL', 'https://api.coincall.com'),
     hypercallBaseUrl: str('HYPERCALL_BASE_URL', 'https://api.hypercall.xyz'),
     deribitBaseUrl: str('DERIBIT_BASE_URL', 'https://www.deribit.com/api/v2'),

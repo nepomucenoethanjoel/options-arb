@@ -18,7 +18,7 @@ make a number look better.**
 
 ## Non-negotiable rules
 
-1. **The verification stack is load-bearing.** 257 tests (incl. a golden
+1. **The verification stack is load-bearing.** 264 tests (incl. a golden
    replay of a recorded live Olive × Derive cycle), typechecks in three
    workspaces, and `server/src/scripts/handcheck.ts` /
    `handcheck-books.ts` (live field
@@ -74,6 +74,7 @@ bash deploy/deploy.sh root@<vps>  # deploy: build locally + ship + restart
 - `server/src/scheduler.ts` — cycle orchestration + change-gated persistence;
   per-venue fee-adjusted prices on lite rows (`signals/bestVenue.ts`), surface
   flags (`signals/surfaceChecks.ts`), parity (`signals/parity.ts`).
+- `server/src/olivePools.ts` — sweeps every Olive market for free pool capacity → `/api/olive-pools`, alerts when a hedgeable untracked pool is funded.
 - `server/src/episodes.ts` — gap episodes at cycle resolution (headline /
   reference / quote_only / parity) → `/api/episodes/summary`; never pruned.
 - Reference-only venues (`REFERENCE_VENUES`, default none) carry `reference_venue` (headline-blocking);

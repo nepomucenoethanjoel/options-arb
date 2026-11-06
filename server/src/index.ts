@@ -8,6 +8,7 @@ import { CallputAdapter } from './adapters/callput';
 import { DeribitAdapter } from './adapters/deribit';
 import { OkxAdapter } from './adapters/okx';
 import { GateAdapter } from './adapters/gate';
+import { OlivePoolWatcher } from './olivePools';
 import { OliveAdapter } from './adapters/olive';
 import { OliveRealtimeClient } from './adapters/olive/realtime';
 import { SqliteStorage } from './storage/sqlite';
@@ -56,7 +57,10 @@ async function main(): Promise<void> {
   const extraVenues = cfg.extraVenues.map((v) => extraAdapters[v]());
   const alerter = new Alerter(cfg);
   const orchestrator = new Orchestrator(cfg, derive, olive, storage, alerter, extraVenues);
-  const app = await buildServer({ cfg, orchestrator, storage, olive });
+  const olivePools = cfg.olivePoolWatch
+    ? new OlivePoolWatcher({ thresholdUsd: cfg.olivePoolAlertUsd, sweepIntervalMs: cfg.olivePoolSweepMs, tracked: cfg.underlyings, notify: (t) => alerter.notify(t), spacingMs: 500 })
+    : null;
+  const app = await buildServer({ cfg, orchestrator, storage, olive, olivePools: olivePools ?? undefined });
 
   await app.listen({ port: cfg.port, host: cfg.host });
   console.log(`[options-arb] API + WS listening on http://${cfg.host}:${cfg.port}`);
@@ -67,6 +71,7 @@ async function main(): Promise<void> {
 
   orchestrator.start();
   oliveRealtime?.start();
+  olivePools?.start();
   if (oliveRealtime) {
     console.log(
       `[options-arb] olive realtime stream on (${cfg.oliveRealtimeUrl}), early re-price trigger ${cfg.oliveRealtimeSpotTriggerPct}%`,
@@ -83,6 +88,7 @@ async function main(): Promise<void> {
     console.log('[options-arb] shutting down…');
     orchestrator.stop();
     oliveRealtime?.stop();
+    olivePools?.stop();
     try {
       await app.close();
     } catch {
