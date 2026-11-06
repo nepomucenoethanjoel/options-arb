@@ -246,10 +246,19 @@ export class DeriveAdapter implements OptionsVenueAdapter {
     let page = 1;
     let numPages = 1;
     do {
-      const res = await this.client.call<{ instruments?: RawInstrument[]; pagination?: { num_pages?: number } }>(
-        'public/get_all_instruments',
-        { instrument_type: 'option', expired: false, currency: underlying, page, page_size: 1000 },
-      );
+      let res: { instruments?: RawInstrument[]; pagination?: { num_pages?: number } };
+      try {
+        res = await this.client.call<{ instruments?: RawInstrument[]; pagination?: { num_pages?: number } }>(
+          'public/get_all_instruments',
+          { instrument_type: 'option', expired: false, currency: underlying, page, page_size: 1000 },
+        );
+      } catch (err) {
+        // A currency Derive does not list (DOGE, TSLA, …) answers "Instrument not found":
+        // an empty chain, cached like any other so it is not re-asked every cycle.
+        if (!(err instanceof Error && err.message.includes('Instrument not found'))) throw err;
+        this.instrumentCache.set(underlying, { ts: Date.now(), rows: [] });
+        return [];
+      }
       for (const raw of res.instruments ?? []) {
         const inst = mapInstrument(raw);
         if (inst && inst.underlying === underlying) rows.push(inst);

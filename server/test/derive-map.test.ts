@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { expiryDateToTs, mapDeriveTicker, parseDeriveInstrumentName } from '../src/adapters/derive';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { expiryDateToTs, mapDeriveTicker, parseDeriveInstrumentName, DeriveAdapter } from '../src/adapters/derive';
 
 describe('parseDeriveInstrumentName', () => {
   it('parses a standard option name', () => {
@@ -82,5 +82,23 @@ describe('mapDeriveTicker', () => {
   it('falls back to raw mark when option_pricing mark is missing', () => {
     const q = mapDeriveTicker('X', { t: 1, M: 42 }, 's');
     expect(q.mark).toBe(42);
+  });
+});
+
+describe('DeriveAdapter.getInstruments', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('a currency Derive does not list ("Instrument not found") is an empty chain, cached — not re-asked', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ error: { message: 'Instrument not found' } }) }));
+    vi.stubGlobal('fetch', fetchMock);
+    const a = new DeriveAdapter({ baseUrl: 'https://x', legacyUrl: 'https://y', bookSource: 'v3' });
+    expect(await a.getInstruments('DOGE')).toEqual([]);
+    expect(await a.getInstruments('DOGE')).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('other errors still throw', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ error: { message: 'Rate limit exceeded' } }) })));
+    await expect(new DeriveAdapter({ baseUrl: 'https://x', legacyUrl: 'https://y', bookSource: 'v3' }).getInstruments('BTC')).rejects.toThrow('Rate limit');
   });
 });
