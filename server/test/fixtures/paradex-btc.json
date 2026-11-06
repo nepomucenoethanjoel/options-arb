@@ -1,0 +1,375 @@
+{
+ "capturedAt": "2026-11-06T12:16:46.581Z",
+ "markets": {
+  "results": [
+   {
+    "symbol": "BTC-USD-10NOV26-76000-P",
+    "base_currency": "BTC",
+    "quote_currency": "USD",
+    "settlement_currency": "USDC",
+    "order_size_increment": "0.001",
+    "price_tick_size": "0.01",
+    "min_notional": "20",
+    "open_at": 1793956501961,
+    "expiry_at": 1794297600000,
+    "asset_kind": "OPTION",
+    "market_kind": "cross",
+    "position_limit": "1000",
+    "price_bands_width": "0.3",
+    "max_slippage": "0",
+    "iv_bands_width": "0.3",
+    "max_open_orders": 150,
+    "max_funding_rate": "0",
+    "option_cross_margin_params": {
+     "imf": {
+      "long_itm": "0.2",
+      "short_itm": "0.15",
+      "short_otm": "0.1",
+      "short_put_cap": "0.5",
+      "premium_multiplier": "1"
+     },
+     "mmf": {
+      "long_itm": "0.1",
+      "short_itm": "0.075",
+      "short_otm": "0.05",
+      "short_put_cap": "0.5",
+      "premium_multiplier": "0.5"
+     }
+    },
+    "option_spread_margin_params": {
+     "unpaired_scale_im": "1.2",
+     "unpaired_scale_mm": "1"
+    },
+    "price_feed_id": "",
+    "oracle_ewma_factor": "0.043647610787352464",
+    "max_order_size": "100",
+    "max_funding_rate_change": "0",
+    "max_tob_spread": "2",
+    "interest_rate": "0",
+    "clamp_rate": "0",
+    "option_type": "PUT",
+    "strike_price": "76000",
+    "funding_period_hours": 0,
+    "funding_multiplier": 1,
+    "tags": [],
+    "fee_config": {
+     "interactive_fee": {
+      "maker_fee": {
+       "fee": "0",
+       "fee_cap": "0.125",
+       "fee_floor": "-0.125"
+      },
+      "taker_fee": {
+       "fee": "0",
+       "fee_cap": "0.125",
+       "fee_floor": "-0.125"
+      }
+     },
+     "api_fee": {
+      "maker_fee": {
+       "fee": "0.0001",
+       "fee_cap": "0.125",
+       "fee_floor": "-0.125"
+      },
+      "taker_fee": {
+       "fee": "0.0001",
+       "fee_cap": "0.125",
+       "fee_floor": "-0.125"
+      }
+     },
+     "rpi_fee": {
+      "maker_fee": {
+       "fee": "0.0001",
+       "fee_cap": "0.125",
+       "fee_floor": "-0.125"
+      },
+      "taker_fee": {
+       "fee": "0.0001",
+       "fee_cap": "0.125",
+       "fee_floor": "-0.125"
+      }
+     }
+    },
+    "trading_mode": "STANDARD"
+   },
+   {
+    "symbol": "BTC-USD-25DEC26-135000-C",
+    "base_currency": "BTC",
+    "quote_currency": "USD",
+    "settlement_currency": "USDC",
+    "order_size_increment": "0.001",
+    "price_tick_size": "0.01",
+    "min_notional": "20",
+    "open_at": 1782807313361,
+    "expiry_at": 1798185600000,
+    "asset_kind": "OPTION",
+    "market_kind": "cross",
+    "position_limit": "1000",
+    "price_bands_width": "0.3",
+    "max_slippage": "0",
+    "iv_bands_width": "0.3",
+    "max_open_orders": 150,
+    "max_funding_rate": "0",
+    "option_cross_margin_params": {
+     "imf": {
+      "long_itm": "0.2",
+      "short_itm": "0.15",
+      "short_otm": "0.1",
+      "short_put_cap": "0.5",
+      "premium_multiplier": "1"
+     },
+     "mmf": {
+      "long_itm": "0.1",
+      "short_itm": "0.075",
+      "short_otm": "0.05",
+      "short_put_cap": "0.5",
+      "premium_multiplier": "0.5"
+     }
+    },
+    "option_spread_margin_params": {
+     "unpaired_scale_im": "1.2",
+     "unpaired_scale_mm": "1"
+    },
+    "price_feed_id": "",
+    "oracle_ewma_factor": "0.043647610787352464",
+    "max_order_size": "100",
+    "max_funding_rate_change": "0",
+    "max_tob_spread": "2",
+    "interest_rate": "0",
+    "clamp_rate": "0",
+    "option_type": "CALL",
+    "strike_price": "135000",
+    "funding_period_hours": 0,
+    "funding_multiplier": 1,
+    "tags": [],
+    "fee_config": {
+     "interactive_fee": {
+      "maker_fee": {
+       "fee": "0",
+       "fee_cap": "0.125",
+       "fee_floor": "-0.125"
+      },
+      "taker_fee": {
+       "fee": "0",
+       "fee_cap": "0.125",
+       "fee_floor": "-0.125"
+      }
+     },
+     "api_fee": {
+      "maker_fee": {
+       "fee": "0.0001",
+       "fee_cap": "0.125",
+       "fee_floor": "-0.125"
+      },
+      "taker_fee": {
+       "fee": "0.0001",
+       "fee_cap": "0.125",
+       "fee_floor": "-0.125"
+      }
+     },
+     "rpi_fee": {
+      "maker_fee": {
+       "fee": "0.0001",
+       "fee_cap": "0.125",
+       "fee_floor": "-0.125"
+      },
+      "taker_fee": {
+       "fee": "0.0001",
+       "fee_cap": "0.125",
+       "fee_floor": "-0.125"
+      }
+     }
+    },
+    "trading_mode": "STANDARD"
+   },
+   {
+    "symbol": "BTC-USD-7NOV26-76000-C",
+    "base_currency": "BTC",
+    "quote_currency": "USD",
+    "settlement_currency": "USDC",
+    "order_size_increment": "0.001",
+    "price_tick_size": "0.01",
+    "min_notional": "20",
+    "open_at": 1793704502391,
+    "expiry_at": 1794038400000,
+    "asset_kind": "OPTION",
+    "market_kind": "cross",
+    "position_limit": "1000",
+    "price_bands_width": "0.3",
+    "max_slippage": "0",
+    "iv_bands_width": "0.3",
+    "max_open_orders": 150,
+    "max_funding_rate": "0",
+    "option_cross_margin_params": {
+     "imf": {
+      "long_itm": "0.2",
+      "short_itm": "0.15",
+      "short_otm": "0.1",
+      "short_put_cap": "0.5",
+      "premium_multiplier": "1"
+     },
+     "mmf": {
+      "long_itm": "0.1",
+      "short_itm": "0.075",
+      "short_otm": "0.05",
+      "short_put_cap": "0.5",
+      "premium_multiplier": "0.5"
+     }
+    },
+    "option_spread_margin_params": {
+     "unpaired_scale_im": "1.2",
+     "unpaired_scale_mm": "1"
+    },
+    "price_feed_id": "",
+    "oracle_ewma_factor": "0.043647610787352464",
+    "max_order_size": "100",
+    "max_funding_rate_change": "0",
+    "max_tob_spread": "2",
+    "interest_rate": "0",
+    "clamp_rate": "0",
+    "option_type": "CALL",
+    "strike_price": "76000",
+    "funding_period_hours": 0,
+    "funding_multiplier": 1,
+    "tags": [],
+    "fee_config": {
+     "interactive_fee": {
+      "maker_fee": {
+       "fee": "0",
+       "fee_cap": "0.125",
+       "fee_floor": "-0.125"
+      },
+      "taker_fee": {
+       "fee": "0",
+       "fee_cap": "0.125",
+       "fee_floor": "-0.125"
+      }
+     },
+     "api_fee": {
+      "maker_fee": {
+       "fee": "0.0001",
+       "fee_cap": "0.125",
+       "fee_floor": "-0.125"
+      },
+      "taker_fee": {
+       "fee": "0.0001",
+       "fee_cap": "0.125",
+       "fee_floor": "-0.125"
+      }
+     },
+     "rpi_fee": {
+      "maker_fee": {
+       "fee": "0.0001",
+       "fee_cap": "0.125",
+       "fee_floor": "-0.125"
+      },
+      "taker_fee": {
+       "fee": "0.0001",
+       "fee_cap": "0.125",
+       "fee_floor": "-0.125"
+      }
+     }
+    },
+    "trading_mode": "STANDARD"
+   }
+  ]
+ },
+ "summary": {
+  "results": [
+   {
+    "symbol": "BTC-USD-10NOV26-76000-P",
+    "mark_price": "1156.13847861",
+    "mark_iv": "0.38775",
+    "delta": "-0.47957",
+    "greeks": {
+     "delta": "-0.47957",
+     "gamma": "0.000132071",
+     "vega": "31.0226",
+     "theta": "-153.135",
+     "rho": "-0.121055",
+     "vanna": "0.00001271",
+     "volga": "0.000500402"
+    },
+    "last_traded_price": "",
+    "bid": "1063.24",
+    "bid_size": "1",
+    "bid_iv": "0.35687",
+    "ask": "1277.99",
+    "ask_size": "1",
+    "ask_iv": "0.42609",
+    "volume_24h": "0",
+    "total_volume": "0",
+    "created_at": 1793967398154,
+    "underlying_price": "76062.51231307",
+    "open_interest": "0",
+    "funding_rate": "",
+    "price_change_rate_24h": "",
+    "future_funding_rate": "0.00009615",
+    "forward_rate": "0.042442",
+    "risk_free_rate": "0"
+   },
+   {
+    "symbol": "BTC-USD-25DEC26-135000-C",
+    "mark_price": "17.98042851",
+    "mark_iv": "0.56063",
+    "delta": "0.00395",
+    "greeks": {
+     "delta": "0.00395",
+     "gamma": "0.00000075177",
+     "vega": "3.26156",
+     "theta": "-1.91903",
+     "rho": "-0.0240503",
+     "vanna": "-0.000219043",
+     "volga": "0.442985"
+    },
+    "last_traded_price": "57.29",
+    "bid": "",
+    "bid_size": "",
+    "ask": "620",
+    "ask_size": "1",
+    "volume_24h": "0",
+    "total_volume": "1275289.94797095",
+    "created_at": 1793967398154,
+    "underlying_price": "76062.51231307",
+    "open_interest": "40",
+    "funding_rate": "",
+    "price_change_rate_24h": "-0.2722",
+    "future_funding_rate": "0.00009615",
+    "forward_rate": "0.056319",
+    "risk_free_rate": "0"
+   },
+   {
+    "symbol": "BTC-USD-7NOV26-76000-C",
+    "mark_price": "755.1441288",
+    "mark_iv": "0.50211",
+    "delta": "0.51887",
+    "greeks": {
+     "delta": "0.51887",
+     "gamma": "0.000219903",
+     "vega": "14.3825",
+     "theta": "-440.382",
+     "rho": "-0.0170017",
+     "vanna": "0.00000883645",
+     "volga": "0.000317843"
+    },
+    "last_traded_price": "877.64",
+    "bid": "682.48",
+    "bid_size": "1",
+    "bid_iv": "0.46079",
+    "ask": "880.46",
+    "ask_size": "1",
+    "ask_iv": "0.59819",
+    "volume_24h": "909.76184008152",
+    "total_volume": "909.75274264404",
+    "created_at": 1793967398154,
+    "underlying_price": "76062.51231307",
+    "open_interest": "0.024",
+    "funding_rate": "",
+    "price_change_rate_24h": "-0.8174",
+    "future_funding_rate": "0.00009615",
+    "forward_rate": "0.009178",
+    "risk_free_rate": "0"
+   }
+  ]
+ }
+}

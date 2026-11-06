@@ -71,6 +71,10 @@ export const VENUE_SPECS: Record<Venue, VenueSpec> = {
   // and any pre-expiry halt are not documented in what we could read: 0.5 h
   // and a conservative 30 min cutoff are assumptions (DATA_SOURCES row 60).
   gate: { label: 'Gate', quoteKind: 'book', canSell: always, tradingCutoffMs: 30 * 60_000, settlementAsset: () => 'USDT', settlementWindowHours: 0.5 },
+  // Dated options, cash-settled in USDC on a 30-min TWAP of Paradex's spot
+  // oracle (docs). No pre-expiry halt is documented: 30 min is a
+  // conservative assumption (DATA_SOURCES row 67).
+  paradex: { label: 'Paradex', quoteKind: 'book', canSell: always, tradingCutoffMs: 30 * 60_000, settlementAsset: () => 'USDC', settlementWindowHours: 0.5 },
   bybit: { label: 'Bybit', quoteKind: 'book', canSell: always, tradingCutoffMs: 0, settlementAsset: () => 'USDT', settlementWindowHours: 0.5 },
   binance: {
     label: 'Binance',
@@ -83,4 +87,4 @@ export const VENUE_SPECS: Record<Venue, VenueSpec> = {
 };
 
 /** Fixed venue order: deterministic pair enumeration and display. */
-export const VENUE_ORDER: Venue[] = ['derive', 'olive', 'coincall', 'hypercall', 'callput', 'deribit', 'okx', 'gate', 'bybit', 'binance'];
+export const VENUE_ORDER: Venue[] = ['derive', 'olive', 'coincall', 'hypercall', 'callput', 'deribit', 'okx', 'gate', 'paradex', 'bybit', 'binance'];

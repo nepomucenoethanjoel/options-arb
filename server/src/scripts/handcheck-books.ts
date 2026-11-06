@@ -10,7 +10,7 @@
 import { loadConfig } from '../config';
 
 const APP = process.env.APP_URL ?? 'http://127.0.0.1:8799';
-const BOOK_VENUES = ['derive', 'coincall', 'hypercall', 'callput', 'deribit', 'okx', 'gate'] as const;
+const BOOK_VENUES = ['derive', 'coincall', 'hypercall', 'callput', 'deribit', 'okx', 'gate', 'paradex'] as const;
 type BookVenue = (typeof BOOK_VENUES)[number];
 
 const n = (v: unknown): number | null => {
@@ -129,6 +129,15 @@ async function gateRaw(underlying: string, name: string): Promise<RawQuote> {
   return { bid, bidSize: bid != null ? n(t.bid1_size)! * coin : null, ask, askSize: ask != null ? n(t.ask1_size)! * coin : null, mark: pos(t.mark_price), index: pos(t.index_price) };
 }
 
+async function paradexRaw(symbol: string): Promise<RawQuote> {
+  const body = (await (await fetch(`https://api.prod.paradex.trade/v1/markets/summary?market=${encodeURIComponent(symbol)}`)).json()) as any;
+  const s = body.results?.[0];
+  if (!s) throw new Error(`Paradex ${symbol} not found`);
+  // USD per 1 coin; sizes already in coin.
+  const bid = pos(s.bid), ask = pos(s.ask);
+  return { bid, bidSize: bid != null ? n(s.bid_size) : null, ask, askSize: ask != null ? n(s.ask_size) : null, mark: pos(s.mark_price), index: pos(s.underlying_price) };
+}
+
 /** Taker fee per contract, written from the venue docs (not fees.ts). */
 function feeOf(venue: BookVenue, legPrice: number | null, spot: number, underlying: string, kind: string, strike: number, tteDays: number, deriveBps: number, side: 'buy' | 'sell'): number {
   if (venue === 'derive') {
@@ -154,6 +163,12 @@ function feeOf(venue: BookVenue, legPrice: number | null, spot: number, underlyi
     const intrinsic = Math.max(0, kind === 'call' ? spot - strike : strike - spot);
     return trade + Math.min(spot * 0.00015, 0.125 * intrinsic);
   }
+  if (venue === 'paradex') {
+    // Docs: Pro/API taker 0.01% (base assumed notional) capped 12.5% premium; + 0.0075% settlement on ITM, conservative.
+    const trade = legPrice != null && legPrice > 0 ? Math.min(spot * 0.0001, 0.125 * legPrice) : spot * 0.0001;
+    const intrinsic = Math.max(0, kind === 'call' ? spot - strike : strike - spot);
+    return trade + Math.min(spot * 0.000075, intrinsic);
+  }
   if (venue === 'hypercall') return spot * (5 + 1.5) / 10_000; // published 5 bps taker + 1.5 bps settlement
   if (venue === 'callput') {
     const capped = (bps: number) => (legPrice != null && legPrice > 0 ? Math.min(spot * bps / 10_000, 0.125 * legPrice) : spot * bps / 10_000);
@@ -164,7 +179,7 @@ function feeOf(venue: BookVenue, legPrice: number | null, spot: number, underlyi
   const intrinsic = Math.max(0, kind === 'call' ? spot - strike : strike - spot);
   return trade + (tteDays < 1 ? 0 : Math.min(spot * 0.00015, 0.125 * intrinsic));
 }
-const ORDER_FEE: Record<BookVenue, number> = { derive: 0.5, coincall: 0, hypercall: 0, callput: 0, deribit: 0, okx: 0, gate: 0 };
+const ORDER_FEE: Record<BookVenue, number> = { derive: 0.5, coincall: 0, hypercall: 0, callput: 0, deribit: 0, okx: 0, gate: 0, paradex: 0 };
 
 /** Exit codes (scheduled runs, deploy/options-arb-handcheck.sh): 0 all ✓, 1 a
  *  money field ✗ or an error, 3 nothing to check right now. Quote drift
@@ -205,7 +220,9 @@ async function main() {
               ? okxRaw(row.legs.okx.instrumentId)
               : v === 'gate'
                 ? gateRaw(row.underlying, row.legs.gate.instrumentId)
-                : deribitRaw(row.legs.deribit.instrumentId);
+                : v === 'paradex'
+                  ? paradexRaw(row.legs.paradex.instrumentId)
+                  : deribitRaw(row.legs.deribit.instrumentId);
   const [freshB, freshS] = await Promise.all([raw(buy), raw(sell)]);
   // 1) Quote source: the fresh raw quote vs the quote the cycle used. RFQ
   //    makers re-quote every second or two, so allow drift; a wrong side,

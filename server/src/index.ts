@@ -8,6 +8,7 @@ import { CallputAdapter } from './adapters/callput';
 import { DeribitAdapter } from './adapters/deribit';
 import { OkxAdapter } from './adapters/okx';
 import { GateAdapter } from './adapters/gate';
+import { ParadexAdapter } from './adapters/paradex';
 import { OlivePoolWatcher } from './olivePools';
 import { OliveAdapter } from './adapters/olive';
 import { OliveRealtimeClient } from './adapters/olive/realtime';
@@ -54,6 +55,7 @@ async function main(): Promise<void> {
     deribit: () => new DeribitAdapter(cfg.deribitBaseUrl),
     okx: () => new OkxAdapter(cfg.okxBaseUrl),
     gate: () => new GateAdapter(cfg.gateBaseUrl),
+    paradex: () => new ParadexAdapter(cfg.paradexBaseUrl),
   };
   const extraVenues = cfg.extraVenues.map((v) => extraAdapters[v]());
   const alerter = new Alerter(cfg);

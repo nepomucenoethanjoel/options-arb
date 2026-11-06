@@ -41,11 +41,11 @@ function list(name: string, def: string[]): string[] {
 
 /** Venues with an adapter that can be enabled via VENUES (Bybit/Binance:
  *  deferred — geo-blocked from the US host, see DATA_SOURCES row 32). */
-export const EXTRA_VENUES = ['coincall', 'hypercall', 'callput', 'deribit', 'okx', 'gate'] as const;
+export const EXTRA_VENUES = ['coincall', 'hypercall', 'callput', 'deribit', 'okx', 'gate', 'paradex'] as const;
 export type ExtraVenue = (typeof EXTRA_VENUES)[number];
 
 function extraVenueList(): ExtraVenue[] {
-  const requested = list('VENUES', ['COINCALL', 'HYPERCALL', 'CALLPUT', 'DERIBIT', 'OKX', 'GATE']).map((v) => v.toLowerCase());
+  const requested = list('VENUES', ['COINCALL', 'HYPERCALL', 'CALLPUT', 'DERIBIT', 'OKX', 'GATE', 'PARADEX']).map((v) => v.toLowerCase());
   const known = requested.filter((v): v is ExtraVenue => (EXTRA_VENUES as readonly string[]).includes(v));
   for (const v of requested) {
     if (!known.includes(v as ExtraVenue) && v !== 'derive' && v !== 'olive') console.warn(`[config] VENUES: no adapter for "${v}" — ignored`);
@@ -75,6 +75,7 @@ export interface AppConfig {
   deribitBaseUrl: string;
   okxBaseUrl: string;
   gateBaseUrl: string;
+  paradexBaseUrl: string;
 
   deriveBaseUrl: string;
   deriveLegacyUrl: string;
@@ -229,6 +230,7 @@ export function loadConfig(): AppConfig {
     deribitBaseUrl: str('DERIBIT_BASE_URL', 'https://www.deribit.com/api/v2'),
     okxBaseUrl: str('OKX_BASE_URL', 'https://www.okx.com'),
     gateBaseUrl: str('GATE_BASE_URL', 'https://api.gateio.ws/api/v4'),
+    paradexBaseUrl: str('PARADEX_BASE_URL', 'https://api.prod.paradex.trade/v1'),
     callputMinIntervalMs: Math.max(15_000, num('CALLPUT_MIN_INTERVAL_MS', 60_000)),
     callputFeedUrl: str('CALLPUT_FEED_URL', 'https://app-data-base.s3.ap-southeast-1.amazonaws.com/market-data.json'),
 

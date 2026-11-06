@@ -14,6 +14,7 @@ a signal tool — it does not route or execute orders.
 | **Deribit** | order book | SOL BTC ETH | public REST summary (+ ticker sizes for candidate pairs) | ✓ (`REFERENCE_VENUES=deribit` makes it reference-only) |
 | **OKX** | order book | BTC ETH | public REST tickers + opt-summary + mark + index (coin-margined) | ✓ |
 | **Gate** | order book | BTC ETH SOL (+ XRP BNB DOGE HYPE XAUT SUI ADA LTC CL listed) | public REST contracts + tickers (USDT) | ✓ |
+| **Paradex** | order book | BTC ETH SOL HYPE ZEC NEAR (dated, 08:00 UTC) | public REST markets + ALL summary (USDC) | ✓ |
 | Bybit, Binance | order book | — | deferred: they geo-block the US host | — |
 
 Every contract (same underlying, 08:00 UTC expiry, strike, kind) is compared

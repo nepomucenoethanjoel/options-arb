@@ -121,6 +121,19 @@ export function feeModels(cfg: FeeConfig): Partial<Record<Venue, VenueFeeModel>>
       },
       perOrder: 0,
     },
+    // Paradex (docs trading-fees; per-market fee_config): retail 0%, Pro / API
+    // taker 0.01% — modelled at 0.01% of notional (the rate's base is not
+    // stated) capped at 12.5% of premium; plus the 0.0075% delisting
+    // settlement fee on ITM legs, which the docs do not rule out at expiry —
+    // both conservative (row 66).
+    paradex: {
+      perContract: ({ legPrice, notional, kind, strike }) => {
+        const trade = legPrice != null && legPrice > 0 ? Math.min(notional * 0.0001, legPrice * 0.125) : notional * 0.0001;
+        const intrinsic = Math.max(0, kind === 'call' ? notional - strike : strike - notional);
+        return trade + Math.min(notional * 0.000075, intrinsic);
+      },
+      perOrder: 0,
+    },
     // Callput (docs fees): open-buy 6 bps, open-sell 3 bps, settle 2 bps of
     // notional, each capped at 12.5% of premium. The keeper's native-token
     // execution fee is unpublished — quotes carry execution_fee_unknown.
