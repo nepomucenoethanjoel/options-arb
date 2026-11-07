@@ -64,11 +64,16 @@ export interface OlivePoolSnapshot {
   ts: number;
 }
 
+/** A market file that could not be read keeps the pool's last good snapshot. */
+const readFailed = (file: OliveMarketFileData | null): boolean => file == null;
+
 export interface PoolWatcherOptions {
   thresholdUsd: number;
   sweepIntervalMs: number;
   /** Underlyings the app already prices — never alerted. */
   tracked: string[];
+  /** Hedge underlyings that trade only in the NYSE session: their wrapper oracles go stale every night by design. */
+  sessionBound?: string[];
   notify?: (text: string) => Promise<boolean>;
   fetchMarkets?: () => Promise<string[]>;
   fetchFile?: (symbol: string) => Promise<OliveMarketFileData | null>;
@@ -94,10 +99,13 @@ const capacity = (s: OlivePoolSnapshot): number => Math.max(s.callCapacityUsd ??
 
 /**
  * What changed between two sweeps that is worth one alert: a hedgeable,
- * untracked pool crossing the threshold upward, or its oracle coming back.
- * The first sweep only sets the baseline (a restart must not re-alert).
+ * untracked pool crossing the threshold upward from a KNOWN lower capacity,
+ * or its execution oracle coming back while the pool can actually write
+ * (capacity ≥ threshold). The first sweep only sets the baseline (a restart
+ * must not re-alert). An oracle outage leaves capacity unknown (null), never
+ * zero, so its recovery is not a "funding".
  */
-export function poolAlerts(prev: Map<string, OlivePoolSnapshot> | null, next: OlivePoolSnapshot[], opts: Pick<PoolWatcherOptions, 'thresholdUsd' | 'tracked'>): string[] {
+export function poolAlerts(prev: Map<string, OlivePoolSnapshot> | null, next: OlivePoolSnapshot[], opts: Pick<PoolWatcherOptions, 'thresholdUsd' | 'tracked' | 'sessionBound'>): string[] {
   if (prev == null) return [];
   const out: string[] = [];
   for (const s of next) {
@@ -105,10 +113,12 @@ export function poolAlerts(prev: Map<string, OlivePoolSnapshot> | null, next: Ol
     const before = prev.get(s.symbol);
     if (!before) continue;
     const usd = (v: number | null) => (v == null ? '–' : `$${Math.round(v).toLocaleString('en-US')}`);
-    if (capacity(s) >= opts.thresholdUsd && capacity(before) < opts.thresholdUsd) {
+    const beforeKnown = before.spot != null && (before.callCapacityUsd != null || before.putCapacityUsd != null);
+    if (beforeKnown && capacity(s) >= opts.thresholdUsd && capacity(before) < opts.thresholdUsd) {
       out.push(`🌱 Olive ${s.symbol} pool funded: calls ${usd(s.callCapacityUsd)} · puts ${usd(s.putCapacityUsd)} free (was ${usd(Math.max(before.callCapacityUsd ?? 0, before.putCapacityUsd ?? 0))}) — hedge on ${s.hedgeVenues.join(', ')} (${s.hedgeUnderlying}). Add it to UNDERLYINGS to price it.`);
     }
-    if (s.spot != null && before.spot == null) {
+    const sessionBound = (opts.sessionBound ?? []).includes(s.hedgeUnderlying ?? s.symbol);
+    if (s.spot != null && before.spot == null && capacity(s) >= opts.thresholdUsd && !sessionBound) {
       out.push(`🔌 Olive ${s.symbol} execution oracle is live again (spot ${s.spot}) — capacity calls ${usd(s.callCapacityUsd)} · puts ${usd(s.putCapacityUsd)}; hedge on ${s.hedgeVenues.join(', ')}.`);
     }
   }
@@ -144,7 +154,8 @@ export class OlivePoolWatcher {
       const next: OlivePoolSnapshot[] = [];
       for (const sym of symbols) {
         const file = await (this.opts.fetchFile ?? ((s: string) => fetchOliveMarketFile('https://olive.exchange/public/market', s)))(sym).catch(() => null);
-        next.push(snapshotPool(sym, file, now));
+        const prev = this.latestByPool?.get(sym);
+        next.push(readFailed(file) && prev ? prev : snapshotPool(sym, file, now));
         if (this.opts.spacingMs) await sleep(this.opts.spacingMs);
       }
       const alerts = poolAlerts(this.latestByPool, next, this.opts);

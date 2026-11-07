@@ -61,7 +61,7 @@ async function main(): Promise<void> {
   const alerter = new Alerter(cfg);
   const orchestrator = new Orchestrator(cfg, derive, olive, storage, alerter, extraVenues);
   const olivePools = cfg.olivePoolWatch
-    ? new OlivePoolWatcher({ thresholdUsd: cfg.olivePoolAlertUsd, sweepIntervalMs: cfg.olivePoolSweepMs, tracked: cfg.underlyings, notify: (t) => alerter.notify(t), spacingMs: 500 })
+    ? new OlivePoolWatcher({ thresholdUsd: cfg.olivePoolAlertUsd, sweepIntervalMs: cfg.olivePoolSweepMs, tracked: cfg.underlyings, sessionBound: cfg.stockUnderlyings, notify: (t) => alerter.notify(t), spacingMs: 500 })
     : null;
   const app = await buildServer({ cfg, orchestrator, storage, olive, olivePools: olivePools ?? undefined });
 

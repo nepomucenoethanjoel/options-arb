@@ -43,13 +43,43 @@ describe('poolAlerts', () => {
     expect(poolAlerts(prev, [snapshotPool('JUP', file({ spot: 0.26, underlyingFree: 100_000 }), 1)], opts)).toEqual([]);
   });
 
-  it('alerts when a dead execution oracle comes back', () => {
-    const [a] = poolAlerts(prev, [snapshotPool('PAXG', file({ spot: 4_100, underlyingFree: 0.16, usdcFreeUsd: 311 }), 1)], opts);
+  it('alerts an oracle revival only when the pool can actually write (capacity ≥ threshold)', () => {
+    expect(poolAlerts(prev, [snapshotPool('PAXG', file({ spot: 4_100, underlyingFree: 0.16, usdcFreeUsd: 311 }), 1)], opts)).toEqual([]);
+    const [a] = poolAlerts(prev, [snapshotPool('PAXG', file({ spot: 4_100, underlyingFree: 0.5, usdcFreeUsd: 311 }), 1)], opts);
     expect(a).toContain('PAXG execution oracle is live again');
+  });
+
+  it('an oracle outage is unknown capacity, not $0: its recovery is not a "funding" (2026-11-07 burst)', () => {
+    // TSLAX read with its oracle stale (spot null) → calls unknown; next sweep the oracle is back.
+    const before = new Map([['TSLAX', snapshotPool('TSLAX', file({ spot: null, underlyingFree: 4.4, usdcFreeUsd: 713 }), 0)]]);
+    const after = snapshotPool('TSLAX', file({ spot: 358.77, underlyingFree: 4.4, usdcFreeUsd: 713 }), 1);
+    // Session-bound (stock) wrapper: nightly oracle staleness is expected — nothing to say.
+    expect(poolAlerts(before, [after], { ...opts, sessionBound: ['TSLA'] })).toEqual([]);
+    // Otherwise only the revival is reported — never "funded (was $0)".
+    const alerts = poolAlerts(before, [after], { ...opts, sessionBound: [] });
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toContain('TSLAX execution oracle is live again');
   });
 });
 
 describe('OlivePoolWatcher', () => {
+  it('a market file that fails to load keeps the last good snapshot (no false outage, no false recovery)', async () => {
+    let fail = false;
+    const notify = vi.fn(async () => true);
+    const w = new OlivePoolWatcher({
+      thresholdUsd: 1_000, sweepIntervalMs: 60_000, tracked: [], notify,
+      fetchMarkets: async () => ['XRP'],
+      fetchFile: async () => (fail ? null : file({ spot: 1.3, underlyingFree: 0 })),
+    });
+    await w.sweep(1);
+    fail = true;
+    await w.sweep(2);
+    expect(w.latest()[0]).toMatchObject({ spot: 1.3, ts: 1 });
+    fail = false;
+    await w.sweep(3);
+    expect(notify).not.toHaveBeenCalled();
+  });
+
   it('sweeps every market, notifies on the second sweep, and serves the latest snapshots', async () => {
     let xrpFree = 0;
     const notify = vi.fn(async () => true);
