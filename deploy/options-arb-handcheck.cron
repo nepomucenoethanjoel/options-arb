@@ -1,4 +1,6 @@
 # options-arb daily live handchecks (06:30 UTC — clear of the 08:00 expiry).
 # Install: cp deploy/options-arb-handcheck.cron /etc/cron.d/options-arb-handcheck
 # (with deploy/options-arb-handcheck.sh installed to /usr/local/bin/)
-30 6 * * * root /usr/local/bin/options-arb-handcheck.sh
+# Runs as the service user, not root: it executes the checkout's TypeScript.
+# The log must be writable by it: chown optionsarb /var/log/options-arb-handcheck.log
+30 6 * * * optionsarb /usr/local/bin/options-arb-handcheck.sh

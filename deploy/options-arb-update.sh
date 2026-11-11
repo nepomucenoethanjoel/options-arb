@@ -11,7 +11,10 @@ cd /opt/options-arb
 git fetch -q origin deploy
 if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/deploy)" ]; then
   git reset -q --hard origin/deploy
-  npm ci --omit=dev --no-audit --no-fund >/dev/null
+  # Runs as root against a root-owned checkout: --ignore-scripts so a dependency
+  # install script on the deploy branch never executes as root (esbuild ships its
+  # binary as a platform package; bufferutil/utf-8-validate are optional).
+  npm ci --omit=dev --ignore-scripts --no-audit --no-fund >/dev/null
   systemctl restart options-arb
   logger -t options-arb "auto-deployed $(git rev-parse --short HEAD)"
 fi

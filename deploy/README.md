@@ -150,6 +150,14 @@ cp /opt/options-arb/deploy/options-arb.cron /etc/cron.d/options-arb
 override path (same content, immediate). The box's `server/.env` and
 `server/data/` survive every update path.
 
+**Ownership model.** `/opt/options-arb` is root-owned; only `server/data/` is
+owned by the service user (`optionsarb`), and `server/.env` is `root:optionsarb`
+mode 640. The service process is public-facing, so it must not be able to write
+anything root later executes (the update cron's `git`/`npm ci`, the handcheck).
+The update script therefore installs with `--ignore-scripts`, and the handcheck
+cron runs as `optionsarb`. `setup.sh` applies this; if you `chown -R` the tree
+back to the service user, you undo it.
+
 ## Notes
 
 - `HOST=0.0.0.0` is set by `setup.sh` (from the local `127.0.0.1`) so the

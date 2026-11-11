@@ -63,7 +63,15 @@ else
   printf '\nHISTORY_RETENTION_DAYS=3\n' >> .env
 fi
 mkdir -p data
-chown -R "$SERVICE_USER:$SERVICE_USER" "$APP_DIR"
+# The checkout is root-owned (root's deploy cron writes it; the service user must
+# not be able to edit .git/config or code that root later runs). Only data/ is
+# the service user's; .env is readable by it through the group, not by others.
+chown -R root:root "$APP_DIR"
+chown -R "$SERVICE_USER:$SERVICE_USER" "$APP_DIR/server/data"
+chown root:"$SERVICE_USER" .env
+chmod 640 .env
+touch /var/log/options-arb-handcheck.log
+chown "$SERVICE_USER:$SERVICE_USER" /var/log/options-arb-handcheck.log
 
 echo "==> systemd unit"
 install -m 644 "$APP_DIR/deploy/options-arb.service" /etc/systemd/system/options-arb.service
