@@ -301,6 +301,16 @@ early re-price (30 s cooldown). Config: `OLIVE_REALTIME`,
 `OLIVE_REALTIME_URL`. Status: `/api/health` → `oliveRealtime`, header badge
 "Olive RT".
 
+> **RETIRED upstream (observed 2026-11-11; stream silent on the box since
+> 2026-10-27).** The gateway no longer advertises `subscribe_ticker` or
+> `subscribe_ticker_fast`; its `connected` ack lists only subscribe_chat,
+> subscribe_positions, subscribe_options (wallet-scoped), subscribe_tpsl,
+> set_activity_scopes, realtime_frontier_repair_started, unsubscribe, ping.
+> Sending `subscribe_ticker` is accepted silently and no `tickerPriceSnapshot`
+> ever follows (40 s probe from a home IP and the VPS). Spot already falls back to
+> the market file (§2d, matrix row 52), so no number changed; set
+> `OLIVE_REALTIME=0`. See matrix row 76.
+
 ### 2d-bis. Other live endpoints discovered from their frontend (2026-09-27)
 
 - `GET /api/v1/oracle/stork-fast-pair?poolName=<SYM>%2FUSDC` — **works for
@@ -437,6 +447,7 @@ No published SDK or IDL reference.
 | 73 | CANDIDATE — **Rysk** (HyperEVM + Ethereum): the app shows only an "Earn" flow — users sell covered calls / cash-secured puts for upfront premium on HYPE variants, UBTC, UETH, USOL, PURR, WBTC, WETH, XAUT; pricing, fees and any API not published. **NO-GO for now** (no readable quotes); revisit if an API appears — it would be a sell venue for Olive-bought options | — | **UNVERIFIED** | app.rysk.finance (read 2026-11-06) |
 | 74 | CANDIDATE — **Stryke** (Arbitrum, Base, Robinhood Chain): CLAMM options priced off Uniswap v3 liquidity (not a model vol) plus a tokenized-stock "Premarket" (TSLA NVDA MSTR CRCL SPY); docs unreadable (GitBook redirect empty), no API found. **NO-GO for now**; the stock Premarket is worth a recheck with Olive's xStocks | — | **UNVERIFIED** | stryke.xyz, clamm.stryke.xyz (read 2026-11-06) |
 | 75 | REJECTED — **Typus** (Sui): options sold by Dutch auction out of vaults (no standing quote to compare), fees 10–15% of option price, SUI-ecosystem underlyings. **Panoptic**: perpetual options paid by streamia (no expiry) — a different instrument from dated options | — | **UNVERIFIED** (docs only; enough to reject) | docs.typus.finance options-specifications, modified-dutch-auction; panoptic.xyz/docs faq, product/streamia |
+| 76 | Olive realtime ticker stream (`subscribe_ticker` → `tickerPriceSnapshot`, ~1 s Stork spot) is RETIRED upstream: the gateway's `connected` ack no longer lists the event and nothing is pushed. The client reconnected every ~24 s while reporting `ok` health; spot falls back to the market file (row 52). `OLIVE_REALTIME=0` on the box; the 1 % early re-price trigger is inactive without it | `adapters/olive/realtime.ts`, `api/server.ts` `buildHealthRollup` | **VERIFIED-LIVE** (absence) | 2026-11-11 40 s socket probes from a home IP and from 192.236.184.31: ack lists 8 events, none a ticker; silent journal since 2026-10-27 18:52 UTC |
 
 | Date | Route / check | Result |
 |---|---|---|
@@ -463,4 +474,5 @@ No published SDK or IDL reference.
 | 2026-09-28 | **Live pricing rates decoded (borrowRateCurve)**: per-custody utilization→bps curves in the market file; "Fixed Rate (L/S)" = curve at locked/owned utilization. SOL 15.02%/2.00% (UI 15.04/2.00), BTC **42.15% short** at 88% USDC utilization (2% pin was wrong), ZEC 30.06%. Wired as live rates with `.env` pins as fallback (`rates_live` caveat) | Encoded in marketFile parse + adapter + handcheck |
 | 2026-09-29 | **CORRECTION — the ±1σ strike band IS enforced by the live UI**: a Dec-25 ZEC attempt at strike 2800 was rejected ("Strike must stay within expected move. Pick between $727.74 and $2,563.15"); reverse-engineering with same-instant market-file inputs gives implied n = **1.000** from the upper bound under the documented `K_L=S·e^(−rS·T−σ√T)`, `K_U=S·e^(rL·T+σ√T)` (docs.olive.exchange/options/open-option, n=m=1; tenor 1-365d). The 2026-09-28 "not enforced" probe was wrong (likely a long-tenor band wide enough to contain the probe strike). Default restored to `OLIVE_STRIKE_BOUND_SIGMAS=1`; out-of-band rows are unmatched, not priced. Also confirmed from a live fill: order quantity quantum = 1e-6; fee base = ORACLE SPOT notional (`min(2.5bps × qty × S, 10% × premium)`, docs option-fees) | Encoded in config default + olive.test.ts + handcheck executability |
 | 2026-09-30 | **Marginal-fill pricing added (upgrades the `execution_moves_rate` warning to a number)**: the full borrow-curve nodes are now parsed from the market file and the expected average entry for a max-size fill is integrated along the utilization curve (AMM repricing convention verified in #1/#2/#4). Fields `expectedEntryUsdc`/`expectedTotalNetUsdc`; the KPI Σ headlines min(quoted, expected) per clip. Also: WAL bounded (journal_size_limit + truncate-checkpoint in prune — it had grown to 199 MB), burst persistence change-gated (was ~100–160k duplicate rows/day) | Encoded in shared/math/olive.ts + signals/engine.ts + buildKpis |
+| 2026-11-11 | **Olive socket.io `subscribe_ticker` gone**: handshake and `connected` ack still work; `supportedEvents` = subscribe_chat, subscribe_positions, subscribe_options, subscribe_tpsl, set_activity_scopes, realtime_frontier_repair_started, unsubscribe, ping. A ticker subscription is accepted silently; no `tickerPriceSnapshot` in 40 s (home IP and VPS). `subscribe_options {}` → `subscription_error "user must be a valid Solana address"` | Matrix row 76; health now degrades on ticker silence (`realtime_no_ticker_<n>s`) |
 | | *(append new probe results here)* | |

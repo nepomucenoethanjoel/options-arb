@@ -300,6 +300,32 @@ describe('buildHealthRollup', () => {
     expect(r.reasons[0]).toMatch(/^realtime_reconnecting_/);
   });
 
+  it('degrades on a stream that flaps but never delivers a ticker (the live 2026-10-27 case)', () => {
+    // statusSinceMs resets every ~24 s reconnect, so the status-age check alone never fires.
+    const r = buildHealthRollup({ ...base, health: health(), realtime: { status: 'reconnecting', statusSinceMs: NOW - 1_000, lastFrameAgeMs: 1_000, tickerSilenceMs: 1_209_600_000, assets: [] } });
+    expect(r.status).toBe('degraded');
+    expect(r.reasons).toEqual(['realtime_no_ticker_1209600s']);
+  });
+
+  it('degrades on a "live" stream that has stopped delivering prices', () => {
+    const r = buildHealthRollup({ ...base, health: health(), realtime: { status: 'live', statusSinceMs: NOW - 1e6, lastFrameAgeMs: 100, tickerSilenceMs: 300_000, assets: [] } });
+    expect(r.status).toBe('degraded');
+    expect(r.reasons).toEqual(['realtime_no_ticker_300s']);
+  });
+
+  it('is ok for a live stream with fresh tickers, or a slow first ticker, or a stopped stream', () => {
+    const rt = (over: Record<string, unknown>) => ({ status: 'live', statusSinceMs: NOW - 1e6, lastFrameAgeMs: 100, tickerSilenceMs: 500, assets: [], ...over });
+    expect(buildHealthRollup({ ...base, health: health(), realtime: rt({}) }).status).toBe('ok');
+    expect(buildHealthRollup({ ...base, health: health(), realtime: rt({ status: 'connecting', statusSinceMs: NOW - 5_000, tickerSilenceMs: 60_000 }) }).status).toBe('ok');
+    expect(buildHealthRollup({ ...base, health: health(), realtime: rt({ status: 'stopped', tickerSilenceMs: null }) }).status).toBe('ok');
+  });
+
+  it('reports one reason when both the status and the silence are stale', () => {
+    const r = buildHealthRollup({ ...base, health: health(), realtime: { status: 'reconnecting', statusSinceMs: NOW - 659_926_729, lastFrameAgeMs: 659_926_729, tickerSilenceMs: 659_926_729, assets: [] } });
+    expect(r.reasons).toHaveLength(1);
+    expect(r.reasons[0]).toMatch(/^realtime_reconnecting_/);
+  });
+
   it('tolerates a brief reconnect', () => {
     const r = buildHealthRollup({ ...base, health: health(), realtime: { status: 'reconnecting', statusSinceMs: NOW - 10_000, lastFrameAgeMs: 10_000, assets: [] } });
     expect(r.status).toBe('ok');

@@ -102,6 +102,13 @@ export interface RealtimeHealth {
   statusSinceMs: number;
   lastFrameAgeMs: number | null;
   lastTickerAgeMs: number | null;
+  /**
+   * Time since the stream last delivered a ticker, or since start() when it never
+   * has; null when not started. Unlike `statusSinceMs` it is not reset by
+   * reconnects, so a gateway that accepts the socket but never sends prices
+   * (live 2026-10-27+: subscribe_ticker removed) cannot hide behind status flaps.
+   */
+  tickerSilenceMs: number | null;
   /** Connect attempts since start. */
   attempts: number;
   lastError: string | null;
@@ -150,6 +157,7 @@ export class OliveRealtimeClient extends EventEmitter {
   private lastTickerMs: number | null = null;
   private connectStartedMs: number | null = null;
   private liveSinceMs: number | null = null;
+  private startedMs: number | null = null;
   private statusSinceMs: number;
   private lastError: string | null = null;
   private attempts = 0;
@@ -195,6 +203,7 @@ export class OliveRealtimeClient extends EventEmitter {
       statusSinceMs: this.statusSinceMs,
       lastFrameAgeMs: this.lastFrameAgeMs,
       lastTickerAgeMs: this.lastTickerMs == null ? null : now - this.lastTickerMs,
+      tickerSilenceMs: this.startedMs == null ? null : now - (this.lastTickerMs ?? this.startedMs),
       attempts: this.attempts,
       lastError: this.lastError,
       assets: [...this.spots.keys()].sort(),
@@ -203,6 +212,7 @@ export class OliveRealtimeClient extends EventEmitter {
 
   start(): void {
     if (this.socket || this.statusValue === 'live' || this.statusValue === 'connecting') return;
+    this.startedMs = this.now();
     this.connect();
     // Supervisor, in every non-stopped state: a silently-dead live socket
     // (tickers stopped) and a connect attempt that never completes (TCP/TLS/
@@ -219,6 +229,7 @@ export class OliveRealtimeClient extends EventEmitter {
     this.reconnectTimer = null;
     if (this.watchdogTimer) clearInterval(this.watchdogTimer);
     this.watchdogTimer = null;
+    this.startedMs = null;
     this.spots.clear();
   }
 

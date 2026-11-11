@@ -70,7 +70,7 @@ export interface CyclePayload {
   health: VenueHealthSnapshot;
   spots: Record<string, number | null>;
   /** Olive socket.io ticker stream status (null when disabled). */
-  realtime: { status: string; statusSinceMs?: number; lastFrameAgeMs: number | null; assets: string[] } | null;
+  realtime: { status: string; statusSinceMs?: number; lastFrameAgeMs: number | null; tickerSilenceMs?: number | null; assets: string[] } | null;
   oliveCaveats: string[];
   config: {
     ivSpreadThresholdVols: number;

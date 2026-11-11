@@ -265,6 +265,42 @@ describe('OliveRealtimeClient', () => {
     client.stop();
   });
 
+  it('tickerSilenceMs keeps growing through the reconnect loop of a gateway that never sends prices', () => {
+    // Live 2026-10-27+: Olive removed subscribe_ticker. The socket opens, the server
+    // acks `connected`, no ticker ever follows, the watchdog recycles it every ~24 s.
+    // statusSinceMs resets on every cycle; the silence clock must not.
+    const { client, sockets, tick } = makeClient({ staleReconnectMs: 20_000 });
+    expect(client.healthSummary().tickerSilenceMs).toBeNull(); // never started
+    client.start();
+    for (let i = 0; i < 3; i++) {
+      sockets[i]!.open();
+      sockets[i]!.message('40{"sid":"s"}');
+      sockets[i]!.message('42["connected",{}]');
+      tick(30_000);
+      vi.advanceTimersByTime(6000); // 5 s watchdog recycles the silent socket
+      vi.advanceTimersByTime(50); // past the 10 ms backoff
+    }
+    expect(sockets.length).toBe(4);
+    const h = client.healthSummary();
+    expect(h.tickerSilenceMs).toBe(90_000);
+    expect(h.lastTickerAgeMs).toBeNull();
+    client.stop();
+    expect(client.healthSummary().tickerSilenceMs).toBeNull();
+  });
+
+  it('tickerSilenceMs resets when a ticker arrives', () => {
+    const { client, sockets, tick } = makeClient();
+    client.start();
+    sockets[0]!.open();
+    tick(45_000);
+    expect(client.healthSummary().tickerSilenceMs).toBe(45_000);
+    sockets[0]!.message('42["tickerPriceSnapshot",[{"symbol":"SOL/USD","price":1,"publishTime":1}]]');
+    expect(client.healthSummary().tickerSilenceMs).toBe(0);
+    tick(2_000);
+    expect(client.healthSummary().tickerSilenceMs).toBe(2_000);
+    client.stop();
+  });
+
   it('stop() prevents any further reconnects', () => {
     const { client, sockets } = makeClient({ backoffBaseMs: 10 });
     client.start();

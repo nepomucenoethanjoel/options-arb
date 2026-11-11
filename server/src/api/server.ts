@@ -23,9 +23,15 @@ export interface ApiDeps {
   olivePools?: { latest(): OlivePoolSnapshot[] };
 }
 
-type RealtimeHealthLike = { status: string; statusSinceMs?: number; lastFrameAgeMs: number | null; assets: string[] };
+type RealtimeHealthLike = {
+  status: string;
+  statusSinceMs?: number;
+  lastFrameAgeMs: number | null;
+  tickerSilenceMs?: number | null;
+  assets: string[];
+};
 
-/** A realtime stream not live for this long degrades health. */
+/** A realtime stream not live — or live but delivering no prices — for this long degrades health. */
 const REALTIME_DEGRADED_AFTER_MS = 120_000;
 
 export interface HealthRollup {
@@ -65,10 +71,15 @@ export function buildHealthRollup(input: {
   if (health.lastCycleMs != null && now - health.lastCycleMs > 3 * input.pollIntervalMs) {
     reasons.push(`cycle_stale_${Math.round((now - health.lastCycleMs) / 1000)}s`);
   }
-  if (realtime && realtime.status !== 'live' && realtime.status !== 'stopped') {
+  if (realtime && realtime.status !== 'stopped') {
     const since = realtime.statusSinceMs;
-    if (since == null || now - since > REALTIME_DEGRADED_AFTER_MS) {
+    const statusStuck =
+      realtime.status !== 'live' && (since == null || now - since > REALTIME_DEGRADED_AFTER_MS);
+    if (statusStuck) {
       reasons.push(`realtime_${realtime.status}${since != null ? `_${Math.round((now - since) / 1000)}s` : ''}`);
+    } else if (realtime.tickerSilenceMs != null && realtime.tickerSilenceMs > REALTIME_DEGRADED_AFTER_MS) {
+      // Status alone is not enough: a reconnect loop resets statusSinceMs every cycle.
+      reasons.push(`realtime_no_ticker_${Math.round(realtime.tickerSilenceMs / 1000)}s`);
     }
   }
   if (input.oliveCaveats.includes('market_file_stale')) reasons.push('market_file_stale');
