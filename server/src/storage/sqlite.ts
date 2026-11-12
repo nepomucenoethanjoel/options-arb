@@ -2,7 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { Venue, VenueHealth } from '@options-arb/shared';
-import type { EpisodeRecord, EpisodeTier, SignalRecord, SpreadHistoryPoint, Storage } from './index';
+import type { EpisodeBatch, EpisodeCursor, EpisodeRecord, EpisodeTier, SignalRecord, SpreadHistoryPoint, Storage } from './index';
 
 /**
  * SQLite-backed Storage using Node's built-in `node:sqlite` (no native addon
@@ -10,6 +10,14 @@ import type { EpisodeRecord, EpisodeTier, SignalRecord, SpreadHistoryPoint, Stor
  * writes each cycle. auto_vacuum=INCREMENTAL + post-prune incremental_vacuum
  * keeps the file size tracking live data instead of its historical peak.
  */
+const EPISODE_COLUMNS = `id, pair_key, underlying, buy_venue, sell_venue, tier, start_ts, end_ts,
+  peak_honest_usdc, peak_quoted_usdc, peak_size, cycles`;
+/** Keyset pages in (start_ts, end_ts, id) order = idx_episodes_start_end order: no sort, no OFFSET. */
+export const EPISODE_BATCH_FIRST_SQL = `SELECT ${EPISODE_COLUMNS} FROM episodes INDEXED BY idx_episodes_start_end
+  WHERE end_ts >= ? ORDER BY start_ts, end_ts, id LIMIT ?`;
+export const EPISODE_BATCH_AFTER_SQL = `SELECT ${EPISODE_COLUMNS} FROM episodes INDEXED BY idx_episodes_start_end
+  WHERE end_ts >= ? AND (start_ts, end_ts, id) > (?, ?, ?) ORDER BY start_ts, end_ts, id LIMIT ?`;
+
 export class SqliteStorage implements Storage {
   private readonly db: DatabaseSync;
   private readonly insertSignal;
@@ -74,6 +82,9 @@ export class SqliteStorage implements Storage {
         cycles INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_episodes_end ON episodes(end_ts);
+      -- Batched reads in start order (readEpisodeBatch): (start_ts, end_ts, id) is the cursor, and the
+      -- index carries end_ts so the window filter never touches table rows it will discard.
+      CREATE INDEX IF NOT EXISTS idx_episodes_start_end ON episodes(start_ts, end_ts);
     `);
     const columns: Array<[string, string]> = [
       ['costs_usdc', 'REAL'],
@@ -180,33 +191,43 @@ export class SqliteStorage implements Storage {
     }
   }
 
+  /** Materializes every match: for small windows and tests only. The API reads in batches. */
   getEpisodes(sinceTs: number): EpisodeRecord[] {
-    return [...this.iterateEpisodes(sinceTs)];
+    const out: EpisodeRecord[] = [];
+    let cursor: EpisodeCursor | null = null;
+    do {
+      const batch = this.readEpisodeBatch(sinceTs, cursor, 10_000);
+      out.push(...batch.rows);
+      cursor = batch.next;
+    } while (cursor);
+    return out;
   }
 
-  *iterateEpisodes(sinceTs: number): Generator<EpisodeRecord> {
-    const rows = this.db
-      .prepare(
-        `SELECT pair_key, underlying, buy_venue, sell_venue, tier, start_ts, end_ts,
-           peak_honest_usdc, peak_quoted_usdc, peak_size, cycles
-         FROM episodes WHERE end_ts >= ? ORDER BY start_ts ASC`,
-      )
-      .iterate(sinceTs) as Iterable<Record<string, unknown>>;
-    for (const r of rows) {
-      yield {
-        pairKey: r.pair_key as string,
-        underlying: r.underlying as string,
-        buyVenue: r.buy_venue as Venue,
-        sellVenue: r.sell_venue as Venue,
-        tier: r.tier as EpisodeTier,
-        startTs: r.start_ts as number,
-        endTs: r.end_ts as number,
-        peakHonestUsdc: r.peak_honest_usdc as number,
-        peakQuotedUsdc: r.peak_quoted_usdc as number,
-        peakSize: (r.peak_size as number | null) ?? null,
-        cycles: r.cycles as number,
-      };
-    }
+  readEpisodeBatch(sinceTs: number, after: EpisodeCursor | null, limit: number): EpisodeBatch {
+    const stmt = this.db.prepare(after ? EPISODE_BATCH_AFTER_SQL : EPISODE_BATCH_FIRST_SQL);
+    const rows = (after
+      ? stmt.all(sinceTs, after.startTs, after.endTs, after.id, limit)
+      : stmt.all(sinceTs, limit)) as Array<Record<string, unknown>>;
+    const records = rows.map((r) => ({
+      pairKey: r.pair_key as string,
+      underlying: r.underlying as string,
+      buyVenue: r.buy_venue as Venue,
+      sellVenue: r.sell_venue as Venue,
+      tier: r.tier as EpisodeTier,
+      startTs: r.start_ts as number,
+      endTs: r.end_ts as number,
+      peakHonestUsdc: r.peak_honest_usdc as number,
+      peakQuotedUsdc: r.peak_quoted_usdc as number,
+      peakSize: (r.peak_size as number | null) ?? null,
+      cycles: r.cycles as number,
+    }));
+    const last = rows[rows.length - 1];
+    return {
+      rows: records,
+      next: rows.length === limit && last
+        ? { startTs: last.start_ts as number, endTs: last.end_ts as number, id: last.id as number }
+        : null,
+    };
   }
 
   /** Signals only: episodes are small and are the long-run evidence, so they are never pruned. */

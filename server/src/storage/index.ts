@@ -53,6 +53,19 @@ export interface EpisodeRecord {
   cycles: number;
 }
 
+/** Position after the last row of a page (the table's sort key). */
+export interface EpisodeCursor {
+  startTs: number;
+  endTs: number;
+  id: number;
+}
+
+export interface EpisodeBatch {
+  rows: EpisodeRecord[];
+  /** Cursor for the next page, or null when this page was the last. */
+  next: EpisodeCursor | null;
+}
+
 export interface EpisodeSummaryRow {
   tier: EpisodeTier;
   underlying: string;
@@ -81,14 +94,15 @@ export interface Storage {
   getSpreadHistory(pairKey: string, sinceTs: number): SpreadHistoryPoint[];
   countSignals(): number;
   recordEpisodes(rows: EpisodeRecord[]): void;
-  /** Materializes every match: only for small windows and tests. The API uses iterateEpisodes. */
+  /** Materializes every match: only for small windows and tests. The API reads in batches. */
   getEpisodes(sinceTs: number): EpisodeRecord[];
   /**
-   * Episodes ending at or after sinceTs in ascending start order, one row at a time. The table gains
-   * ~65k rows/day; materializing a week of them overran the 256 MB heap. Consume it synchronously (the
-   * statement is open on the shared connection while it runs).
+   * One page of episodes ending at or after sinceTs, in ascending (startTs, endTs, id) order, after the
+   * cursor of the previous page (null = from the start). The table gains ~65k rows/day; materializing a
+   * week of them overran the 256 MB heap, and one long synchronous pass froze the server for 7-14 s on
+   * the VPS. Each page is a complete query, so callers can yield between pages.
    */
-  iterateEpisodes(sinceTs: number): Iterable<EpisodeRecord>;
+  readEpisodeBatch(sinceTs: number, after: EpisodeCursor | null, limit: number): EpisodeBatch;
   prune(olderThanTs: number): void;
   close(): void;
 }

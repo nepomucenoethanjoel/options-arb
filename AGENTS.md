@@ -18,7 +18,7 @@ make a number look better.**
 
 ## Non-negotiable rules
 
-1. **The verification stack is load-bearing.** 293 tests (incl. a golden
+1. **The verification stack is load-bearing.** 297 tests (incl. a golden
    replay of a recorded live Olive × Derive cycle), typechecks in three
    workspaces, and `server/src/scripts/handcheck.ts` /
    `handcheck-books.ts` (live field
@@ -77,9 +77,11 @@ bash deploy/deploy.sh root@<vps>  # deploy: build locally + ship + restart
 - `server/src/olivePools.ts` — sweeps every Olive market for free pool capacity → `/api/olive-pools`, alerts when a hedgeable untracked pool is funded.
 - `server/src/episodes.ts` — gap episodes at cycle resolution (headline /
   reference / quote_only / parity) → `/api/episodes/summary`; never pruned, so the
-  table is far larger than the heap (~65k rows/day): summaries stream through
-  `iterateEpisodes` + `EpisodeSummarizer` — never `getEpisodes` + an array (that OOM'd
-  the server on 2026-11-11; `test/episodes-stream.test.ts` pins it under a capped heap).
+  table is far larger than the heap (~65k rows/day): summaries read it in pages
+  (`readEpisodeBatch` + `summarizeStoredEpisodes`, yielding to the event loop between
+  pages) — never `getEpisodes` + an array (that OOM'd the server on 2026-11-11), and never
+  one long synchronous pass (7.5 s freeze on the VPS). `test/episodes-stream.test.ts`
+  pins both: a capped-heap run and the page/yield behaviour.
 - Reference-only venues (`REFERENCE_VENUES`, default none) carry `reference_venue` (headline-blocking);
   informational flags (`smile_outlier`, `calendar_inversion`, parity rows) never
   reach the KPI. The KPI may use the fill model's best smaller Olive clip

@@ -8,7 +8,7 @@ import type WebSocket from 'ws';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { honestTotalNetUsdc, isHeadlineProfitable, isTwoLegExecutable, type Signal, type SignalKpis, type VenueHealthSnapshot } from '@options-arb/shared';
 import type { AppConfig } from '../config';
-import { summarizeEpisodeStream } from '../episodes';
+import { summarizeStoredEpisodes } from '../episodes';
 import type { OlivePoolSnapshot } from '../olivePools';
 import type { Orchestrator } from '../scheduler';
 import type { Storage } from '../storage';
@@ -266,9 +266,9 @@ export async function buildServer(deps: ApiDeps): Promise<FastifyInstance> {
     return { ts: orchestrator.latest?.ts ?? null, parity: q.underlying !== undefined ? all.filter((p) => p.underlying === underlying) : all };
   });
 
-  // The summary streams ~65k rows/day through one synchronous pass, which blocks the event loop for as
-  // long as it takes; a short cache keeps dashboard polls from repeating it.
-  const episodeSummaryCache = new Map<number, { at: number; body: unknown }>();
+  // The summary reads ~65k rows/day in pages, yielding between them (see summarizeStoredEpisodes). Concurrent
+  // and repeated requests share one computation for 30 s, so a polling dashboard never stacks passes.
+  const episodeSummaryCache = new Map<number, { at: number; body: Promise<unknown> }>();
   app.get('/api/episodes/summary', async (req) => {
     const q = req.query as { days?: string };
     const days = Math.min(90, Math.max(1, Number(q.days) || 7));
@@ -276,15 +276,18 @@ export async function buildServer(deps: ApiDeps): Promise<FastifyInstance> {
     if (hit && Date.now() - hit.at < EPISODE_SUMMARY_CACHE_MS) return hit.body;
     const sinceTs = Date.now() - days * 86_400_000;
     const open = orchestrator.episodes.snapshotOpen();
-    const body = {
+    const body = summarizeStoredEpisodes(storage, sinceTs, open, cfg.pollIntervalMs * 1.5).then((rows) => ({
       days,
       sinceTs,
       pollIntervalMs: cfg.pollIntervalMs,
       trackingSinceTs: orchestrator.startedAt,
       openCount: open.length,
-      rows: summarizeEpisodeStream(storage.iterateEpisodes(sinceTs), open, cfg.pollIntervalMs * 1.5),
-    };
+      rows,
+    }));
     episodeSummaryCache.set(days, { at: Date.now(), body });
+    body.catch(() => {
+      if (episodeSummaryCache.get(days)?.body === body) episodeSummaryCache.delete(days);
+    });
     return body;
   });
 

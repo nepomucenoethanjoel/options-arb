@@ -4,17 +4,18 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import { buildServer } from '../src/api/server';
 import type { AppConfig } from '../src/config';
-import { EpisodeSummarizer, summarizeEpisodeStream, summarizeEpisodes } from '../src/episodes';
+import { EpisodeSummarizer, summarizeEpisodes, summarizeStoredEpisodes } from '../src/episodes';
 import type { Orchestrator } from '../src/scheduler';
-import type { EpisodeRecord, EpisodeSummaryRow, EpisodeTier } from '../src/storage';
-import { SqliteStorage } from '../src/storage/sqlite';
+import type { EpisodeCursor, EpisodeRecord, EpisodeSummaryRow, EpisodeTier } from '../src/storage';
+import { EPISODE_BATCH_AFTER_SQL, EPISODE_BATCH_FIRST_SQL, SqliteStorage } from '../src/storage/sqlite';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
-/** The pre-2026-11-11 implementation (materialize, group, sort), kept as the reference the stream must match. */
+/** The pre-2026-11-11 implementation (materialize, group, sort), kept as the reference the paged one must match. */
 function referenceSummary(episodes: EpisodeRecord[], joinGapMs: number): EpisodeSummaryRow[] {
   const quantile = (sorted: number[], q: number) => (sorted.length === 0 ? 0 : sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))]!);
   const windowPeaks = (g: EpisodeRecord[]) => {
@@ -71,26 +72,84 @@ function randomEpisodes(n: number, seed: number): EpisodeRecord[] {
   });
 }
 
-describe('streaming episode summary', () => {
-  it('matches the old materializing implementation on random data, open episodes included', () => {
+async function withStorage<T>(fn: (storage: SqliteStorage, file: string) => Promise<T> | T): Promise<T> {
+  const dir = mkdtempSync(join(tmpdir(), 'options-arb-paged-'));
+  const file = join(dir, 'e.db');
+  const storage = new SqliteStorage(file);
+  try {
+    return await fn(storage, file);
+  } finally {
+    storage.close();
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // Windows may hold the file briefly
+    }
+  }
+}
+
+const noYield = async () => {};
+
+describe('paged episode summary', () => {
+  it('matches the old materializing implementation on random data, open episodes included', async () => {
     for (const seed of [1, 2, 3, 42]) {
-      const all = randomEpisodes(3_000, seed);
-      const open = all.filter((_, i) => i % 50 === 0); // a few still-running episodes, interleaved in time
-      const stored = all.filter((_, i) => i % 50 !== 0).sort((a, b) => a.startTs - b.startTs);
-      for (const gap of [0, 22_500, 200_000]) {
-        const expected = referenceSummary([...stored, ...open], gap);
-        expect(summarizeEpisodeStream(stored, open, gap)).toEqual(expected);
-        expect(summarizeEpisodes([...stored, ...open], gap)).toEqual(expected);
-      }
+      await withStorage(async (storage) => {
+        const all = randomEpisodes(3_000, seed);
+        const open = all.filter((_, i) => i % 50 === 0); // a few still-running episodes, interleaved in time
+        const stored = all.filter((_, i) => i % 50 !== 0);
+        storage.recordEpisodes(stored);
+        const ordered = [...stored].sort((a, b) => a.startTs - b.startTs);
+        for (const gap of [0, 22_500, 200_000]) {
+          const expected = referenceSummary([...ordered, ...open], gap);
+          for (const batch of [7, 97, 10_000]) { // page boundaries mid-window, mid-tie, and a single page
+            expect(await summarizeStoredEpisodes(storage, 0, open, gap, batch, noYield)).toEqual(expected);
+          }
+          expect(summarizeEpisodes([...ordered, ...open], gap)).toEqual(expected);
+        }
+      });
     }
   });
 
-  it('handles empty input and a single episode', () => {
-    expect(summarizeEpisodeStream([], [], 22_500)).toEqual([]);
-    const [e] = randomEpisodes(1, 7);
-    const [row] = summarizeEpisodeStream([e!], [], 22_500);
-    expect(row).toMatchObject({ count: 1, windows: 1, medianCycles: e!.cycles, p90Cycles: e!.cycles, maxCycles: e!.cycles });
-    expect(row!.sumWindowPeakUsdc).toBe(Math.round(Math.max(0, e!.peakHonestUsdc) * 100) / 100);
+  it('handles empty input and a single episode', async () => {
+    await withStorage(async (storage) => {
+      expect(await summarizeStoredEpisodes(storage, 0, [], 22_500)).toEqual([]);
+      const [e] = randomEpisodes(1, 7);
+      storage.recordEpisodes([e!]);
+      const [row] = await summarizeStoredEpisodes(storage, 0, [], 22_500);
+      expect(row).toMatchObject({ count: 1, windows: 1, medianCycles: e!.cycles, p90Cycles: e!.cycles, maxCycles: e!.cycles });
+      expect(row!.sumWindowPeakUsdc).toBe(Math.round(Math.max(0, e!.peakHonestUsdc) * 100) / 100);
+    });
+  });
+
+  it('yields to the event loop between pages', async () => {
+    await withStorage(async (storage) => {
+      storage.recordEpisodes(randomEpisodes(25, 11));
+      let yields = 0;
+      await summarizeStoredEpisodes(storage, 0, [], 22_500, 10, async () => {
+        yields++;
+      });
+      expect(yields).toBe(2); // pages of 10, 10, 5: control goes back after each full page
+    });
+  });
+
+  it('does not count an open episode twice when it closes mid-pass', async () => {
+    await withStorage(async (storage) => {
+      const base = randomEpisodes(40, 13).map((e) => ({
+        ...e, tier: 'headline' as const, buyVenue: 'olive' as const, sellVenue: 'coincall' as const, underlying: 'ETH',
+      }));
+      storage.recordEpisodes(base);
+      const open: EpisodeRecord = { ...base[0]!, pairKey: 'ETH-OPEN', startTs: 9_000_000, endTs: 9_000_000, peakHonestUsdc: 1, cycles: 1 };
+      let closed = false;
+      const rows = await summarizeStoredEpisodes(storage, 0, [open], 22_500, 8, async () => {
+        if (!closed) {
+          // the open episode finishes while we are between pages: it is written to the table
+          closed = true;
+          storage.recordEpisodes([{ ...open, endTs: 9_030_000, peakHonestUsdc: 2, cycles: 3 }]);
+        }
+      });
+      expect(closed).toBe(true);
+      expect(rows.reduce((a, r) => a + r.count, 0)).toBe(41); // 40 stored + the open one, once
+    });
   });
 
   it('keeps memory bounded by the number of routes, not episodes', () => {
@@ -100,43 +159,75 @@ describe('streaming episode summary', () => {
   });
 });
 
-describe('SqliteStorage.iterateEpisodes', () => {
-  it('is lazy, ordered by start, honours sinceTs, and agrees with getEpisodes', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'options-arb-iter-'));
-    const storage = new SqliteStorage(join(dir, 'e.db'));
-    try {
-      const rows = randomEpisodes(200, 5);
+describe('SqliteStorage.readEpisodeBatch', () => {
+  it('pages through every row exactly once, in (start, end, id) order, for any page size, ties included', async () => {
+    await withStorage((storage) => {
+      // many episodes sharing a start (and some sharing start and end): the cursor must break ties by id
+      const rows = randomEpisodes(300, 5).map((e, i) => ({
+        ...e, startTs: 1_000 * Math.floor(i / 7), endTs: 1_000 * Math.floor(i / 7) + (i % 3) * 15_000,
+      }));
       storage.recordEpisodes(rows);
-      const it = storage.iterateEpisodes(0);
-      expect(Array.isArray(it)).toBe(false);
-      const first = (it as Iterator<EpisodeRecord>).next();
-      expect(first.done).toBe(false);
-      const all = [...storage.iterateEpisodes(0)];
-      expect(all).toHaveLength(200);
-      expect(all.map((e) => e.startTs)).toEqual([...all.map((e) => e.startTs)].sort((a, b) => a - b));
-      expect(storage.getEpisodes(0)).toEqual(all);
-      const cut = 2_000_000;
-      expect([...storage.iterateEpisodes(cut)].every((e) => e.endTs >= cut)).toBe(true);
-    } finally {
-      storage.close();
-      try {
-        rmSync(dir, { recursive: true, force: true });
-      } catch {
-        // Windows may hold the file briefly
+      for (const limit of [1, 2, 7, 50, 299, 300, 301, 10_000]) {
+        const seen: EpisodeRecord[] = [];
+        let cursor: EpisodeCursor | null = null;
+        let pages = 0;
+        do {
+          const page = storage.readEpisodeBatch(0, cursor, limit);
+          expect(page.rows.length).toBeLessThanOrEqual(limit);
+          seen.push(...page.rows);
+          cursor = page.next;
+          pages++;
+        } while (cursor);
+        expect(seen).toHaveLength(300);
+        const keys = seen.map((e) => [e.startTs, e.endTs] as const);
+        expect(keys).toEqual([...keys].sort((a, b) => a[0] - b[0] || a[1] - b[1]));
+        expect(pages).toBe(Math.floor(300 / limit) + 1); // a page that is exactly full still hands back a cursor
       }
-    }
+      expect(storage.getEpisodes(0)).toHaveLength(300);
+    });
+  });
+
+  it('honours sinceTs on end_ts (an episode that started earlier but ends inside the window counts)', async () => {
+    await withStorage((storage) => {
+      const e = (startTs: number, endTs: number): EpisodeRecord => ({
+        pairKey: 'ETH-A', underlying: 'ETH', buyVenue: 'olive', sellVenue: 'coincall', tier: 'headline',
+        startTs, endTs, peakHonestUsdc: 1, peakQuotedUsdc: 1, peakSize: 1, cycles: 1,
+      });
+      storage.recordEpisodes([e(0, 100), e(50, 250), e(300, 300)]);
+      expect(storage.getEpisodes(200).map((x) => [x.startTs, x.endTs])).toEqual([[50, 250], [300, 300]]);
+      expect(storage.getEpisodes(301)).toEqual([]);
+    });
+  });
+
+  it('plans both queries on the (start_ts, end_ts) index without a sort', async () => {
+    await withStorage((_storage, file) => {
+      const db = new DatabaseSync(file, { readOnly: true });
+      try {
+        const cases: Array<[string, string, number[]]> = [
+          ['first', EPISODE_BATCH_FIRST_SQL, [0, 100]],
+          ['after', EPISODE_BATCH_AFTER_SQL, [0, 1, 2, 3, 100]],
+        ];
+        for (const [name, sql, args] of cases) {
+          const plan = db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...args).map((r) => String(r.detail)).join(' | ');
+          expect(plan, name).toContain('idx_episodes_start_end');
+          expect(plan, name).not.toMatch(/TEMP B-TREE/i);
+        }
+      } finally {
+        db.close();
+      }
+    });
   });
 });
 
 describe('/api/episodes/summary', () => {
-  it('summarizes through the stream, includes open episodes, and reuses the result briefly', async () => {
+  it('summarizes in pages, includes open episodes, and shares one computation between concurrent and repeated requests', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'options-arb-api-'));
     const storage = new SqliteStorage(join(dir, 'e.db'));
     let scans = 0;
-    const realIterate = storage.iterateEpisodes.bind(storage);
-    storage.iterateEpisodes = (sinceTs: number) => {
-      scans++;
-      return realIterate(sinceTs);
+    const realBatch = storage.readEpisodeBatch.bind(storage);
+    storage.readEpisodeBatch = (sinceTs, after, limit) => {
+      if (after === null) scans++; // one scan = one pass from the first page
+      return realBatch(sinceTs, after, limit);
     };
     const now = Date.now();
     const ep = (startTs: number, peak: number): EpisodeRecord => ({
@@ -149,13 +240,19 @@ describe('/api/episodes/summary', () => {
     const cfg = { underlyings: ['ETH'], pollIntervalMs: 15_000 } as unknown as AppConfig;
     const app = await buildServer({ cfg, orchestrator: orch, storage });
     try {
-      const a = (await app.inject({ url: '/api/episodes/summary?days=7' })).json();
+      const both = await Promise.all([
+        app.inject({ url: '/api/episodes/summary?days=7' }),
+        app.inject({ url: '/api/episodes/summary?days=7' }),
+      ]);
+      expect(scans).toBe(1); // two concurrent requests, one pass
+      const a = both[0].json();
+      expect(both[1].json()).toEqual(a);
       expect(a).toMatchObject({ days: 7, pollIntervalMs: 15_000, openCount: 1, trackingSinceTs: 1 });
       expect(a.rows).toHaveLength(1);
       expect(a.rows[0]).toMatchObject({ tier: 'headline', count: 3, windows: 3, sumWindowPeakUsdc: 12 }); // stored 2 + 3, open 7
       const b = (await app.inject({ url: '/api/episodes/summary?days=7' })).json();
       expect(b).toEqual(a);
-      expect(scans).toBe(1); // second request served from the cache
+      expect(scans).toBe(1); // served from the cache
       await app.inject({ url: '/api/episodes/summary?days=1' });
       expect(scans).toBe(2); // another window is its own entry
     } finally {
@@ -191,7 +288,7 @@ describe('heap regression (the 2026-11-11 crash)', () => {
     expect(r.out).toMatch(/heap out of memory/i);
   }, 120_000);
 
-  it('the streaming path summarizes the same 300k episodes under the same cap', () => {
+  it('the paged path summarizes the same 300k episodes under the same cap', () => {
     const r = run('stream');
     expect(r.code).toBe(0);
     expect(JSON.parse(r.out.trim().split('\n').pop()!)).toMatchObject({ mode: 'stream', count: 300_000 });

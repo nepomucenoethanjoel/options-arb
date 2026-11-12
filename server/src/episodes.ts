@@ -1,5 +1,5 @@
 import { HEADLINE_BLOCKING_FLAGS, honestTotalNetUsdc, type ParitySignal, type Signal, type Venue } from '@options-arb/shared';
-import type { EpisodeRecord, EpisodeSummaryRow, EpisodeTier, Storage } from './storage';
+import type { EpisodeCursor, EpisodeRecord, EpisodeSummaryRow, EpisodeTier, Storage } from './storage';
 
 /** The fields a tier decision needs — present on both a Signal and its alternatives. */
 interface PairResult {
@@ -221,18 +221,46 @@ export function summarizeEpisodes(episodes: EpisodeRecord[], joinGapMs = 0): Epi
   return s.rows();
 }
 
+/** Identity of an episode across the open snapshot and the table (an open one is written when it closes). */
+function episodeKey(e: EpisodeRecord): string {
+  return `${e.pairKey}|${e.tier}|${e.buyVenue}|${e.sellVenue}|${e.startTs}`;
+}
+
+const yieldToEventLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
+
 /**
- * Summary over the stored episodes without materializing them: `stored` must yield ascending startTs
- * (SqliteStorage.iterateEpisodes) and is consumed lazily; the few still-open episodes are merged in by
- * start time, stored first on ties.
+ * Summary over the stored episodes without materializing them or monopolizing the event loop: reads
+ * one page at a time (storage.readEpisodeBatch, ascending start) and hands control back between pages.
+ * One synchronous pass over a week of episodes froze the 2-vCPU server for 7.5 s (14 s for 90 days),
+ * past the watchdog's 10 s health timeout.
+ *
+ * The still-open episodes are merged in by start time (stored first on ties). An open episode that
+ * closes mid-pass is written to the table and would be read again: skipped by its key, since the open
+ * snapshot already carries it.
  */
-export function summarizeEpisodeStream(stored: Iterable<EpisodeRecord>, open: EpisodeRecord[], joinGapMs = 0): EpisodeSummaryRow[] {
+export async function summarizeStoredEpisodes(
+  storage: Pick<Storage, 'readEpisodeBatch'>,
+  sinceTs: number,
+  open: EpisodeRecord[],
+  joinGapMs = 0,
+  batchSize = 3_000,
+  yieldFn: () => Promise<void> = yieldToEventLoop,
+): Promise<EpisodeSummaryRow[]> {
   const s = new EpisodeSummarizer(joinGapMs);
   const pending = [...open].sort((a, b) => a.startTs - b.startTs);
+  const openKeys = new Set(open.map(episodeKey));
   let i = 0;
-  for (const e of stored) {
-    while (i < pending.length && pending[i]!.startTs < e.startTs) s.add(pending[i++]!);
-    s.add(e);
+  let cursor: EpisodeCursor | null = null;
+  for (;;) {
+    const page = storage.readEpisodeBatch(sinceTs, cursor, batchSize);
+    for (const e of page.rows) {
+      if (openKeys.size > 0 && openKeys.has(episodeKey(e))) continue;
+      while (i < pending.length && pending[i]!.startTs < e.startTs) s.add(pending[i++]!);
+      s.add(e);
+    }
+    if (!page.next) break;
+    cursor = page.next;
+    await yieldFn();
   }
   while (i < pending.length) s.add(pending[i++]!);
   return s.rows();
