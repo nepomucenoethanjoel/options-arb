@@ -181,26 +181,32 @@ export class SqliteStorage implements Storage {
   }
 
   getEpisodes(sinceTs: number): EpisodeRecord[] {
+    return [...this.iterateEpisodes(sinceTs)];
+  }
+
+  *iterateEpisodes(sinceTs: number): Generator<EpisodeRecord> {
     const rows = this.db
       .prepare(
         `SELECT pair_key, underlying, buy_venue, sell_venue, tier, start_ts, end_ts,
            peak_honest_usdc, peak_quoted_usdc, peak_size, cycles
          FROM episodes WHERE end_ts >= ? ORDER BY start_ts ASC`,
       )
-      .all(sinceTs) as Array<Record<string, unknown>>;
-    return rows.map((r) => ({
-      pairKey: r.pair_key as string,
-      underlying: r.underlying as string,
-      buyVenue: r.buy_venue as Venue,
-      sellVenue: r.sell_venue as Venue,
-      tier: r.tier as EpisodeTier,
-      startTs: r.start_ts as number,
-      endTs: r.end_ts as number,
-      peakHonestUsdc: r.peak_honest_usdc as number,
-      peakQuotedUsdc: r.peak_quoted_usdc as number,
-      peakSize: (r.peak_size as number | null) ?? null,
-      cycles: r.cycles as number,
-    }));
+      .iterate(sinceTs) as Iterable<Record<string, unknown>>;
+    for (const r of rows) {
+      yield {
+        pairKey: r.pair_key as string,
+        underlying: r.underlying as string,
+        buyVenue: r.buy_venue as Venue,
+        sellVenue: r.sell_venue as Venue,
+        tier: r.tier as EpisodeTier,
+        startTs: r.start_ts as number,
+        endTs: r.end_ts as number,
+        peakHonestUsdc: r.peak_honest_usdc as number,
+        peakQuotedUsdc: r.peak_quoted_usdc as number,
+        peakSize: (r.peak_size as number | null) ?? null,
+        cycles: r.cycles as number,
+      };
+    }
   }
 
   /** Signals only: episodes are small and are the long-run evidence, so they are never pruned. */

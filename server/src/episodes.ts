@@ -132,54 +132,108 @@ function strip({ seenCycle: _seen, ...rest }: OpenEpisode): EpisodeRecord {
   return rest;
 }
 
-function quantile(sorted: number[], q: number): number {
-  if (sorted.length === 0) return 0;
-  return sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))]!;
+/** k-th smallest of a histogram {value -> count} with the same index rule as indexing a sorted array. */
+function histQuantile(hist: Map<number, number>, n: number, q: number): number {
+  if (n === 0) return 0;
+  let k = Math.min(n - 1, Math.floor(q * n));
+  for (const v of [...hist.keys()].sort((a, b) => a - b)) {
+    const m = hist.get(v)!;
+    if (k < m) return v;
+    k -= m;
+  }
+  return 0;
 }
 
-/** Per (tier, underlying, venue pair): how often a gap appeared, how long it lasted (cycles), what it peaked at. */
+interface GroupAcc {
+  first: EpisodeRecord;
+  count: number;
+  cycleHist: Map<number, number>;
+  maxCycles: number;
+  best: EpisodeRecord;
+  windows: number;
+  windowPeakSum: number;
+  windowPeak: number;
+  windowEnd: number;
+}
+
 /**
- * Episodes of one route that overlap in time (or follow on the next cycle,
- * within joinGapMs) are one window: they share pools and books, so taking one
- * clip closes the rest. Σ = best peak per window — not a sum over contracts.
+ * Per (tier, underlying, venue pair): how often a gap appeared, how long it lasted (cycles), what it peaked at.
+ *
+ * Streaming: folds one episode at a time into running totals, so memory is bounded by the number of
+ * routes, not episodes (the table gains ~65k rows/day; materializing a week of them crashed the 256 MB
+ * heap). Episodes must arrive in ascending startTs order.
+ *
+ * Episodes of one route that overlap in time (or follow on the next cycle, within joinGapMs) are one
+ * window: they share pools and books, so taking one clip closes the rest. Σ = best peak per window — not
+ * a sum over contracts. Ties for `best` go to the earliest start.
  */
-function windowPeaks(g: EpisodeRecord[], joinGapMs: number): number[] {
-  const peaks: number[] = [];
-  let end = -Infinity;
-  for (const e of [...g].sort((a, b) => a.startTs - b.startTs)) {
-    if (e.startTs > end + joinGapMs) peaks.push(0);
-    peaks[peaks.length - 1] = Math.max(peaks[peaks.length - 1]!, e.peakHonestUsdc);
-    end = Math.max(end, e.endTs);
+export class EpisodeSummarizer {
+  private readonly groups = new Map<string, GroupAcc>();
+
+  constructor(private readonly joinGapMs = 0) {}
+
+  add(e: EpisodeRecord): void {
+    const k = `${e.tier}|${e.underlying}|${e.buyVenue}|${e.sellVenue}`;
+    let g = this.groups.get(k);
+    if (!g) {
+      g = { first: e, count: 0, cycleHist: new Map(), maxCycles: 0, best: e, windows: 0, windowPeakSum: 0, windowPeak: 0, windowEnd: -Infinity };
+      this.groups.set(k, g);
+    }
+    g.count++;
+    g.cycleHist.set(e.cycles, (g.cycleHist.get(e.cycles) ?? 0) + 1);
+    if (e.cycles > g.maxCycles) g.maxCycles = e.cycles;
+    if (e.peakHonestUsdc > g.best.peakHonestUsdc) g.best = e;
+    if (e.startTs > g.windowEnd + this.joinGapMs) {
+      g.windowPeakSum += g.windowPeak;
+      g.windows++;
+      g.windowPeak = 0;
+    }
+    g.windowPeak = Math.max(g.windowPeak, e.peakHonestUsdc);
+    g.windowEnd = Math.max(g.windowEnd, e.endTs);
   }
-  return peaks;
+
+  rows(): EpisodeSummaryRow[] {
+    const out: EpisodeSummaryRow[] = [];
+    for (const g of this.groups.values()) {
+      out.push({
+        tier: g.first.tier,
+        underlying: g.first.underlying,
+        buyVenue: g.first.buyVenue,
+        sellVenue: g.first.sellVenue,
+        count: g.count,
+        medianCycles: histQuantile(g.cycleHist, g.count, 0.5),
+        p90Cycles: histQuantile(g.cycleHist, g.count, 0.9),
+        maxCycles: g.maxCycles,
+        windows: g.windows,
+        sumWindowPeakUsdc: Math.round((g.windowPeakSum + g.windowPeak) * 100) / 100,
+        best: g.best,
+      });
+    }
+    const tierOrder: Record<EpisodeTier, number> = { headline: 0, parity: 1, reference: 2, quote_only: 3 };
+    return out.sort((a, b) => tierOrder[a.tier] - tierOrder[b.tier] || b.count - a.count);
+  }
 }
 
+/** Summary over an in-memory list (tests, small windows). Sorts by start; see EpisodeSummarizer. */
 export function summarizeEpisodes(episodes: EpisodeRecord[], joinGapMs = 0): EpisodeSummaryRow[] {
-  const groups = new Map<string, EpisodeRecord[]>();
-  for (const e of episodes) {
-    const k = `${e.tier}|${e.underlying}|${e.buyVenue}|${e.sellVenue}`;
-    const g = groups.get(k);
-    if (g) g.push(e);
-    else groups.set(k, [e]);
+  const s = new EpisodeSummarizer(joinGapMs);
+  for (const e of [...episodes].sort((a, b) => a.startTs - b.startTs)) s.add(e);
+  return s.rows();
+}
+
+/**
+ * Summary over the stored episodes without materializing them: `stored` must yield ascending startTs
+ * (SqliteStorage.iterateEpisodes) and is consumed lazily; the few still-open episodes are merged in by
+ * start time, stored first on ties.
+ */
+export function summarizeEpisodeStream(stored: Iterable<EpisodeRecord>, open: EpisodeRecord[], joinGapMs = 0): EpisodeSummaryRow[] {
+  const s = new EpisodeSummarizer(joinGapMs);
+  const pending = [...open].sort((a, b) => a.startTs - b.startTs);
+  let i = 0;
+  for (const e of stored) {
+    while (i < pending.length && pending[i]!.startTs < e.startTs) s.add(pending[i++]!);
+    s.add(e);
   }
-  const out: EpisodeSummaryRow[] = [];
-  for (const g of groups.values()) {
-    const cycles = g.map((e) => e.cycles).sort((a, b) => a - b);
-    const best = g.reduce((a, b) => (b.peakHonestUsdc > a.peakHonestUsdc ? b : a));
-    out.push({
-      tier: g[0]!.tier,
-      underlying: g[0]!.underlying,
-      buyVenue: g[0]!.buyVenue,
-      sellVenue: g[0]!.sellVenue,
-      count: g.length,
-      medianCycles: quantile(cycles, 0.5),
-      p90Cycles: quantile(cycles, 0.9),
-      maxCycles: cycles[cycles.length - 1]!,
-      windows: windowPeaks(g, joinGapMs).length,
-      sumWindowPeakUsdc: Math.round(windowPeaks(g, joinGapMs).reduce((a, p) => a + Math.max(0, p), 0) * 100) / 100,
-      best,
-    });
-  }
-  const tierOrder: Record<EpisodeTier, number> = { headline: 0, parity: 1, reference: 2, quote_only: 3 };
-  return out.sort((a, b) => tierOrder[a.tier] - tierOrder[b.tier] || b.count - a.count);
+  while (i < pending.length) s.add(pending[i++]!);
+  return s.rows();
 }

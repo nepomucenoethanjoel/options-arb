@@ -8,7 +8,7 @@ import type WebSocket from 'ws';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { honestTotalNetUsdc, isHeadlineProfitable, isTwoLegExecutable, type Signal, type SignalKpis, type VenueHealthSnapshot } from '@options-arb/shared';
 import type { AppConfig } from '../config';
-import { summarizeEpisodes } from '../episodes';
+import { summarizeEpisodeStream } from '../episodes';
 import type { OlivePoolSnapshot } from '../olivePools';
 import type { Orchestrator } from '../scheduler';
 import type { Storage } from '../storage';
@@ -30,6 +30,9 @@ type RealtimeHealthLike = {
   tickerSilenceMs?: number | null;
   assets: string[];
 };
+
+/** How long a computed /api/episodes/summary is reused. */
+const EPISODE_SUMMARY_CACHE_MS = 30_000;
 
 /** A realtime stream not live — or live but delivering no prices — for this long degrades health. */
 const REALTIME_DEGRADED_AFTER_MS = 120_000;
@@ -263,13 +266,26 @@ export async function buildServer(deps: ApiDeps): Promise<FastifyInstance> {
     return { ts: orchestrator.latest?.ts ?? null, parity: q.underlying !== undefined ? all.filter((p) => p.underlying === underlying) : all };
   });
 
+  // The summary streams ~65k rows/day through one synchronous pass, which blocks the event loop for as
+  // long as it takes; a short cache keeps dashboard polls from repeating it.
+  const episodeSummaryCache = new Map<number, { at: number; body: unknown }>();
   app.get('/api/episodes/summary', async (req) => {
     const q = req.query as { days?: string };
     const days = Math.min(90, Math.max(1, Number(q.days) || 7));
+    const hit = episodeSummaryCache.get(days);
+    if (hit && Date.now() - hit.at < EPISODE_SUMMARY_CACHE_MS) return hit.body;
     const sinceTs = Date.now() - days * 86_400_000;
     const open = orchestrator.episodes.snapshotOpen();
-    const episodes = [...storage.getEpisodes(sinceTs), ...open];
-    return { days, sinceTs, pollIntervalMs: cfg.pollIntervalMs, trackingSinceTs: orchestrator.startedAt, openCount: open.length, rows: summarizeEpisodes(episodes, cfg.pollIntervalMs * 1.5) };
+    const body = {
+      days,
+      sinceTs,
+      pollIntervalMs: cfg.pollIntervalMs,
+      trackingSinceTs: orchestrator.startedAt,
+      openCount: open.length,
+      rows: summarizeEpisodeStream(storage.iterateEpisodes(sinceTs), open, cfg.pollIntervalMs * 1.5),
+    };
+    episodeSummaryCache.set(days, { at: Date.now(), body });
+    return body;
   });
 
   app.get('/api/health', async () => {

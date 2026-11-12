@@ -81,7 +81,14 @@ export interface Storage {
   getSpreadHistory(pairKey: string, sinceTs: number): SpreadHistoryPoint[];
   countSignals(): number;
   recordEpisodes(rows: EpisodeRecord[]): void;
+  /** Materializes every match: only for small windows and tests. The API uses iterateEpisodes. */
   getEpisodes(sinceTs: number): EpisodeRecord[];
+  /**
+   * Episodes ending at or after sinceTs in ascending start order, one row at a time. The table gains
+   * ~65k rows/day; materializing a week of them overran the 256 MB heap. Consume it synchronously (the
+   * statement is open on the shared connection while it runs).
+   */
+  iterateEpisodes(sinceTs: number): Iterable<EpisodeRecord>;
   prune(olderThanTs: number): void;
   close(): void;
 }
