@@ -18,7 +18,7 @@ make a number look better.**
 
 ## Non-negotiable rules
 
-1. **The verification stack is load-bearing.** 297 tests (incl. a golden
+1. **The verification stack is load-bearing.** 302 tests (incl. a golden
    replay of a recorded live Olive × Derive cycle), typechecks in three
    workspaces, and `server/src/scripts/handcheck.ts` /
    `handcheck-books.ts` (live field
@@ -82,6 +82,9 @@ bash deploy/deploy.sh root@<vps>  # deploy: build locally + ship + restart
   pages) — never `getEpisodes` + an array (that OOM'd the server on 2026-11-11), and never
   one long synchronous pass (7.5 s freeze on the VPS). `test/episodes-stream.test.ts`
   pins both: a capped-heap run and the page/yield behaviour.
+  `count` is raw and flickery (a gap crossing the threshold is stored as many episodes), so
+  the summary also reports `oneCycleCount`, flicker-merged `mergedCount` and `sustainedCount`
+  (10+ min, $5+): quote the merged/sustained figures, not the raw count, as "how many gaps".
 - Reference-only venues (`REFERENCE_VENUES`, default none) carry `reference_venue` (headline-blocking);
   informational flags (`smile_outlier`, `calendar_inversion`, parity rows) never
   reach the KPI. The KPI may use the fill model's best smaller Olive clip

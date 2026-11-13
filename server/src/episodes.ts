@@ -144,6 +144,26 @@ function histQuantile(hist: Map<number, number>, n: number, q: number): number {
   return 0;
 }
 
+/** A gap lasting at least this long, peaking at least this high (honest USDC), is one a person could act on. */
+export const SUSTAINED_MIN_MS = 10 * 60_000;
+export const SUSTAINED_MIN_USDC = 5;
+
+/**
+ * Two episodes of one contract this close are the same gap flickering across the threshold (about two
+ * missed cycles at the configured interval, never under 90 s: real cycles run longer than the interval).
+ */
+export function flickerGapMs(pollIntervalMs: number): number {
+  return Math.max(90_000, 3 * pollIntervalMs);
+}
+
+interface Flicker {
+  start: number;
+  end: number;
+  peak: number;
+}
+
+const isSustained = (f: Flicker) => f.end - f.start >= SUSTAINED_MIN_MS && f.peak >= SUSTAINED_MIN_USDC;
+
 interface GroupAcc {
   first: EpisodeRecord;
   count: number;
@@ -154,6 +174,10 @@ interface GroupAcc {
   windowPeakSum: number;
   windowPeak: number;
   windowEnd: number;
+  /** Per contract: the flicker-merged episode currently being extended. */
+  contracts: Map<string, Flicker>;
+  merged: number;
+  sustained: number;
 }
 
 /**
@@ -166,18 +190,42 @@ interface GroupAcc {
  * Episodes of one route that overlap in time (or follow on the next cycle, within joinGapMs) are one
  * window: they share pools and books, so taking one clip closes the rest. Σ = best peak per window — not
  * a sum over contracts. Ties for `best` go to the earliest start.
+ *
+ * A gap that flickers across the threshold is stored as many episodes (one contract opened 4,345 in a
+ * week; 40% last a single cycle), so `count` inflates the number of opportunities. Alongside it:
+ * `mergedCount` joins episodes of one contract separated by at most flickerGapMs (peak taken across them),
+ * `oneCycleCount` is how many lasted a single cycle, and `sustainedCount` is merged episodes that lasted
+ * SUSTAINED_MIN_MS with a peak of at least SUSTAINED_MIN_USDC — the slice a person could act on.
+ * Memory stays bounded by routes × contracts, not episodes.
  */
 export class EpisodeSummarizer {
   private readonly groups = new Map<string, GroupAcc>();
 
-  constructor(private readonly joinGapMs = 0) {}
+  constructor(
+    private readonly joinGapMs = 0,
+    private readonly flickerGapMs = 0,
+  ) {}
 
   add(e: EpisodeRecord): void {
     const k = `${e.tier}|${e.underlying}|${e.buyVenue}|${e.sellVenue}`;
     let g = this.groups.get(k);
     if (!g) {
-      g = { first: e, count: 0, cycleHist: new Map(), maxCycles: 0, best: e, windows: 0, windowPeakSum: 0, windowPeak: 0, windowEnd: -Infinity };
+      g = {
+        first: e, count: 0, cycleHist: new Map(), maxCycles: 0, best: e, windows: 0, windowPeakSum: 0, windowPeak: 0,
+        windowEnd: -Infinity, contracts: new Map(), merged: 0, sustained: 0,
+      };
       this.groups.set(k, g);
+    }
+    const f = g.contracts.get(e.pairKey);
+    if (f && e.startTs <= f.end + this.flickerGapMs) {
+      f.end = Math.max(f.end, e.endTs);
+      f.peak = Math.max(f.peak, e.peakHonestUsdc);
+    } else {
+      if (f) {
+        g.merged++;
+        if (isSustained(f)) g.sustained++;
+      }
+      g.contracts.set(e.pairKey, { start: e.startTs, end: e.endTs, peak: e.peakHonestUsdc });
     }
     g.count++;
     g.cycleHist.set(e.cycles, (g.cycleHist.get(e.cycles) ?? 0) + 1);
@@ -195,12 +243,17 @@ export class EpisodeSummarizer {
   rows(): EpisodeSummaryRow[] {
     const out: EpisodeSummaryRow[] = [];
     for (const g of this.groups.values()) {
+      let sustained = g.sustained;
+      for (const f of g.contracts.values()) if (isSustained(f)) sustained++;
       out.push({
         tier: g.first.tier,
         underlying: g.first.underlying,
         buyVenue: g.first.buyVenue,
         sellVenue: g.first.sellVenue,
         count: g.count,
+        oneCycleCount: g.cycleHist.get(1) ?? 0,
+        mergedCount: g.merged + g.contracts.size,
+        sustainedCount: sustained,
         medianCycles: histQuantile(g.cycleHist, g.count, 0.5),
         p90Cycles: histQuantile(g.cycleHist, g.count, 0.9),
         maxCycles: g.maxCycles,
@@ -215,8 +268,8 @@ export class EpisodeSummarizer {
 }
 
 /** Summary over an in-memory list (tests, small windows). Sorts by start; see EpisodeSummarizer. */
-export function summarizeEpisodes(episodes: EpisodeRecord[], joinGapMs = 0): EpisodeSummaryRow[] {
-  const s = new EpisodeSummarizer(joinGapMs);
+export function summarizeEpisodes(episodes: EpisodeRecord[], joinGapMs = 0, flickerGap = 0): EpisodeSummaryRow[] {
+  const s = new EpisodeSummarizer(joinGapMs, flickerGap);
   for (const e of [...episodes].sort((a, b) => a.startTs - b.startTs)) s.add(e);
   return s.rows();
 }
@@ -245,8 +298,9 @@ export async function summarizeStoredEpisodes(
   joinGapMs = 0,
   batchSize = 3_000,
   yieldFn: () => Promise<void> = yieldToEventLoop,
+  flickerGap = 0,
 ): Promise<EpisodeSummaryRow[]> {
-  const s = new EpisodeSummarizer(joinGapMs);
+  const s = new EpisodeSummarizer(joinGapMs, flickerGap);
   const pending = [...open].sort((a, b) => a.startTs - b.startTs);
   const openKeys = new Set(open.map(episodeKey));
   let i = 0;

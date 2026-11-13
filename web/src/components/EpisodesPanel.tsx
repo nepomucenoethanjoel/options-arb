@@ -71,7 +71,11 @@ export function EpisodesPanel() {
           <div className="table-wrap"><table>
             <thead>
               <tr>
-                <th>Underlying</th><th>Pair</th><th className="num" title="Contract-level episodes">Episodes</th><th className="num" title="Overlapping or back-to-back episodes merged: one clip per window">Windows</th>
+                <th>Underlying</th><th>Pair</th><th className="num" title="Contract-level episodes as stored. A gap that flickers across the threshold is stored as many episodes, so this overstates how many opportunities there were.">Episodes</th>
+                <th className="num" title="One-cycle episodes as a share of all episodes: a quote that appeared for a single tick">1-cycle</th>
+                <th className="num" title="Episodes of one contract separated by about two missed cycles (never under 90 s) counted once, peak taken across them">Merged</th>
+                <th className="num" title="Merged episodes that lasted 10+ minutes and peaked at $5+ honest — the slice a person could act on">≥10m &amp; ≥$5</th>
+                <th className="num" title="Overlapping or back-to-back episodes merged: one clip per window">Windows</th>
                 <th className="num">Median</th><th className="num">p90</th><th className="num">Longest</th>
                 <th className="num">{tier === 'quote_only' ? 'Best quoted' : tier === 'parity' ? 'Σ best / window / ctr' : 'Σ best / window'}</th><th>Best episode</th>
               </tr>
@@ -82,6 +86,9 @@ export function EpisodesPanel() {
                   <td>{r.underlying}</td>
                   <td>buy {venueLabel(r.buyVenue)} · sell {venueLabel(r.sellVenue)}</td>
                   <td className="num">{r.count}</td>
+                  <td className="num">{r.count > 0 ? `${Math.round((100 * r.oneCycleCount) / r.count)}%` : '–'}</td>
+                  <td className="num">{r.mergedCount}</td>
+                  <td className="num">{r.sustainedCount}</td>
                   <td className="num">{r.windows}</td>
                   <td className="num">{duration(r.medianCycles, poll)}</td>
                   <td className="num">{duration(r.p90Cycles, poll)}</td>

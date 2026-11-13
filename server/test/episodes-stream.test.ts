@@ -8,15 +8,57 @@ import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import { buildServer } from '../src/api/server';
 import type { AppConfig } from '../src/config';
-import { EpisodeSummarizer, summarizeEpisodes, summarizeStoredEpisodes } from '../src/episodes';
+import {
+  EpisodeSummarizer, SUSTAINED_MIN_MS, SUSTAINED_MIN_USDC, flickerGapMs, summarizeEpisodes, summarizeStoredEpisodes,
+} from '../src/episodes';
 import type { Orchestrator } from '../src/scheduler';
 import type { EpisodeCursor, EpisodeRecord, EpisodeSummaryRow, EpisodeTier } from '../src/storage';
 import { EPISODE_BATCH_AFTER_SQL, EPISODE_BATCH_FIRST_SQL, SqliteStorage } from '../src/storage/sqlite';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
+type LegacyRow = Omit<EpisodeSummaryRow, 'oneCycleCount' | 'mergedCount' | 'sustainedCount'>;
+const legacy = (rows: EpisodeSummaryRow[]): LegacyRow[] =>
+  rows.map(({ oneCycleCount: _o, mergedCount: _m, sustainedCount: _s, ...rest }) => rest);
+
+/** Independent reference for the flicker metrics: group by route and contract, sort, merge, count. */
+function referenceFlicker(episodes: EpisodeRecord[], flickerGap: number) {
+  const out = new Map<string, { oneCycle: number; merged: number; sustained: number }>();
+  const routes = new Map<string, EpisodeRecord[]>();
+  for (const e of episodes) {
+    const k = `${e.tier}|${e.underlying}|${e.buyVenue}|${e.sellVenue}`;
+    routes.set(k, [...(routes.get(k) ?? []), e]);
+  }
+  for (const [k, g] of routes) {
+    const acc = { oneCycle: g.filter((e) => e.cycles === 1).length, merged: 0, sustained: 0 };
+    const byContract = new Map<string, EpisodeRecord[]>();
+    for (const e of g) byContract.set(e.pairKey, [...(byContract.get(e.pairKey) ?? []), e]);
+    for (const list of byContract.values()) {
+      const sorted = [...list].sort((a, b) => a.startTs - b.startTs);
+      let cur: { start: number; end: number; peak: number } | null = null;
+      const close = () => {
+        if (!cur) return;
+        acc.merged++;
+        if (cur.end - cur.start >= SUSTAINED_MIN_MS && cur.peak >= SUSTAINED_MIN_USDC) acc.sustained++;
+      };
+      for (const e of sorted) {
+        if (cur && e.startTs <= cur.end + flickerGap) {
+          cur.end = Math.max(cur.end, e.endTs);
+          cur.peak = Math.max(cur.peak, e.peakHonestUsdc);
+        } else {
+          close();
+          cur = { start: e.startTs, end: e.endTs, peak: e.peakHonestUsdc };
+        }
+      }
+      close();
+    }
+    out.set(k, acc);
+  }
+  return out;
+}
+
 /** The pre-2026-11-11 implementation (materialize, group, sort), kept as the reference the paged one must match. */
-function referenceSummary(episodes: EpisodeRecord[], joinGapMs: number): EpisodeSummaryRow[] {
+function referenceSummary(episodes: EpisodeRecord[], joinGapMs: number): LegacyRow[] {
   const quantile = (sorted: number[], q: number) => (sorted.length === 0 ? 0 : sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))]!);
   const windowPeaks = (g: EpisodeRecord[]) => {
     const peaks: number[] = [];
@@ -33,7 +75,7 @@ function referenceSummary(episodes: EpisodeRecord[], joinGapMs: number): Episode
     const k = `${e.tier}|${e.underlying}|${e.buyVenue}|${e.sellVenue}`;
     groups.set(k, [...(groups.get(k) ?? []), e]);
   }
-  const out: EpisodeSummaryRow[] = [];
+  const out: LegacyRow[] = [];
   for (const g of groups.values()) {
     const cycles = g.map((e) => e.cycles).sort((a, b) => a - b);
     const best = g.reduce((a, b) => (b.peakHonestUsdc > a.peakHonestUsdc ? b : a));
@@ -102,9 +144,9 @@ describe('paged episode summary', () => {
         for (const gap of [0, 22_500, 200_000]) {
           const expected = referenceSummary([...ordered, ...open], gap);
           for (const batch of [7, 97, 10_000]) { // page boundaries mid-window, mid-tie, and a single page
-            expect(await summarizeStoredEpisodes(storage, 0, open, gap, batch, noYield)).toEqual(expected);
+            expect(legacy(await summarizeStoredEpisodes(storage, 0, open, gap, batch, noYield))).toEqual(expected);
           }
-          expect(summarizeEpisodes([...ordered, ...open], gap)).toEqual(expected);
+          expect(legacy(summarizeEpisodes([...ordered, ...open], gap))).toEqual(expected);
         }
       });
     }
@@ -156,6 +198,73 @@ describe('paged episode summary', () => {
     const s = new EpisodeSummarizer(22_500);
     for (const e of randomEpisodes(2_000, 9).sort((a, b) => a.startTs - b.startTs)) s.add(e);
     expect(s.rows().length).toBeLessThanOrEqual(4 * 2 * 3); // tiers × underlyings × sell venues
+  });
+});
+
+describe('flicker-merged counts', () => {
+  const ep = (pairKey: string, startTs: number, endTs: number, peak: number, over: Partial<EpisodeRecord> = {}): EpisodeRecord => ({
+    pairKey, underlying: 'ETH', buyVenue: 'olive', sellVenue: 'coincall', tier: 'headline',
+    startTs, endTs, peakHonestUsdc: peak, peakQuotedUsdc: peak, peakSize: 1, cycles: 1 + (endTs - startTs) / 15_000, ...over,
+  });
+
+  it('merges one contract across a short gap, takes the peak across it, and uses the span as its duration', () => {
+    // three one-cycle blips each 2 missed cycles apart (45 s start-to-start), then a long quiet spell and one more blip
+    const blips = [ep('ETH-A', 0, 0, 2), ep('ETH-A', 45_000, 45_000, 6), ep('ETH-A', 90_000, 90_000, 1), ep('ETH-A', 700_000, 700_000, 9)];
+    const [row] = summarizeEpisodes(blips, 22_500, flickerGapMs(15_000));
+    expect(row).toMatchObject({ count: 4, oneCycleCount: 4, mergedCount: 2 });
+    expect(row!.sustainedCount).toBe(0); // the first merged span is 90 s, the second a single blip
+    // a merged span lasting 10+ minutes with a peak of $5+ counts; long but low does not; high but short does not
+    const times = Array.from({ length: 15 }, (_, i) => i * 45_000);
+    const long = times.map((t, i) => ep('ETH-LONG', t, t, i === 7 ? 6 : 1));
+    const lowLong = times.map((t) => ep('ETH-LOW', t, t, 1));
+    const [r2] = summarizeEpisodes([...long, ...lowLong, ep('ETH-SHORT', 0, 0, 50)], 22_500, flickerGapMs(15_000));
+    expect(r2).toMatchObject({ count: 31, mergedCount: 3, sustainedCount: 1 }); // only ETH-LONG: 630 s and peak 6
+  });
+
+  it('does not merge across contracts, tiers or venue pairs; with no flicker gap only overlaps merge', () => {
+    const eps = [ep('ETH-A', 0, 30_000, 3), ep('ETH-B', 15_000, 15_000, 4), ep('ETH-A', 45_000, 45_000, 2)];
+    expect(summarizeEpisodes(eps, 22_500, flickerGapMs(15_000))[0]).toMatchObject({ count: 3, mergedCount: 2 }); // A with A, B alone
+    expect(summarizeEpisodes(eps, 22_500)[0]).toMatchObject({ count: 3, mergedCount: 3 }); // no gap allowed: A ends at 30 s, restarts at 45 s
+    const rows = summarizeEpisodes([ep('ETH-A', 0, 0, 3), ep('ETH-A', 15_000, 15_000, 3, { tier: 'parity' })], 22_500, 90_000);
+    expect(rows.map((r) => r.mergedCount)).toEqual([1, 1]);
+  });
+
+  it('counts one-cycle episodes per route (the parity tier flickers most)', () => {
+    const rows = summarizeEpisodes(
+      [ep('P-1', 0, 0, 20, { tier: 'parity' }), ep('P-2', 5_000, 5_000, 20, { tier: 'parity' }), ep('P-3', 10_000, 40_000, 20, { tier: 'parity', cycles: 3 })],
+      22_500, flickerGapMs(15_000));
+    expect(rows[0]).toMatchObject({ tier: 'parity', count: 3, oneCycleCount: 2 });
+  });
+
+  it('flickerGapMs is about two missed cycles but never under 90 s', () => {
+    expect(flickerGapMs(15_000)).toBe(90_000);
+    expect(flickerGapMs(20_000)).toBe(90_000);
+    expect(flickerGapMs(60_000)).toBe(180_000);
+  });
+
+  it('matches an independent reference on random data across page sizes, open episodes included', async () => {
+    for (const seed of [4, 8, 15]) {
+      await withStorage(async (storage) => {
+        // few contracts and compressed start times so contracts really do repeat and flicker
+        const all = randomEpisodes(2_500, seed).map((e, i) => {
+          const startTs = Math.floor(e.startTs / 40);
+          return { ...e, pairKey: `ETH-${i % 9}`, startTs, endTs: startTs + (e.cycles - 1) * 15_000 };
+        });
+        const open = all.filter((_, i) => i % 60 === 0);
+        storage.recordEpisodes(all.filter((_, i) => i % 60 !== 0));
+        for (const gap of [0, 45_000, 90_000, 400_000]) {
+          const ref = referenceFlicker(all, gap);
+          for (const batch of [11, 3_000]) {
+            const rows = await summarizeStoredEpisodes(storage, 0, open, 22_500, batch, noYield, gap);
+            for (const r of rows) {
+              const want = ref.get(`${r.tier}|${r.underlying}|${r.buyVenue}|${r.sellVenue}`)!;
+              expect({ one: r.oneCycleCount, merged: r.mergedCount, sustained: r.sustainedCount }, `${r.tier} gap=${gap} batch=${batch}`)
+                .toEqual({ one: want.oneCycle, merged: want.merged, sustained: want.sustained });
+            }
+          }
+        }
+      });
+    }
   });
 });
 

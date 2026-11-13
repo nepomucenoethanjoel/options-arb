@@ -91,6 +91,12 @@ export interface EpisodeSummaryResponse {
     buyVenue: Venue;
     sellVenue: Venue;
     count: number;
+    /** Of `count`, how many lasted a single cycle. */
+    oneCycleCount: number;
+    /** Episodes of one contract separated by a short flicker gap, counted once. */
+    mergedCount: number;
+    /** Merged episodes lasting 10+ minutes with a peak of $5+ honest. */
+    sustainedCount: number;
     medianCycles: number;
     p90Cycles: number;
     maxCycles: number;

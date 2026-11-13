@@ -8,7 +8,7 @@ import type WebSocket from 'ws';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { honestTotalNetUsdc, isHeadlineProfitable, isTwoLegExecutable, type Signal, type SignalKpis, type VenueHealthSnapshot } from '@options-arb/shared';
 import type { AppConfig } from '../config';
-import { summarizeStoredEpisodes } from '../episodes';
+import { flickerGapMs, summarizeStoredEpisodes } from '../episodes';
 import type { OlivePoolSnapshot } from '../olivePools';
 import type { Orchestrator } from '../scheduler';
 import type { Storage } from '../storage';
@@ -276,7 +276,7 @@ export async function buildServer(deps: ApiDeps): Promise<FastifyInstance> {
     if (hit && Date.now() - hit.at < EPISODE_SUMMARY_CACHE_MS) return hit.body;
     const sinceTs = Date.now() - days * 86_400_000;
     const open = orchestrator.episodes.snapshotOpen();
-    const body = summarizeStoredEpisodes(storage, sinceTs, open, cfg.pollIntervalMs * 1.5).then((rows) => ({
+    const body = summarizeStoredEpisodes(storage, sinceTs, open, cfg.pollIntervalMs * 1.5, undefined, undefined, flickerGapMs(cfg.pollIntervalMs)).then((rows) => ({
       days,
       sinceTs,
       pollIntervalMs: cfg.pollIntervalMs,

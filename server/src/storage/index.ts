@@ -72,6 +72,12 @@ export interface EpisodeSummaryRow {
   buyVenue: Venue;
   sellVenue: Venue;
   count: number;
+  /** How many of `count` lasted a single cycle (flicker, or a one-tick quote). */
+  oneCycleCount: number;
+  /** Episodes of one contract separated by a short flicker gap, counted once (see EpisodeSummarizer). */
+  mergedCount: number;
+  /** Merged episodes lasting 10+ minutes with a peak of $5+ honest — the slice a person could act on. */
+  sustainedCount: number;
   medianCycles: number;
   p90Cycles: number;
   maxCycles: number;
