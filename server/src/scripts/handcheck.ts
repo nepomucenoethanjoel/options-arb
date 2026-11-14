@@ -159,6 +159,7 @@ async function pickTarget(): Promise<TargetPick> {
 /** Exit codes (scheduled runs, deploy/options-arb-handcheck.sh): 0 all ✓, 1 a
  *  pipeline field ✗ or an error, 3 nothing to check right now. */
 let failures = 0;
+const DRIFT_SKIP_BPS = 25;
 class NothingToCheck extends Error {}
 
 async function main() {
@@ -298,6 +299,22 @@ async function main() {
   const xchkVol = n(row?.legs?.olive?.quote?.iv) ?? market.vol;
   const xchk = deriveMark - bsPrice({ forward, strike: target.strike, tauYears: tau, vol: xchkVol, discountFactor: df, kind: target.kind });
 
+  // Spot drift between the server's cycle and this fetch moves Derive's quotes
+  // (first order: delta·dS) and the spot-proportional fees. Widen only the
+  // fields that depend on those, by exactly that first-order amount (×1.25 for
+  // gamma); a pipeline error (wrong source/scale/sign) is far larger. Past
+  // DRIFT_SKIP_BPS the pair is inconclusive, not failed.
+  const cycleIndex = n(row?.legs?.derive?.quote?.indexPrice);
+  const dS = cycleIndex != null ? Math.abs(index - cycleIndex) : 0;
+  const driftBps = cycleIndex ? (dS / cycleIndex) * 1e4 : 0;
+  if (driftBps > DRIFT_SKIP_BPS) {
+    throw new NothingToCheck(`${target.pairKey}: Derive index moved ${driftBps.toFixed(1)} bps since the cycle (${cycleIndex} → ${index}); a fresh-vs-cycle comparison is inconclusive`);
+  }
+  const derivePx = 1.25 * Math.abs(delta) * dS;
+  const feeMove = (cfg.deriveTakerFeeBps / 10_000 + 0.00025) * dS;
+  const capMove = target.kind === 'call' ? cfg.capitalBorrowRateApr * tau * dS : 0;
+  console.log(`spot drift since cycle: ${dS.toFixed(2)} (${driftBps.toFixed(1)} bps) → Derive-quote allowance ${derivePx.toFixed(4)}`);
+
   const cmp = (label: string, mine: number | null, theirs: number | null, tol = 0.02) => {
     if (mine == null || theirs == null) {
       if (mine !== theirs) failures++;
@@ -316,19 +333,20 @@ async function main() {
   // between the server's cycle and this fetch; the point is catching gross
   // pipeline errors (wrong vol source / scale), not tick-level drift.
   console.log(cmp('spreadVols', spreadVols, signal.ivSpreadVols, 0.5));
-  console.log(cmp('entryPrice', entry, signal.entryPriceUsdc, 0.02));
-  console.log(cmp('exitPrice', exit, signal.exitPriceUsdc, 0.02));
-  console.log(cmp('grossEdge', gross, signal.edgeUsdc, 0.02));
-  console.log(cmp('costs', costs, signal.costsUsdc, 0.02));
-  console.log(cmp('capitalCost', capital, signal.capitalCostUsdc, 0.05));
-  console.log(cmp('netEdge', net, signal.netEdgeUsdc, 0.03));
-  console.log(cmp('netAfterCapital', netAfterCapital, signal.netAfterCapitalUsdc, 0.05));
+  console.log(cmp('entryPrice', entry, signal.entryPriceUsdc, 0.02 + derivePx));
+  console.log(cmp('exitPrice', exit, signal.exitPriceUsdc, 0.02 + derivePx));
+  console.log(cmp('grossEdge', gross, signal.edgeUsdc, 0.02 + derivePx));
+  console.log(cmp('costs', costs, signal.costsUsdc, 0.02 + feeMove));
+  console.log(cmp('capitalCost', capital, signal.capitalCostUsdc, 0.05 + capMove));
+  console.log(cmp('netEdge', net, signal.netEdgeUsdc, 0.03 + derivePx + feeMove));
+  console.log(cmp('netAfterCapital', netAfterCapital, signal.netAfterCapitalUsdc, 0.05 + derivePx + feeMove + capMove));
   console.log(cmp('maxSize', size, signal.maxExecutableSize, 0.5));
-  console.log(cmp('totalNet', total, signal.totalNetUsdc, 1));
-  console.log(cmp('roiApyPct', apy, signal.roiApyPct, 0.5));
-  console.log(cmp('settlementBasis', basis, signal.settlementBasisUsdc, 0.01));
-  // 0.1: this field differences the (fresh) Derive mark against a reprice —
-  // mark drift between the cycle and this check lands here wholesale.
+  console.log(cmp('totalNet', total, signal.totalNetUsdc, 1 + (derivePx + feeMove + capMove) * Math.max(size ?? 0, 0)));
+  console.log(cmp('roiApyPct', apy, signal.roiApyPct, 0.5 + ((derivePx + feeMove + capMove) / collateral / tau) * 100));
+  // Relative: basis = |delta|·S·σ·√(0.5h) scales with the underlying, so a flat
+  // 0.01 USD false-failed every BTC/ETH pair (0.16% IV/spot drift = 0.011 on
+  // BTC). 1% of value still catches a wrong vol source/scale (those are ≥10%).
+  console.log(cmp('settlementBasis', basis, signal.settlementBasisUsdc, Math.max(0.01, 0.01 * Math.abs(signal.settlementBasisUsdc ?? basis))));
   console.log(cmp('syntheticCrossCheck', xchk, signal.syntheticCrossCheckUsdc, 0.1));
 
   // ── Executability verdicts: would the venue accept this trade? ───────────
