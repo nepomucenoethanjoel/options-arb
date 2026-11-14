@@ -159,7 +159,6 @@ async function pickTarget(): Promise<TargetPick> {
 /** Exit codes (scheduled runs, deploy/options-arb-handcheck.sh): 0 all ✓, 1 a
  *  pipeline field ✗ or an error, 3 nothing to check right now. */
 let failures = 0;
-const DRIFT_SKIP_BPS = 25;
 class NothingToCheck extends Error {}
 
 async function main() {
@@ -208,17 +207,22 @@ async function main() {
   }
 
   const op = t.option_pricing ?? {};
-  // Zero prices mean "no quote" on Derive (v3 zeroed books), same rule as the adapter.
-  const bid = n(t.b) != null && n(t.b)! > 0 ? n(t.b)! : null;
-  const ask = n(t.a) != null && n(t.a)! > 0 ? n(t.a)! : null;
-  const bidSize = bid != null ? n(t.B) ?? 0 : null;
-  const askSize = ask != null ? n(t.A) ?? 0 : null;
-  const deriveIv = n(op.i) ?? 0;
-  const deriveMark = n(op.m) ?? 0;
-  const index = n(t.I) ?? market.spot;
-  const forward = n(op.f) ?? index;
-  const df = n(op.df) ?? 1;
-  const delta = n(op.d) ?? 0;
+  // FRESH Derive ticker — used only for the live-parity check below. The
+  // pipeline recomputation uses the cycle's own stored Derive quote (same
+  // instant as the signal), so quote drift between the cycle and this fetch
+  // cannot masquerade as a pipeline error (it false-failed every BTC/ETH pair).
+  const fresh = {
+    bid: n(t.b) != null && n(t.b)! > 0 ? n(t.b)! : null,
+    ask: n(t.a) != null && n(t.a)! > 0 ? n(t.a)! : null,
+    bidSize: n(t.B) ?? 0,
+    askSize: n(t.A) ?? 0,
+    iv: n(op.i) ?? 0,
+    mark: n(op.m) ?? 0,
+    index: n(t.I) ?? market.spot,
+    forward: n(op.f) ?? (n(t.I) ?? market.spot),
+    df: n(op.df) ?? 1,
+    delta: n(op.d) ?? 0,
+  };
 
   // The server's own synth inputs for the AMM leg — reusing its exact spot
   // print isolates pipeline correctness from spot drift between fetches.
@@ -230,6 +234,21 @@ async function main() {
     throw new NothingToCheck(`${target.pairKey} is now ${signal.buyVenue}→${signal.sellVenue}; this script verifies Olive × Derive pairs`);
   }
   const serverSynthSpot = n(row?.legs?.olive?.quote?.indexPrice) ?? market.spot;
+  // Zero prices mean "no quote" on Derive (v3 zeroed books), same rule as the adapter.
+  const cq = row?.legs?.derive?.quote;
+  const cycleMode = cq != null && n(cq.indexPrice) != null && n(cq.ts) != null;
+  const pos = (v: unknown) => (n(v) != null && n(v)! > 0 ? n(v)! : null);
+  const bid = cycleMode ? pos(cq.bid) : fresh.bid;
+  const ask = cycleMode ? pos(cq.ask) : fresh.ask;
+  const bidSize = bid != null ? (cycleMode ? n(cq.bidSize) ?? 0 : fresh.bidSize) : null;
+  const askSize = ask != null ? (cycleMode ? n(cq.askSize) ?? 0 : fresh.askSize) : null;
+  const deriveIv = cycleMode ? n(cq.iv) ?? 0 : fresh.iv;
+  const deriveMark = cycleMode ? n(cq.mark) ?? 0 : fresh.mark;
+  const index = cycleMode ? n(cq.indexPrice)! : fresh.index;
+  const forward = cycleMode ? n(cq.forward) ?? index : fresh.forward;
+  const df = cycleMode ? n(cq.discountFactor) ?? 1 : fresh.df;
+  const delta = cycleMode ? n(cq.greeks?.delta) ?? 0 : fresh.delta;
+  console.log(cycleMode ? `recomputing from the cycle's own Derive quote (ts ${new Date(n(cq.ts)!).toISOString()})` : 'cycle Derive quote missing — recomputing from the FRESH ticker (drift-sensitive)');
 
   // ── Independent recomputation (engine semantics, live inputs) ────────────
   const expiryTs = Date.UTC(
@@ -238,7 +257,7 @@ async function main() {
     Number(target.expiryDate.slice(6, 8)),
     8,
   );
-  const now = Date.now();
+  const now = cycleMode ? n(cq.ts)! : Date.now();
   const tau = Math.max(0, (expiryTs - now) / (365 * 86_400_000));
   const r = target.kind === 'call' ? rates.token : -rates.usdc;
   const oliveForward = serverSynthSpot * Math.exp(r * tau);
@@ -299,22 +318,6 @@ async function main() {
   const xchkVol = n(row?.legs?.olive?.quote?.iv) ?? market.vol;
   const xchk = deriveMark - bsPrice({ forward, strike: target.strike, tauYears: tau, vol: xchkVol, discountFactor: df, kind: target.kind });
 
-  // Spot drift between the server's cycle and this fetch moves Derive's quotes
-  // (first order: delta·dS) and the spot-proportional fees. Widen only the
-  // fields that depend on those, by exactly that first-order amount (×1.25 for
-  // gamma); a pipeline error (wrong source/scale/sign) is far larger. Past
-  // DRIFT_SKIP_BPS the pair is inconclusive, not failed.
-  const cycleIndex = n(row?.legs?.derive?.quote?.indexPrice);
-  const dS = cycleIndex != null ? Math.abs(index - cycleIndex) : 0;
-  const driftBps = cycleIndex ? (dS / cycleIndex) * 1e4 : 0;
-  if (driftBps > DRIFT_SKIP_BPS) {
-    throw new NothingToCheck(`${target.pairKey}: Derive index moved ${driftBps.toFixed(1)} bps since the cycle (${cycleIndex} → ${index}); a fresh-vs-cycle comparison is inconclusive`);
-  }
-  const derivePx = 1.25 * Math.abs(delta) * dS;
-  const feeMove = (cfg.deriveTakerFeeBps / 10_000 + 0.00025) * dS;
-  const capMove = target.kind === 'call' ? cfg.capitalBorrowRateApr * tau * dS : 0;
-  console.log(`spot drift since cycle: ${dS.toFixed(2)} (${driftBps.toFixed(1)} bps) → Derive-quote allowance ${derivePx.toFixed(4)}`);
-
   const cmp = (label: string, mine: number | null, theirs: number | null, tol = 0.02) => {
     if (mine == null || theirs == null) {
       if (mine !== theirs) failures++;
@@ -333,21 +336,40 @@ async function main() {
   // between the server's cycle and this fetch; the point is catching gross
   // pipeline errors (wrong vol source / scale), not tick-level drift.
   console.log(cmp('spreadVols', spreadVols, signal.ivSpreadVols, 0.5));
-  console.log(cmp('entryPrice', entry, signal.entryPriceUsdc, 0.02 + derivePx));
-  console.log(cmp('exitPrice', exit, signal.exitPriceUsdc, 0.02 + derivePx));
-  console.log(cmp('grossEdge', gross, signal.edgeUsdc, 0.02 + derivePx));
-  console.log(cmp('costs', costs, signal.costsUsdc, 0.02 + feeMove));
-  console.log(cmp('capitalCost', capital, signal.capitalCostUsdc, 0.05 + capMove));
-  console.log(cmp('netEdge', net, signal.netEdgeUsdc, 0.03 + derivePx + feeMove));
-  console.log(cmp('netAfterCapital', netAfterCapital, signal.netAfterCapitalUsdc, 0.05 + derivePx + feeMove + capMove));
+  console.log(cmp('entryPrice', entry, signal.entryPriceUsdc, 0.02));
+  console.log(cmp('exitPrice', exit, signal.exitPriceUsdc, 0.02));
+  console.log(cmp('grossEdge', gross, signal.edgeUsdc, 0.02));
+  console.log(cmp('costs', costs, signal.costsUsdc, 0.02));
+  console.log(cmp('capitalCost', capital, signal.capitalCostUsdc, 0.05));
+  console.log(cmp('netEdge', net, signal.netEdgeUsdc, 0.03));
+  console.log(cmp('netAfterCapital', netAfterCapital, signal.netAfterCapitalUsdc, 0.05));
   console.log(cmp('maxSize', size, signal.maxExecutableSize, 0.5));
-  console.log(cmp('totalNet', total, signal.totalNetUsdc, 1 + (derivePx + feeMove + capMove) * Math.max(size ?? 0, 0)));
-  console.log(cmp('roiApyPct', apy, signal.roiApyPct, 0.5 + ((derivePx + feeMove + capMove) / collateral / tau) * 100));
+  console.log(cmp('totalNet', total, signal.totalNetUsdc, 1));
+  console.log(cmp('roiApyPct', apy, signal.roiApyPct, 0.5));
   // Relative: basis = |delta|·S·σ·√(0.5h) scales with the underlying, so a flat
   // 0.01 USD false-failed every BTC/ETH pair (0.16% IV/spot drift = 0.011 on
   // BTC). 1% of value still catches a wrong vol source/scale (those are ≥10%).
   console.log(cmp('settlementBasis', basis, signal.settlementBasisUsdc, Math.max(0.01, 0.01 * Math.abs(signal.settlementBasisUsdc ?? basis))));
   console.log(cmp('syntheticCrossCheck', xchk, signal.syntheticCrossCheckUsdc, 0.1));
+
+  // Live parity: the cycle's stored Derive quote vs the fresh ticker, so a
+  // wrong field mapping / scale in the adapter still fails. Allowed difference
+  // is the first-order move of the quote over the elapsed spot and IV drift
+  // (1.25·|delta|·dS gamma margin, + vega·dIV), + 1% of price for book noise.
+  if (cycleMode) {
+    const dS = Math.abs(fresh.index - index);
+    const vegaPerVol = (bsPrice({ forward, strike: target.strike, tauYears: tau, vol: deriveIv + 0.005, discountFactor: df, kind: target.kind }) -
+      bsPrice({ forward, strike: target.strike, tauYears: tau, vol: Math.max(1e-4, deriveIv - 0.005), discountFactor: df, kind: target.kind })) / 0.01;
+    const allow = (px: number) => 1.25 * Math.abs(delta) * dS + 1.25 * Math.abs(vegaPerVol) * Math.abs(fresh.iv - deriveIv) + 0.01 * px + 0.02;
+    console.log(`live parity (cycle quote vs fresh ticker; index drift ${dS.toFixed(2)} = ${(index ? (dS / index) * 1e4 : 0).toFixed(1)} bps):`);
+    if (dS / index > 0.0050) {
+      console.log('  index moved >50 bps since the cycle — parity inconclusive, skipped');
+    } else {
+      console.log('  ' + cmp('mark', fresh.mark, deriveMark, allow(deriveMark)));
+      if (bid != null && fresh.bid != null) console.log('  ' + cmp('bid', fresh.bid, bid, allow(bid)));
+      if (ask != null && fresh.ask != null) console.log('  ' + cmp('ask', fresh.ask, ask, allow(ask)));
+    }
+  }
 
   // ── Executability verdicts: would the venue accept this trade? ───────────
   // Strike band: docs + live-UI verified ±1σ (2026-09-29). Size: quantities
