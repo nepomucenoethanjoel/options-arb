@@ -204,3 +204,29 @@ describe('expectedFillVwap with fixed-rate state — Olive order mechanics (opti
     expect(curveOnly.vwapEntry).toBeLessThan(exact.vwapEntry);
   });
 });
+
+describe('quadratic curve shape above the kink (docs interest-rates since 2026-11-17, DATA_SOURCES row 79)', () => {
+  const ASSET_NEW: OliveRateCurvePoint[] = [
+    { utilizationBps: 0, rateBps: 0 }, { utilizationBps: 7500, rateBps: 2000 }, { utilizationBps: 10000, rateBps: 17000 },
+  ];
+  const USDC_NEW: OliveRateCurvePoint[] = [
+    { utilizationBps: 0, rateBps: 0 }, { utilizationBps: 7500, rateBps: 1000 }, { utilizationBps: 10000, rateBps: 16000 },
+  ];
+  it('reproduces the docs table', () => {
+    const table: Array<[number, number, number]> = [[2500, 666.67, 333.33], [8000, 2600, 1600], [8500, 4400, 3400], [9000, 7400, 6400], [9500, 11600, 10600], [9800, 14696, 13696], [10000, 17000, 16000]];
+    for (const [u, a, s] of table) {
+      expect(curveRateBpsAt(ASSET_NEW, u, 'quadratic')).toBeCloseTo(a, 1);
+      expect(curveRateBpsAt(USDC_NEW, u, 'quadratic')).toBeCloseTo(s, 1);
+    }
+  });
+  it('matches Olive’s own variable rate live (SOL state-history 2026-11-19 10:19 UTC: 86.15% → 4983 bp, USDC 91.69% → 7677 bp)', () => {
+    expect(oliveFixedQuoteBps(ASSET_NEW, null, 123.273331918, 106.202809999, 86_400, 0, 'quadratic')).toBe(4983);
+    expect(oliveFixedQuoteBps(USDC_NEW, null, 6889.357269, 6316.836027, 86_400, 0, 'quadratic')).toBe(7677);
+  });
+  it('averages exactly across the kink: 70% → 90% pays a variable part of 33.33% (docs example)', () => {
+    expect(oliveOrderRateBps(ASSET_NEW, null, 100, 70, 86_400, 20, 'quadratic')).toBe(3333);
+  });
+  it('defaults to the linear shape every earlier recording used', () => {
+    expect(curveRateBpsAt(ASSET_NEW, 9000)).toBeCloseTo(11000, 6);
+  });
+});

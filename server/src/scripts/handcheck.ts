@@ -62,7 +62,7 @@ async function call(method: string, params: Record<string, unknown>) {
   return res.json();
 }
 
-async function fetchMarketFile(sym: string): Promise<MarketFile> {
+async function fetchMarketFile(sym: string, curveShape: 'linear' | 'quadratic'): Promise<MarketFile> {
   let lastErr = 'unknown error';
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
@@ -112,7 +112,9 @@ async function fetchMarketFile(sym: string): Promise<MarketFile> {
           const [x1, y1] = uniq[i]!;
           if (util <= x1) {
             const [x0, y0] = uniq[i - 1]!;
-            return y0 + ((y1 - y0) * (util - x0)) / (x1 - x0);
+            const x = (util - x0) / (x1 - x0);
+            // Above the kink (segments after the first) the live curve is squared (row 79).
+            return y0 + (y1 - y0) * (curveShape === 'quadratic' && i >= 2 ? x * x : x);
           }
         }
         return uniq[uniq.length - 1]![1];
@@ -186,7 +188,7 @@ async function main() {
   const target = await pickTarget();
   console.log(`verifying ${target.pairKey} (${target.how})`);
 
-  const market = await fetchMarketFile(target.underlying);
+  const market = await fetchMarketFile(target.underlying, cfg.oliveRateCurveShape);
   // Live borrow-curve rates when present; config pins only as fallback.
   const rates = market.rates
     ? { token: market.rates.tokenApr, usdc: market.rates.usdcApr }

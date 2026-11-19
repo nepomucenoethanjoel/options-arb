@@ -1,6 +1,7 @@
 import {
   fixedRatePremiumBps,
   type IVSurfacePoint,
+  type OliveCurveShape,
   type OliveFixedRateSide,
   type OliveRateCurvePoint,
   type OptionInstrument,
@@ -41,6 +42,8 @@ export interface OliveAdapterOptions {
    * market-file spot while fresh. */
   realtime?: OliveRealtimeClient;
   realtimeMaxSpotAgeMs?: number;
+  /** Curve shape above the kink (OLIVE_RATE_CURVE_SHAPE; DATA_SOURCES row 79). Default 'linear'. */
+  curveShape?: OliveCurveShape;
   /** Underlying → Olive market symbol where they differ (TSLA → TSLAX, XAUT → PAXG). */
   symbolMap?: Record<string, string>;
 }
@@ -99,7 +102,7 @@ export class OliveAdapter implements OptionsVenueAdapter {
   private async getMarketFile(underlying: string): Promise<OliveMarketFileData | null> {
     const cached = this.marketFileCache.get(underlying);
     if (cached && Date.now() - cached.ts < MARKET_FILE_CACHE_TTL_MS) return cached.data;
-    const fetched = await fetchOliveMarketFile(OLIVE_MARKET_FILE_BASE, this.oliveSymbol(underlying)).catch(() => null);
+    const fetched = await fetchOliveMarketFile(OLIVE_MARKET_FILE_BASE, this.oliveSymbol(underlying), 8000, this.opts.curveShape ?? 'linear').catch(() => null);
     // A frozen file must not feed spot/vol/custody as if live — drop it so
     // every consumer takes the on-chain/Pyth fallback path instead.
     const stale = fetched != null && !isMarketFileFresh(fetched, Date.now());
@@ -141,6 +144,7 @@ export class OliveAdapter implements OptionsVenueAdapter {
     usdcCurve?: OliveRateCurvePoint[] | null;
     tokenFixedRate?: OliveFixedRateSide | null;
     usdcFixedRate?: OliveFixedRateSide | null;
+    curveShape?: OliveCurveShape;
   } | null {
     const cached = this.marketFileCache.get(underlying.toUpperCase());
     if (!cached?.ts || Date.now() - cached.ts > 60_000) return null;
@@ -155,6 +159,7 @@ export class OliveAdapter implements OptionsVenueAdapter {
       usdcCurve: d.curves?.usdc ?? null,
       tokenFixedRate: d.fixedRate?.token ?? null,
       usdcFixedRate: d.fixedRate?.usdc ?? null,
+      curveShape: d.curveShape,
     };
   }
 

@@ -45,6 +45,7 @@ async function main(): Promise<void> {
     volOverrides: cfg.oliveVolOverrides,
     symbolMap: cfg.oliveSymbolMap,
     strikeBoundSigmas: cfg.oliveStrikeBoundSigmas,
+    curveShape: cfg.oliveRateCurveShape,
     realtime: oliveRealtime,
     realtimeMaxSpotAgeMs: cfg.oliveRealtimeMaxSpotAgeMs,
   });

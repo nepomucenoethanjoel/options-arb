@@ -132,6 +132,8 @@ export interface AppConfig {
   solanaFeeUsdc: number;
   /** Olive option/chooser open fee: min(bps × qty × oracle spot, pct × premium) — pool-admin config (DATA_SOURCES rows 7, 77). */
   oliveFeeNotionalBps: number;
+  /** Olive variable-curve shape above the kink — not published in the market file (DATA_SOURCES row 79). */
+  oliveRateCurveShape: 'linear' | 'quadratic';
   oliveFeePremiumPct: number;
   capitalBorrowRateApr: number;
 
@@ -275,6 +277,8 @@ export function loadConfig(): AppConfig {
     solanaFeeUsdc: num('SOLANA_FEE_USDC', 0.05),
     // 5 bp on every non-capped fill since 2026-10-21 11:21 UTC (2.5 bp before) — DATA_SOURCES row 77.
     oliveFeeNotionalBps: num('OLIVE_FEE_NOTIONAL_BPS', 5),
+    // Quadratic above the kink since 2026-11-17 10:59 UTC (docs + every state-history bucket) — row 79.
+    oliveRateCurveShape: str('OLIVE_RATE_CURVE_SHAPE', 'quadratic') === 'linear' ? 'linear' : 'quadratic',
     oliveFeePremiumPct: num('OLIVE_FEE_PREMIUM_PCT', 10),
     capitalBorrowRateApr: num('CAPITAL_BORROW_RATE_APR', 0.08),
 

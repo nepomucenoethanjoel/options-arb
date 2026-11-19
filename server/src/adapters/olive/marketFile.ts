@@ -12,7 +12,7 @@
  * stale), pool AUM / entry claims (liquidity capacity), perp borrow curves,
  * recent trades, and the full on-chain pool snapshot.
  */
-import type { OliveFixedRateSide, OliveRateCurvePoint, Venue } from '@options-arb/shared';
+import { curveRateBpsAt, type OliveCurveShape, type OliveFixedRateSide, type OliveRateCurvePoint, type Venue } from '@options-arb/shared';
 import { fetchWithTimeout } from '../../util';
 
 export const OLIVE_MARKET_FILE_BASE = 'https://olive.exchange/public/market';
@@ -59,6 +59,8 @@ export interface OliveMarketFileData {
    * options and expiry futures (DATA_SOURCES row 78). Null when absent.
    */
   fixedRate: { token: OliveFixedRateSide | null; usdc: OliveFixedRateSide | null };
+  /** Curve shape the rates were evaluated with (config, not in the file — DATA_SOURCES row 79). */
+  curveShape: OliveCurveShape;
   /** File generation time (ms); null when the file carries no asOf. */
   asOfMs: number | null;
   /** Last on-chain EWMA write (ms) — the projection base. */
@@ -67,7 +69,7 @@ export interface OliveMarketFileData {
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-export function parseOliveMarketFile(json: any, underlying: string): OliveMarketFileData | null {
+export function parseOliveMarketFile(json: any, underlying: string, curveShape: OliveCurveShape = 'linear'): OliveMarketFileData | null {
   const u = underlying.toUpperCase();
   if (!json || typeof json !== 'object') return null;
   const num = (v: unknown): number | null => {
@@ -151,16 +153,9 @@ export function parseOliveMarketFile(json: any, underlying: string): OliveMarket
     const owned = custody && typeof custody === 'object' ? ownedNative(custody) : null;
     const locked = num(custody?.tokenLocked) ?? 0;
     if (owned == null || owned <= 0) return null;
-    const util = Math.min(10_000, Math.max(0, (locked / owned) * 10_000));
-    if (util <= nodes[0]!.utilizationBps) return nodes[0]!.rateBps;
-    for (let i = 1; i < nodes.length; i++) {
-      const [x1, y1] = [nodes[i]!.utilizationBps, nodes[i]!.rateBps];
-      if (util <= x1) {
-        const [x0, y0] = [nodes[i - 1]!.utilizationBps, nodes[i - 1]!.rateBps];
-        return y0 + ((y1 - y0) * (util - x0)) / (x1 - x0);
-      }
-    }
-    return nodes[nodes.length - 1]!.rateBps;
+    // On chain utilization and the rate are whole bps, rounded down (docs interest-rates).
+    const rate = curveRateBpsAt(nodes, Math.floor((locked / owned) * 10_000 + 1e-9), curveShape);
+    return rate == null ? null : Math.floor(rate + 1e-9);
   };
   const tokenCurve = raw?.underlyingCustody ? curveNodes(raw.underlyingCustody) : null;
   const usdcCurve = raw?.usdcCustody ? curveNodes(raw.usdcCustody) : null;
@@ -199,6 +194,7 @@ export function parseOliveMarketFile(json: any, underlying: string): OliveMarket
     rates,
     curves: { token: tokenCurve, usdc: usdcCurve },
     fixedRate,
+    curveShape,
     asOfMs,
     volOnChainMs,
     projectionBranch: volObj?.projectionBranch ?? null,
@@ -217,6 +213,7 @@ export async function fetchOliveMarketFile(
   base: string,
   underlying: string,
   timeoutMs = 8000,
+  curveShape: OliveCurveShape = 'linear',
 ): Promise<OliveMarketFileData | null> {
   try {
     const res = await fetchWithTimeout(
@@ -225,7 +222,7 @@ export async function fetchOliveMarketFile(
       timeoutMs,
     );
     if (!res.ok) return null;
-    return parseOliveMarketFile(await res.json(), underlying);
+    return parseOliveMarketFile(await res.json(), underlying, curveShape);
   } catch {
     return null;
   }

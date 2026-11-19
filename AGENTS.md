@@ -55,7 +55,8 @@ bash deploy/deploy.sh root@<vps>  # deploy: build locally + ship + restart
 - Pricing conventions (verified, do not alter without new evidence):
   Olive calls `F=S·e^(rL·T)`, `df=e^(−rL·T)`; puts `F=S·e^(−rS·T)`,
   `df=e^(+rS·T)`; rates = per-custody borrow curve at `locked/(owned − escrow)`
-  utilization **plus the fixed-rate premium** `β·U2d·t/(t+τ)` for the tenor, and an
+  utilization (whole bps, floored; quadratic above the kink since 2026-11-17 —
+  shape is config `OLIVE_RATE_CURVE_SHAPE`, not in the file, row 79) **plus the fixed-rate premium** `β·U2d·t/(t+τ)` for the tenor, and an
   order pays the Simpson average over its own lock (options: window from the
   pre-trade price) — `shared/src/math/olive.ts`, DATA_SOURCES rows 4, 78; strike
   band ±1σ (`K_L=S·e^(−rS·T−σ√T)`, `K_U=S·e^(rL·T+σ√T)`) at those zero-size tenor rates.

@@ -278,3 +278,27 @@ describe('parseOliveMarketFile — fixed-rate state and escrow (DATA_SOURCES row
     expect(d.rates!.tokenApr).toBeGreaterThan(parseOliveMarketFile(live(), 'SOL')!.rates!.tokenApr);
   });
 });
+
+describe('parseOliveMarketFile — curve shape (DATA_SOURCES row 79)', () => {
+  // Live SOL market file 2026-11-19 10:19 UTC; Olive's own state-history variable rates: 4983 / 7677 bp.
+  const live = {
+    ...fixture,
+    state: { payload: { snapshot: { ...fixture.state.payload.snapshot, rawOnChainPoolSnapshot: {
+      underlyingCustody: { decimals: 9, tokenOwned: '123273331918', tokenLocked: '106202809999', pendingEscrowNative: '0',
+        borrowRateCurve: { points: [{ utilizationRateBps: '0', borrowRateBps: '0' }, { utilizationRateBps: '7500', borrowRateBps: '2000' }, { utilizationRateBps: '10000', borrowRateBps: '17000' }, { utilizationRateBps: '10000', borrowRateBps: '17000' }] } },
+      usdcCustody: { decimals: 6, tokenOwned: '6889357269', tokenLocked: '6316836027', pendingEscrowNative: '0',
+        borrowRateCurve: { points: [{ utilizationRateBps: '0', borrowRateBps: '0' }, { utilizationRateBps: '7500', borrowRateBps: '1000' }, { utilizationRateBps: '10000', borrowRateBps: '16000' }, { utilizationRateBps: '10000', borrowRateBps: '16000' }] } },
+    } } } },
+  };
+  it('reproduces Olive’s variable rates with the quadratic shape, to the bp', () => {
+    const d = parseOliveMarketFile(live, 'SOL', 'quadratic')!;
+    expect(d.curveShape).toBe('quadratic');
+    expect(Math.round(d.rates!.tokenApr * 1e4)).toBe(4983);
+    expect(Math.round(d.rates!.usdcApr * 1e4)).toBe(7677);
+  });
+  it('the linear shape overstates them badly above the kink (what the app priced before this fix)', () => {
+    const d = parseOliveMarketFile(live, 'SOL', 'linear')!;
+    expect(d.rates!.tokenApr).toBeGreaterThan(0.86);
+    expect(d.rates!.usdcApr).toBeGreaterThan(1.1);
+  });
+});

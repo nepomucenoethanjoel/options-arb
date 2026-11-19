@@ -35,6 +35,7 @@ async function main(): Promise<void> {
     oliveMaxTenorDays: cfg.oliveMaxTenorDays,
     volOverrides: cfg.oliveVolOverrides,
     strikeBoundSigmas: cfg.oliveStrikeBoundSigmas,
+    curveShape: cfg.oliveRateCurveShape,
   });
 
   const cases = [];

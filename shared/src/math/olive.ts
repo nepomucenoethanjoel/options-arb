@@ -28,12 +28,23 @@ export interface OliveRateCurvePoint {
 }
 
 /**
- * Borrow rate (bps) at a utilization (bps) via piecewise-linear interpolation
- * over the curve nodes, clamped to the end rates outside the node range —
- * the same evaluation their pricer performs (verified 2026-09-28: SOL curve
- * at 20.8% util = 15.02% vs UI 15.04%; BTC USDC custody 88% util = 42.15%).
+ * How Olive interpolates its curve nodes above the kink (the first interior
+ * node). The market file publishes only the nodes, not the shape:
+ *  - 'linear': straight segments (verified 2026-09-28 → 2026-11-17 10:44 UTC);
+ *  - 'quadratic': straight to the kink, then r_k + (r_max − r_k)·x², x the
+ *    fraction of the way from the kink to the last node (docs interest-rates
+ *    since 2026-11-17; every above-kink state-history bucket from 10:59 UTC
+ *    that day matches it exactly — DATA_SOURCES row 79).
  */
-export function curveRateBpsAt(points: OliveRateCurvePoint[], utilizationBps: number): number | null {
+export type OliveCurveShape = 'linear' | 'quadratic';
+
+/**
+ * Borrow rate (bps) at a utilization (bps) over the curve nodes, clamped to
+ * the end rates outside the node range (verified 2026-09-28 for the linear
+ * shape: SOL 20.8% util = 15.02% vs UI 15.04%; BTC USDC custody 88% = 42.15%).
+ * `shape` defaults to 'linear', the shape every recording before 2026-11-17 used.
+ */
+export function curveRateBpsAt(points: OliveRateCurvePoint[], utilizationBps: number, shape: OliveCurveShape = 'linear'): number | null {
   if (points.length === 0) return null;
   const u = Math.min(10_000, Math.max(0, utilizationBps));
   if (u <= points[0]!.utilizationBps) return points[0]!.rateBps;
@@ -41,7 +52,9 @@ export function curveRateBpsAt(points: OliveRateCurvePoint[], utilizationBps: nu
     const p1 = points[i]!;
     if (u <= p1.utilizationBps) {
       const p0 = points[i - 1]!;
-      return p0.rateBps + ((p1.rateBps - p0.rateBps) * (u - p0.utilizationBps)) / (p1.utilizationBps - p0.utilizationBps);
+      const x = (u - p0.utilizationBps) / (p1.utilizationBps - p0.utilizationBps);
+      // Segments after the first (above the kink) are squared in the quadratic shape.
+      return p0.rateBps + (p1.rateBps - p0.rateBps) * (shape === 'quadratic' && i >= 2 ? x * x : x);
     }
   }
   return points[points.length - 1]!.rateBps;
@@ -96,10 +109,11 @@ export function oliveFixedQuoteBps(
   locked: number,
   tSeconds: number,
   extra = 0,
+  shape: OliveCurveShape = 'linear',
 ): number {
   const utilBps = Math.floor(((locked + extra) / owned) * 10_000 + 1e-9);
   return (
-    Math.floor((curveRateBpsAt(curve, utilBps) ?? 0) + 1e-9) +
+    Math.floor((curveRateBpsAt(curve, utilBps, shape) ?? 0) + 1e-9) +
     (fixedRate ? fixedRatePremiumBps(fixedRate, owned, tSeconds, extra) : 0)
   );
 }
@@ -121,9 +135,10 @@ export function oliveOrderRateBps(
   locked: number,
   tSeconds: number,
   lock: number,
+  shape: OliveCurveShape = 'linear',
 ): number | null {
   if (curve.length === 0 || !(owned > 0)) return null;
-  const r = (x: number): number => oliveFixedQuoteBps(curve, fixedRate, owned, locked, tSeconds, x);
+  const r = (x: number): number => oliveFixedQuoteBps(curve, fixedRate, owned, locked, tSeconds, x, shape);
   const r0 = r(0);
   if (!(lock > 0)) return r0;
   // Breakpoints: interior curve nodes (the kink) strictly inside the lock window. Olive does not
@@ -166,6 +181,8 @@ export interface MarginalFillInput {
    * when absent, the original curve-only tranche integration.
    */
   fixedRate?: OliveFixedRateSide | null;
+  /** Curve shape above the kink (default 'linear', as every pre-2026-11-17 recording). */
+  curveShape?: OliveCurveShape;
 }
 
 export interface MarginalFillResult {
@@ -204,7 +221,7 @@ export function expectedFillVwap(input: MarginalFillInput): MarginalFillResult |
       ? bsPrice({ forward: spot * Math.exp(r * tauYears), strike, tauYears, vol, discountFactor: Math.exp(-r * tauYears), kind: 'call' })
       : bsPrice({ forward: spot * Math.exp(-r * tauYears), strike, tauYears, vol, discountFactor: Math.exp(r * tauYears), kind: 'put' });
   const premiumAtUtil = (utilFraction: number): number => {
-    const rateBps = curveRateBpsAt(curve, utilFraction * 10_000);
+    const rateBps = curveRateBpsAt(curve, utilFraction * 10_000, input.curveShape);
     return premiumAtRate(rateBps != null ? rateBps / 10_000 : 0);
   };
 
@@ -218,7 +235,7 @@ export function expectedFillVwap(input: MarginalFillInput): MarginalFillResult |
     // pays p1 = p(r_avg over that window). For a target of `size` contracts the
     // budget is size·p1, so the window size·p1/p0 is solved by fixed point.
     const tSeconds = tauYears * PROTOCOL_YEAR_SECONDS;
-    const rate = (lock: number): number => (oliveOrderRateBps(curve, input.fixedRate!, owned, locked0, tSeconds, lock) ?? 0) / 10_000;
+    const rate = (lock: number): number => (oliveOrderRateBps(curve, input.fixedRate!, owned, locked0, tSeconds, lock, input.curveShape) ?? 0) / 10_000;
     const p0 = premiumAtRate(rate(0));
     if (!(p0 > 0)) return null;
     let p1 = p0;
@@ -227,7 +244,7 @@ export function expectedFillVwap(input: MarginalFillInput): MarginalFillResult |
       if (Math.abs(next - p1) <= 1e-12 * p1) { p1 = next; break; }
       p1 = next;
     }
-    const endRate = oliveFixedQuoteBps(curve, input.fixedRate, owned, locked0, tSeconds, size * perUnitLocked) / 10_000;
+    const endRate = oliveFixedQuoteBps(curve, input.fixedRate, owned, locked0, tSeconds, size * perUnitLocked, input.curveShape) / 10_000;
     return { quoteEntry: p0, vwapEntry: p1, endEntry: premiumAtRate(endRate), endUtilization: endUtil };
   }
   const TRANCHE_COUNT = 32;
