@@ -218,7 +218,7 @@ value, not live vol. Consequences encoded in the app:
 - **Fully collateralized** (calls backed by underlying, puts by USDC); keeper
   auto-exercises ITM at expiry; effectively European (manual ITM exercise
   allowed pre-expiry).
-- **Fees**: `min(2.5 bps of notional, 10% of premium)`, split 25/75 company/pool.
+- **Fees**: `min(5 bps of notional, 10% of premium)` since 2026-10-21 (2.5 bps before; matrix row 77), split 25/75 company/pool.
 - **Settlement price**: Stork oracle (`stork-fast`), with Pyth symbols as
   fallback — vs Derive's 30-min TWAP. Encoded as a signal caveat.
 - **Directionality caveat**: users buy options from the pool and sell them
@@ -378,7 +378,7 @@ No published SDK or IDL reference.
 | 4 | Pricing rates = borrow curve at `locked/owned` | `marketFile.ts` | **VERIFIED-LIVE** | 4 pools; the user's fill moved ZEC rS 30%→69.5% exactly as the curve predicts |
 | 5 | Custody locks: call = 1 underlying, put = K USDC | `marketFile.ts` | **VERIFIED-LIVE** | Fill locked $53.20 = K×qty exact; UI Lock display |
 | 6 | Strike band ±1σ incl. rate drift, n=m=1, tenor 1–365d | `olive.ts`, config | **VERIFIED-LIVE** | UI rejection 2026-09-29, implied 1.000σ from upper bound; docs open-option |
-| 7 | Olive fee `min(2.5bps × qty × ORACLE SPOT, 10% × premium)` | `signals/engine.ts` | **VERIFIED-LIVE** | Fill fee $0.011628 exact; docs option-fees (pool-admin-configurable) |
+| 7 | Olive fee `min(2.5bps × qty × ORACLE SPOT, 10% × premium)` — **superseded 2026-10-21 by row 77 (5 bp)** | `signals/engine.ts` | **VERIFIED-LIVE** (until 2026-10-21) | Fill fee $0.011628 exact; docs option-fees (pool-admin-configurable) |
 | 8 | Quantity tick 1e-6 | handcheck | **VERIFIED-LIVE** | Fill `quantityNative: 31854`, decimals 6 |
 | 9 | Premium flows back into custody (buying partially refills) | — (understanding) | **VERIFIED-LIVE** | Fill: `tokenOwned` +$11.00 = premium |
 | 10 | Own-fill moves the pricing rate (convex >90% util) | `execution_moves_rate` flag | **VERIFIED-LIVE** | Fill: rS 30→69.5% on ~$50 |
@@ -448,6 +448,7 @@ No published SDK or IDL reference.
 | 74 | CANDIDATE — **Stryke** (Arbitrum, Base, Robinhood Chain): CLAMM options priced off Uniswap v3 liquidity (not a model vol) plus a tokenized-stock "Premarket" (TSLA NVDA MSTR CRCL SPY); docs unreadable (GitBook redirect empty), no API found. **NO-GO for now**; the stock Premarket is worth a recheck with Olive's xStocks | — | **UNVERIFIED** | stryke.xyz, clamm.stryke.xyz (read 2026-11-06) |
 | 75 | REJECTED — **Typus** (Sui): options sold by Dutch auction out of vaults (no standing quote to compare), fees 10–15% of option price, SUI-ecosystem underlyings. **Panoptic**: perpetual options paid by streamia (no expiry) — a different instrument from dated options | — | **UNVERIFIED** (docs only; enough to reject) | docs.typus.finance options-specifications, modified-dutch-auction; panoptic.xyz/docs faq, product/streamia |
 | 76 | Olive realtime ticker stream (`subscribe_ticker` → `tickerPriceSnapshot`, ~1 s Stork spot) is RETIRED upstream: the gateway's `connected` ack no longer lists the event and nothing is pushed. The client reconnected every ~24 s while reporting `ok` health; spot falls back to the market file (row 52). `OLIVE_REALTIME=0` on the box; the 1 % early re-price trigger is inactive without it | `adapters/olive/realtime.ts`, `api/server.ts` `buildHealthRollup` | **VERIFIED-LIVE** (absence) | 2026-11-11 40 s socket probes from a home IP and from 192.236.184.31: ack lists 8 events, none a ticker; silent journal since 2026-10-27 18:52 UTC |
+| 77 | Olive option (and Simple Chooser) open fee = `min(5 bp × qty × ORACLE SPOT, 10% × premium)` since 2026-10-21 11:21 UTC (was 2.5 bp, row 7). Configurable (`OLIVE_FEE_NOTIONAL_BPS`, default 5; `OLIVE_FEE_PREMIUM_PCT`, default 10) because the docs call it pool-admin config. The golden replay keeps 2.5 bp: it replays a cycle recorded before the change, with its own stored `signalConfig` | `config.ts`, `scheduler.ts` `feeConfig`, `signals/fees.ts`, `scripts/handcheck.ts` | **VERIFIED-LIVE** | `/public/analytics/transactions.json` (SOL/BTC/ETH pools, read 2026-11-17): 156 option opens — `tradeFeeUsd / (qty × executionSpotPrice)` = 2.500 bp through 2026-10-21, 4.999–5.000 bp on every non-premium-capped fill since (latest 2026-11-17 16:09). E.g. SOL 69-C 2026-11-15 08:24:03: 25.000279 × 70.3168 × 5 bp = 0.878970 vs recorded 0.878968 (`test/olive-fee.test.ts`). docs protocol/pool-parameters "Option fee 0.05%"; docs exotics/fees chooser "min(0.0005 × Size, 0.10 × PremiumValue)" |
 
 | Date | Route / check | Result |
 |---|---|---|

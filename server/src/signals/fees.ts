@@ -49,8 +49,9 @@ export function feeModels(cfg: FeeConfig): Partial<Record<Venue, VenueFeeModel>>
       },
       perOrder: DERIVE_TAKER_ORDER_FEE_USDC,
     },
-    // Olive (docs option-fees + a live fill 2026-09-29): min(2.5bps × qty ×
-    // ORACLE SPOT, 10% × premium); one Solana tx opens the whole clip.
+    // Olive (docs option-fees, pool-admin config): min(bps × qty × ORACLE SPOT,
+    // pct × premium) — 5 bp since 2026-10-21 (2.5 bp before; DATA_SOURCES rows 7, 77);
+    // one Solana tx opens the whole clip.
     olive: {
       perContract: ({ legPrice, notional }) =>
         legPrice != null && legPrice > 0

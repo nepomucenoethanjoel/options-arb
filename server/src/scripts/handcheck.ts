@@ -283,14 +283,14 @@ async function main() {
   const spot = index; // engine: dq.indexPrice ?? spotByUnderlying ?? forward
   // Fee models (verified 2026-09-29):
   //   Derive taker: $0.50/order + min(3bps × notional, 12.5% × leg premium)
-  //   Olive:        min(2.5bps × qty × ORACLE SPOT, 10% × premium) — spot base for both kinds
+  //   Olive:        min(cfg bps (5 since 2026-10-21) × qty × ORACLE SPOT, 10% × premium) — spot base for both kinds
   const deriveLegPremium =
     spreadVols >= 0 ? bid ?? deriveMark : ask ?? deriveMark;
   let deriveFee = spot * (cfg.deriveTakerFeeBps / 10_000);
   if (deriveLegPremium != null && deriveLegPremium > 0) {
     deriveFee = Math.min(deriveFee, deriveLegPremium * 0.125);
   }
-  const oliveFee = olivePremium > 0 ? Math.min(spot * 0.00025, olivePremium * 0.1) : 0;
+  const oliveFee = olivePremium > 0 ? Math.min(spot * (cfg.oliveFeeNotionalBps / 10_000), olivePremium * (cfg.oliveFeePremiumPct / 100)) : 0;
   const costs = deriveFee + oliveFee; // Solana tx fee is per clip — in total below
   const collateral = target.kind === 'call' ? spot : target.strike;
   const capital = collateral * cfg.capitalBorrowRateApr * tau;

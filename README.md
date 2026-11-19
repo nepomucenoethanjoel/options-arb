@@ -129,7 +129,7 @@ Every signal carries a held-to-expiry profit estimate in USDC:
 entry  = cheap leg's take price   (Olive AMM premium, or Derive ask)
 exit   = rich leg's executable px (Derive BID when Derive vol is rich — not mid)
 gross  = exit − entry
-net    = gross − fees − gas                     (Derive taker bps, Olive min(2.5bps, 10% premium), Solana fee)
+net    = gross − fees − gas                     (Derive taker bps, Olive min(5bps, 10% premium), Solana fee)
 profit = net − collateral drag                  (Olive locks full collateral × borrow APR × tenor)
 total  = profit × size cap                      (min of Derive bid/ask touch size; Olive AMM depth unknown)
 ```

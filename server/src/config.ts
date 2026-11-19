@@ -130,6 +130,9 @@ export interface AppConfig {
   maxRelBookWidth: number;
   nearExpiryDays: number;
   solanaFeeUsdc: number;
+  /** Olive option/chooser open fee: min(bps × qty × oracle spot, pct × premium) — pool-admin config (DATA_SOURCES rows 7, 77). */
+  oliveFeeNotionalBps: number;
+  oliveFeePremiumPct: number;
   capitalBorrowRateApr: number;
 
   dataDir: string;
@@ -270,6 +273,9 @@ export function loadConfig(): AppConfig {
     maxRelBookWidth: num('MAX_REL_BOOK_WIDTH', 0.2),
     nearExpiryDays: num('NEAR_EXPIRY_DAYS', 2),
     solanaFeeUsdc: num('SOLANA_FEE_USDC', 0.05),
+    // 5 bp on every non-capped fill since 2026-10-21 11:21 UTC (2.5 bp before) — DATA_SOURCES row 77.
+    oliveFeeNotionalBps: num('OLIVE_FEE_NOTIONAL_BPS', 5),
+    oliveFeePremiumPct: num('OLIVE_FEE_PREMIUM_PCT', 10),
     capitalBorrowRateApr: num('CAPITAL_BORROW_RATE_APR', 0.08),
 
     dataDir: str('DATA_DIR', './data'),

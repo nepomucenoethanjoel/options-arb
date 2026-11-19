@@ -169,7 +169,7 @@ export async function buildServer(deps: ApiDeps): Promise<FastifyInstance> {
     underlyings: cfg.underlyings,
     fees: {
       deriveTakerFeeBps: cfg.deriveTakerFeeBps,
-      oliveFee: 'min(2.5 bps notional, 10% premium)',
+      oliveFee: `min(${cfg.oliveFeeNotionalBps} bps notional, ${cfg.oliveFeePremiumPct}% premium)`,
       solanaFeeUsdc: cfg.solanaFeeUsdc,
       capitalBorrowRateApr: cfg.capitalBorrowRateApr,
     },
