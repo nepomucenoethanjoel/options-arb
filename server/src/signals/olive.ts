@@ -1,4 +1,4 @@
-import { expectedFillVwap, type OptionKind, type OliveRateCurvePoint } from '@options-arb/shared';
+import { expectedFillVwap, type OliveFixedRateSide, type OptionKind, type OliveRateCurvePoint } from '@options-arb/shared';
 
 /** Olive pool custody for one underlying (market-file on-chain snapshot). */
 export interface OliveCustody {
@@ -8,6 +8,9 @@ export interface OliveCustody {
   usdcOwnedUsd?: number | null;
   tokenCurve?: OliveRateCurvePoint[] | null;
   usdcCurve?: OliveRateCurvePoint[] | null;
+  /** Live fixed-rate exposure per side; when present the fill is priced with Olive's exact order mechanics. */
+  tokenFixedRate?: OliveFixedRateSide | null;
+  usdcFixedRate?: OliveFixedRateSide | null;
 }
 
 /**
@@ -78,6 +81,7 @@ export function oliveExecutionImpact(input: {
     free,
     owned,
     perUnitLocked: perUnit,
+    fixedRate: kind === 'call' ? custody.tokenFixedRate ?? null : custody.usdcFixedRate ?? null,
   });
   if (fill && p.quotedMark > 0 && Math.abs(fill.quoteEntry - p.quotedMark) <= 0.02 * p.quotedMark) {
     return { movesRate, vwapEntry: fill.vwapEntry };

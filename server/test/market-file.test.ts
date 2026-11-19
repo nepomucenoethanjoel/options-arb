@@ -219,3 +219,62 @@ describe('parseOliveMarketFile — live borrow-curve rates', () => {
     expect(bare.curves.usdc).toBeNull();
   });
 });
+
+describe('parseOliveMarketFile — fixed-rate state and escrow (DATA_SOURCES row 78)', () => {
+  // Live SOL market file 2026-11-15 08:41 UTC (rawOnChainPoolSnapshot excerpt).
+  const live = (escrowNative = '0') => ({
+    ...fixture,
+    state: {
+      payload: {
+        snapshot: {
+          ...fixture.state.payload.snapshot,
+          rawOnChainPoolSnapshot: {
+            poolAccount: {
+              fixedRateBetaBps: '2500',
+              fixedRateStates: [
+                { liveExposureNative: '61661767000', timeValueNative: '402716025749638000' },
+                { liveExposureNative: '3063562823', timeValueNative: '1492554189343622' },
+              ],
+            },
+            underlyingCustody: {
+              decimals: 9, tokenOwned: '65671025202', tokenLocked: '61871766999', pendingEscrowNative: escrowNative,
+              borrowRateCurve: { points: [
+                { utilizationRateBps: '0', borrowRateBps: '0' },
+                { utilizationRateBps: '7500', borrowRateBps: '2000' },
+                { utilizationRateBps: '10000', borrowRateBps: '12000' },
+              ] },
+            },
+            usdcCustody: {
+              decimals: 6, tokenOwned: '3341817862', tokenLocked: '3063562823', pendingEscrowNative: '0',
+              borrowRateCurve: { points: [
+                { utilizationRateBps: '0', borrowRateBps: '0' },
+                { utilizationRateBps: '7500', borrowRateBps: '1000' },
+                { utilizationRateBps: '10000', borrowRateBps: '6000' },
+              ] },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  it('exposes each side’s fixed-rate exposure in display units', () => {
+    const d = parseOliveMarketFile(live(), 'SOL')!;
+    expect(d.fixedRate.token).toEqual({ betaBps: 2500, exposure: 61.661767, timeValue: 402716025.749638 });
+    expect(d.fixedRate.usdc!.exposure).toBeCloseTo(3063.562823, 6);
+    expect(d.fixedRate.usdc!.timeValue).toBeCloseTo(1492554189.343622, 3);
+    // Variable part unchanged: 94.21% token utilization → 96.85%; the premium is added per tenor at pricing.
+    expect(d.rates!.tokenApr).toBeCloseTo(0.9685, 3);
+  });
+
+  it('is null when the pool account carries no fixed-rate state', () => {
+    expect(parseOliveMarketFile(fixture, 'SOL')!.fixedRate).toEqual({ token: null, usdc: null });
+  });
+
+  it('excludes pending limit-order escrow from owned, free and utilization', () => {
+    const d = parseOliveMarketFile(live('1000000000'), 'SOL')!; // 1 SOL escrowed
+    expect(d.underlyingOwned).toBeCloseTo(64.671025202, 9);
+    expect(d.underlyingFree).toBeCloseTo(64.671025202 - 61.871766999, 9);
+    expect(d.rates!.tokenApr).toBeGreaterThan(parseOliveMarketFile(live(), 'SOL')!.rates!.tokenApr);
+  });
+});

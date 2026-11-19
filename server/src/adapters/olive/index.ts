@@ -1,5 +1,7 @@
 import {
+  fixedRatePremiumBps,
   type IVSurfacePoint,
+  type OliveFixedRateSide,
   type OliveRateCurvePoint,
   type OptionInstrument,
   type OptionKind,
@@ -137,6 +139,8 @@ export class OliveAdapter implements OptionsVenueAdapter {
     usdcOwnedUsd?: number | null;
     tokenCurve?: OliveRateCurvePoint[] | null;
     usdcCurve?: OliveRateCurvePoint[] | null;
+    tokenFixedRate?: OliveFixedRateSide | null;
+    usdcFixedRate?: OliveFixedRateSide | null;
   } | null {
     const cached = this.marketFileCache.get(underlying.toUpperCase());
     if (!cached?.ts || Date.now() - cached.ts > 60_000) return null;
@@ -149,6 +153,8 @@ export class OliveAdapter implements OptionsVenueAdapter {
       usdcOwnedUsd: d.usdcOwnedUsd,
       tokenCurve: d.curves?.token ?? null,
       usdcCurve: d.curves?.usdc ?? null,
+      tokenFixedRate: d.fixedRate?.token ?? null,
+      usdcFixedRate: d.fixedRate?.usdc ?? null,
     };
   }
 
@@ -270,6 +276,12 @@ export class OliveAdapter implements OptionsVenueAdapter {
     // the config pins are the fallback.
     const liveRates = file?.rates ?? null;
     if (liveRates) caveats.push('rates_live');
+    const withOwned = (side: OliveFixedRateSide | null | undefined, owned: number | null | undefined) =>
+      side && owned != null && owned > 0 ? { ...side, owned } : null;
+    const oliveFixedRate = liveRates && file
+      ? { token: withOwned(file.fixedRate?.token, file.underlyingOwned), usdc: withOwned(file.fixedRate?.usdc, file.usdcOwnedUsd) }
+      : null;
+    if (oliveFixedRate?.token || oliveFixedRate?.usdc) caveats.push('fixed_rate_premium_live');
 
     const state: VenueMarketState = {
       venue: 'olive',
@@ -278,6 +290,7 @@ export class OliveAdapter implements OptionsVenueAdapter {
       modelVol: vol,
       tokenRateApr: liveRates?.tokenApr ?? this.ratesFor(u).tokenApr,
       usdcRateApr: liveRates?.usdcApr ?? this.ratesFor(u).usdcApr,
+      oliveFixedRate,
       ts: Date.now(),
       source: file ? 'olive:market-file(live)' : this.rest ? 'olive:rest-health+onchain' : 'olive:onchain',
       caveats,
@@ -328,12 +341,29 @@ export class OliveAdapter implements OptionsVenueAdapter {
     return this.ratesFor(underlying);
   }
 
+  /**
+   * Zero-size fixed rates for a tenor: the variable rates plus each side's
+   * fixed-rate premium at that tenor (docs interest-rates; DATA_SOURCES row 78).
+   * Without live fixed-rate state, the variable rates alone (the prior model).
+   */
+  private tenorRates(underlying: string, state: VenueMarketState | null, tauYears: number): { tokenApr: number; usdcApr: number } {
+    const base = this.pricingRates(underlying, state);
+    const fr = state?.oliveFixedRate;
+    if (!fr) return base;
+    const tSeconds = tauYears * 365 * 86_400;
+    return {
+      tokenApr: base.tokenApr + (fr.token ? fixedRatePremiumBps(fr.token, fr.token.owned, tSeconds) / 10_000 : 0),
+      usdcApr: base.usdcApr + (fr.usdc ? fixedRatePremiumBps(fr.usdc, fr.usdc.owned, tSeconds) / 10_000 : 0),
+    };
+  }
+
   /** Live quotable strike band for an expiry, or null when unbounded. */
   getBounds(underlying: string, expiryTs: number, now = Date.now()): { lower: number; upper: number } | null {
     if (this.opts.strikeBoundSigmas <= 0) return null;
     const state = this.getCachedState(underlying);
     if (!state?.spot || state.modelVol == null) return null;
-    return oliveStrikeBounds(state.spot, state.modelVol, yearsBetween(now, expiryTs), this.pricingRates(underlying, state), this.opts.strikeBoundSigmas);
+    const tau = yearsBetween(now, expiryTs);
+    return oliveStrikeBounds(state.spot, state.modelVol, tau, this.tenorRates(underlying, state, tau), this.opts.strikeBoundSigmas);
   }
 
   /** Deterministic AMM quote at an arbitrary grid point. */
@@ -350,7 +380,7 @@ export class OliveAdapter implements OptionsVenueAdapter {
     if (state.modelVol == null) return { rejected: 'no_vol' };
     const tau = yearsBetween(now, expiryTs);
     if (tau * 365 > this.opts.oliveMaxTenorDays) return { rejected: 'beyond_max_tenor' };
-    const rates = this.pricingRates(underlying, state);
+    const rates = this.tenorRates(underlying, state, tau);
     if (this.opts.strikeBoundSigmas > 0) {
       const bounds = oliveStrikeBounds(state.spot, state.modelVol, tau, rates, this.opts.strikeBoundSigmas);
       if (strike < bounds.lower || strike > bounds.upper) {

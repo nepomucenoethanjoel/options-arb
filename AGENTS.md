@@ -54,8 +54,11 @@ bash deploy/deploy.sh root@<vps>  # deploy: build locally + ship + restart
 
 - Pricing conventions (verified, do not alter without new evidence):
   Olive calls `F=S·e^(rL·T)`, `df=e^(−rL·T)`; puts `F=S·e^(−rS·T)`,
-  `df=e^(+rS·T)`; rates = per-custody borrow curve at `locked/owned`
-  utilization; strike band ±1σ (`K_L=S·e^(−rS·T−σ√T)`, `K_U=S·e^(rL·T+σ√T)`).
+  `df=e^(+rS·T)`; rates = per-custody borrow curve at `locked/(owned − escrow)`
+  utilization **plus the fixed-rate premium** `β·U2d·t/(t+τ)` for the tenor, and an
+  order pays the Simpson average over its own lock (options: window from the
+  pre-trade price) — `shared/src/math/olive.ts`, DATA_SOURCES rows 4, 78; strike
+  band ±1σ (`K_L=S·e^(−rS·T−σ√T)`, `K_U=S·e^(rL·T+σ√T)`) at those zero-size tenor rates.
 - `shared/src/venueSpecs.ts` — `VENUE_SPECS`: per-venue quote kind, whether users
   can short there, trading cutoff, settlement asset/window. Every entry is a
   DATA_SOURCES row.
