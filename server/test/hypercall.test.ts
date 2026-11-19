@@ -65,4 +65,36 @@ describe('HypercallAdapter.getChain', () => {
     expect(await a.getChain('SOL')).toEqual({ instruments: [], quotes: [] });
     expect(a.getHealth().status).toBe('ok');
   });
+
+  it('skips underlyings the /markets listing does not carry (live shape 2026-11-19), one listing read for concurrent calls', async () => {
+    const urls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      urls.push(String(url));
+      return {
+        ok: true,
+        json: async () =>
+          String(url).endsWith('/markets')
+            ? { success: true, data: [{ underlying: 'AAPL' }, { underlying: 'ETH' }, { underlying: 'NVDA' }] }
+            : String(url).includes('currency=ETH') ? fixture : { jsonrpc: '2.0', result: [] },
+      };
+    }));
+    const a = new HypercallAdapter('https://x');
+    const [tsla, eth, sol] = await Promise.all([a.getChain('TSLA'), a.getChain('ETH'), a.getChain('SOL')]);
+    expect(tsla).toEqual({ instruments: [], quotes: [] });
+    expect(sol).toEqual({ instruments: [], quotes: [] });
+    expect(eth.quotes).toHaveLength(3);
+    expect(urls.filter((u) => u.endsWith('/markets'))).toHaveLength(1);
+    expect(urls.filter((u) => u.includes('options-summary'))).toEqual(['https://x/options-summary?currency=ETH&kind=option&include_rfq_provider_quotes=true']);
+  });
+
+  it('queries every underlying when the listing is unavailable', async () => {
+    const urls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      urls.push(String(url));
+      return String(url).endsWith('/markets') ? { ok: false, json: async () => ({}) } : { ok: true, json: async () => ({ jsonrpc: '2.0', result: [] }) };
+    }));
+    const a = new HypercallAdapter('https://x');
+    await a.getChain('TSLA');
+    expect(urls.some((u) => u.includes('options-summary?currency=TSLA'))).toBe(true);
+  });
 });
