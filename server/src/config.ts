@@ -155,6 +155,17 @@ export interface AppConfig {
    *  same basis the KPI Σ uses) before an opportunity alert fires.
    *  0 = alert on any isOpportunity row (legacy behavior). */
   alertMinTotalUsdc: number;
+  /** Maker-quote lane (alerts.ts): single-maker RFQ quotes that cross a clean
+   *  book after fees. Own cooldown; never touches headline totals. */
+  makerAlertsEnabled: boolean;
+  /** Minimum net after fees + capital, USDC per contract. */
+  makerAlertMinNetUsdc: number;
+  /** Minimum clip total, USDC. */
+  makerAlertMinTotalUsdc: number;
+  /** > 0: also require the maker quote this many times off its venue's own
+   *  model price (bid / model when selling, model / ask when buying). 0 = off. */
+  makerAlertMinTheoMultiple: number;
+  makerAlertCooldownMs: number;
 }
 
 /**
@@ -292,5 +303,10 @@ export function loadConfig(): AppConfig {
     telegramChatId: str('TELEGRAM_CHAT_ID', ''),
     discordWebhookUrl: str('DISCORD_WEBHOOK_URL', ''),
     alertMinTotalUsdc: num('ALERT_MIN_TOTAL_USDC', 0),
+    makerAlertsEnabled: bool('MAKER_ALERTS', true),
+    makerAlertMinNetUsdc: num('MAKER_ALERT_MIN_NET_USDC', 5),
+    makerAlertMinTotalUsdc: num('MAKER_ALERT_MIN_TOTAL_USDC', 10),
+    makerAlertMinTheoMultiple: num('MAKER_ALERT_MIN_THEO_MULTIPLE', 0),
+    makerAlertCooldownMs: num('MAKER_ALERT_COOLDOWN_MS', 600000),
   };
 }

@@ -43,6 +43,9 @@ export interface OptionQuote {
   ask: number | null;
   askSize: number | null;
   mark: number | null;
+  /** The venue's own model price, when it publishes one apart from its quotes
+   *  (Hypercall `theoretical_price`). Informational: never an executable price. */
+  theoreticalPrice?: number | null;
   /** Underlying index/spot price as seen by the venue, if published. */
   indexPrice?: number | null;
   iv: number | null;

@@ -27,6 +27,7 @@ describe('Hypercall mapping (live fixture)', () => {
       indexPrice: 2374.6,
       ivSource: 'model',
       flags: ['single_maker'],
+      theoreticalPrice: 275.27048326015984,
     });
   });
 
@@ -36,6 +37,8 @@ describe('Hypercall mapping (live fixture)', () => {
     expect(quote.ask).toBeNull();
     expect(quote.mark).toBeNull();
     expect(quote.flags).toBeUndefined();
+    // The model price is published even with no maker quote.
+    expect(quote.theoreticalPrice).toBe(625.1152709810467);
   });
 
   it('picks the best bid and ask across makers; two wallets drop single_maker', () => {
