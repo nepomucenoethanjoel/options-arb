@@ -24,6 +24,11 @@ import { HealthTracker, fetchWithTimeout } from '../util';
  *    is `indicative_quote` (headline-blocking) with no published size
  *    (`VENUE_SPECS.callput.sizeUnpublished` → pairs carry `size_unknown`).
  *    The keeper's ETH execution fee is known (row 85) and sits in the fee model.
+ *  - Callput currently offers ONLY call and put spreads (docs traders/
+ *    instruments-strategies-and-collateral: "Currently, Callput only providing
+ *    Call & Put Spread"; every one of 71 on-chain requests 2026-11-13..20 was a
+ *    spread — row 87). A single-leg quote is not executable: `spread_only`
+ *    (non-executable) on every quote.
  *  - BTC/ETH only (plus synthetic stocks we don't track).
  */
 
@@ -110,7 +115,7 @@ export function mapCallputChain(feed: CallputFeed, underlying: string): { instru
         greeks: { delta: num(raw.delta), gamma: num(raw.gamma), vega: num(raw.vega), theta: num(raw.theta), rho: null },
         openInterest: num(raw.openInterest),
         source: 'callput:s3-feed',
-        flags: ['indicative_quote'],
+        flags: ['indicative_quote', 'spread_only'],
       });
     }
   }

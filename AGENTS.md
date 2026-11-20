@@ -18,7 +18,7 @@ make a number look better.**
 
 ## Non-negotiable rules
 
-1. **The verification stack is load-bearing.** 348 tests (incl. a golden
+1. **The verification stack is load-bearing.** 354 tests (incl. a golden
    replay of a recorded live Olive × Derive cycle), typechecks in three
    workspaces, and `server/src/scripts/handcheck.ts` /
    `handcheck-books.ts` (live field
@@ -47,6 +47,7 @@ npx tsc -b shared server web  # typecheck — must be clean
 npm run build -w shared -w web  # build dists
 npm run handcheck -w server   # LIVE check of an Olive pair vs real venue data (read-only)
 npm run handcheck:books -w server  # LIVE check of a book-venue pair (PAIR_KEY=… optional)
+npm run callput:fills -w server    # LIVE read of recent Callput requests/fills on Base (HOURS=… optional)
 bash deploy/deploy.sh root@<vps>  # deploy: build locally + ship + restart
 ```
 
