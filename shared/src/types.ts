@@ -1,3 +1,5 @@
+import type { OliveFixedRateSide } from './math/olive';
+
 export type OptionKind = 'call' | 'put';
 /** Every venue the app knows; which are polled is config (VENUES). */
 export type Venue = 'derive' | 'olive' | 'coincall' | 'hypercall' | 'callput' | 'deribit' | 'okx' | 'gate' | 'paradex' | 'bybit' | 'binance';
@@ -75,6 +77,15 @@ export interface VenueMarketState {
   /** Olive only: fixed rates used by their pricer (null = unknown, priced flat). */
   tokenRateApr?: number | null;
   usdcRateApr?: number | null;
+  /**
+   * Olive only: live fixed-rate exposure per custody side with its pool-owned
+   * balance (display units). Pricing adds the fixed-rate premium for the
+   * quote's tenor on top of the variable rates above (DATA_SOURCES row 78).
+   */
+  oliveFixedRate?: {
+    token: (OliveFixedRateSide & { owned: number }) | null;
+    usdc: (OliveFixedRateSide & { owned: number }) | null;
+  } | null;
   /** Strike bounds if the venue enforces them (Olive ±1σ bands). */
   strikeBounds?: { lower: number | null; upper: number | null };
   ts: number;

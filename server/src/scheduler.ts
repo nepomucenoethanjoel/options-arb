@@ -390,7 +390,7 @@ export class Orchestrator extends EventEmitter {
           underlyings: this.cfg.underlyings,
           fees: {
             deriveTakerFeeBps: this.cfg.deriveTakerFeeBps,
-            oliveFee: 'min(2.5 bps notional, 10% premium)',
+            oliveFee: `min(${this.cfg.oliveFeeNotionalBps} bps notional, ${this.cfg.oliveFeePremiumPct}% premium)`,
             solanaFeeUsdc: this.cfg.solanaFeeUsdc,
             capitalBorrowRateApr: this.cfg.capitalBorrowRateApr,
           },
@@ -411,7 +411,12 @@ export class Orchestrator extends EventEmitter {
   }
 
   private feeConfig() {
-    return { deriveTakerFeeBps: this.cfg.deriveTakerFeeBps, oliveFeeNotionalBps: 2.5, oliveFeePremiumPct: 10, solanaFeeUsdc: this.cfg.solanaFeeUsdc };
+    return {
+      deriveTakerFeeBps: this.cfg.deriveTakerFeeBps,
+      oliveFeeNotionalBps: this.cfg.oliveFeeNotionalBps,
+      oliveFeePremiumPct: this.cfg.oliveFeePremiumPct,
+      solanaFeeUsdc: this.cfg.solanaFeeUsdc,
+    };
   }
 
   private async processUnderlying(underlying: string, now: number): Promise<UnderlyingResult> {

@@ -35,6 +35,7 @@ async function main(): Promise<void> {
     oliveMaxTenorDays: cfg.oliveMaxTenorDays,
     volOverrides: cfg.oliveVolOverrides,
     strikeBoundSigmas: cfg.oliveStrikeBoundSigmas,
+    curveShape: cfg.oliveRateCurveShape,
   });
 
   const cases = [];
@@ -82,8 +83,8 @@ async function main(): Promise<void> {
       nearExpiryDays: cfg.nearExpiryDays,
       staleQuoteMs: Math.max(60_000, cfg.pollIntervalMs * 3),
       deriveTakerFeeBps: cfg.deriveTakerFeeBps,
-      oliveFeeNotionalBps: 2.5,
-      oliveFeePremiumPct: 10,
+      oliveFeeNotionalBps: cfg.oliveFeeNotionalBps,
+      oliveFeePremiumPct: cfg.oliveFeePremiumPct,
       solanaFeeUsdc: cfg.solanaFeeUsdc,
       capitalBorrowRateApr: cfg.capitalBorrowRateApr,
       poolLiquidityUsdByAsset: liveLiquidity != null ? { ...cfg.olivePoolLiquidityUsd, [underlying]: liveLiquidity } : { ...cfg.olivePoolLiquidityUsd },

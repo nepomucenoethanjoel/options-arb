@@ -1,8 +1,8 @@
 /**
  * Ground-truth check on Olive's executed trades from the market-file `trades`
  * feed: no premium field exists, but `tradeFeeUsdE6` verifies the fee model
- * exactly (min(2.5 bps notional, 10% premium) — the notional bound binds on
- * every observed open_option).
+ * exactly (min(5 bps notional, 10% premium) since 2026-10-21, 2.5 bps before —
+ * the notional bound binds on every observed open_option).
  */
 export {};
 

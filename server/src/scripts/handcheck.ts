@@ -40,6 +40,17 @@ interface MarketFile {
   usdcFreeUsd: number | null;
   liquidityUsd: number | null;
   rates: { tokenApr: number; usdcApr: number } | null;
+  premium: { token: PremiumSide | null; usdc: PremiumSide | null } | null;
+}
+interface PremiumSide { beta: number; owned: number; exposure: number; timeValue: number }
+
+/** Fixed-rate premium (bps) at a tenor — independent of shared/src/math/olive.ts (docs interest-rates). */
+function premiumBps(s: PremiumSide | null, tSeconds: number): number {
+  if (!s || !(tSeconds > 0) || !(s.beta > 0)) return 0;
+  const u2d = Math.floor((s.timeValue * 10_000) / (s.owned * 365 * 86_400));
+  if (u2d <= 0) return 0;
+  const tau = s.exposure > 0 ? Math.floor(s.timeValue / s.exposure) : 0;
+  return Math.floor((s.beta * u2d * (tau === 0 ? 1 : tSeconds / (tSeconds + tau))) / 10_000 + 0.5);
 }
 
 async function call(method: string, params: Record<string, unknown>) {
@@ -51,7 +62,7 @@ async function call(method: string, params: Record<string, unknown>) {
   return res.json();
 }
 
-async function fetchMarketFile(sym: string): Promise<MarketFile> {
+async function fetchMarketFile(sym: string, curveShape: 'linear' | 'quadratic'): Promise<MarketFile> {
   let lastErr = 'unknown error';
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
@@ -67,8 +78,10 @@ async function fetchMarketFile(sym: string): Promise<MarketFile> {
       const ob = snap?.executionOracle?.base;
       const spot = n(tk?.price) ?? (ob?.label === `${sym}/USD` && ob?.isFresh === true ? n(ob.price) : null);
       if (spot == null || vol == null) throw new Error('spot or vol missing from file');
+      // Pending limit-order escrow is not pool-owned (docs interest-rates; row 78).
+      const ownedRaw = (c: any): number | null => (n(c?.tokenOwned) == null ? null : n(c.tokenOwned)! - (n(c?.pendingEscrowNative) ?? 0));
       const custodyFree = (c: any): number | null => {
-        const owned = n(c?.tokenOwned);
+        const owned = ownedRaw(c);
         const locked = n(c?.tokenLocked) ?? 0;
         const dec = n(c?.decimals);
         if (owned == null || dec == null || dec < 0 || dec > 18) return null;
@@ -90,7 +103,7 @@ async function fetchMarketFile(sym: string): Promise<MarketFile> {
         }
         const uniq = [...byUtil.entries()].sort((a, b) => a[0] - b[0]);
         if (uniq.length === 0) return null;
-        const owned = n(c?.tokenOwned);
+        const owned = ownedRaw(c);
         const locked = n(c?.tokenLocked) ?? 0;
         if (owned == null || owned <= 0) return null;
         const util = Math.min(10_000, Math.max(0, (locked / owned) * 10_000));
@@ -99,7 +112,9 @@ async function fetchMarketFile(sym: string): Promise<MarketFile> {
           const [x1, y1] = uniq[i]!;
           if (util <= x1) {
             const [x0, y0] = uniq[i - 1]!;
-            return y0 + ((y1 - y0) * (util - x0)) / (x1 - x0);
+            const x = (util - x0) / (x1 - x0);
+            // Above the kink (segments after the first) the live curve is squared (row 79).
+            return y0 + (y1 - y0) * (curveShape === 'quadratic' && i >= 2 ? x * x : x);
           }
         }
         return uniq[uniq.length - 1]![1];
@@ -110,6 +125,13 @@ async function fetchMarketFile(sym: string): Promise<MarketFile> {
         tokenRateBps != null && usdcRateBps != null
           ? { tokenApr: tokenRateBps / 10_000, usdcApr: usdcRateBps / 10_000 }
           : null;
+      // Fixed-rate premium inputs per side (poolAccount.fixedRateStates[0] token / [1] USDC), native units.
+      const premiumSide = (c: any, i: number): { beta: number; owned: number; exposure: number; timeValue: number } | null => {
+        const st = raw?.poolAccount?.fixedRateStates?.[i];
+        const beta = n(raw?.poolAccount?.fixedRateBetaBps), owned = ownedRaw(c), exposure = n(st?.liveExposureNative), timeValue = n(st?.timeValueNative);
+        return beta == null || owned == null || owned <= 0 || exposure == null || timeValue == null ? null : { beta, owned, exposure, timeValue };
+      };
+      const premium = rates ? { token: premiumSide(raw?.underlyingCustody, 0), usdc: premiumSide(raw?.usdcCustody, 1) } : null;
       const aum = n(snap?.poolSummary?.aumUsd);
       const claims = n(snap?.poolSummary?.openPositionEntryClaimsUsd);
       const liquidityUsd =
@@ -118,7 +140,7 @@ async function fetchMarketFile(sym: string): Promise<MarketFile> {
           : aum != null && claims != null
             ? Math.max(0, aum - claims)
             : null;
-      return { spot, vol, underlyingFree, usdcFreeUsd, liquidityUsd, rates };
+      return { spot, vol, underlyingFree, usdcFreeUsd, liquidityUsd, rates, premium };
     } catch (e) {
       lastErr = e instanceof Error ? e.message : String(e);
       await new Promise((r) => setTimeout(r, 1500));
@@ -166,12 +188,11 @@ async function main() {
   const target = await pickTarget();
   console.log(`verifying ${target.pairKey} (${target.how})`);
 
-  const market = await fetchMarketFile(target.underlying);
+  const market = await fetchMarketFile(target.underlying, cfg.oliveRateCurveShape);
   // Live borrow-curve rates when present; config pins only as fallback.
   const rates = market.rates
     ? { token: market.rates.tokenApr, usdc: market.rates.usdcApr }
-    : (cfg.oliveRateOverrides[target.underlying] ??
-      { token: cfg.oliveTokenRateApr, usdc: cfg.oliveUsdcRateApr });
+    : { ...(cfg.oliveRateOverrides[target.underlying] ?? { token: cfg.oliveTokenRateApr, usdc: cfg.oliveUsdcRateApr }) };
   console.log(
     `live inputs: Stork spot ${market.spot} · model vol ${(market.vol * 100).toFixed(2)}% · rates L/S ${(rates.token * 100).toFixed(2)}%/${(rates.usdc * 100).toFixed(2)}%${market.rates ? ' (borrow-curve, live)' : ' (config pins)'} · custody free: ${market.underlyingFree ?? '?'} ${target.underlying} / $${market.usdcFreeUsd ?? '?'}`,
   );
@@ -259,6 +280,11 @@ async function main() {
   );
   const now = cycleMode ? n(cq.ts)! : Date.now();
   const tau = Math.max(0, (expiryTs - now) / (365 * 86_400_000));
+  // Zero-size fixed rates at this tenor: curve + fixed-rate premium (row 78), when the file carries the state.
+  const tSec = tau * 365 * 86_400;
+  rates.token += premiumBps(market.premium?.token ?? null, tSec) / 10_000;
+  rates.usdc += premiumBps(market.premium?.usdc ?? null, tSec) / 10_000;
+  console.log(`fixed rates at ${(tau * 365).toFixed(2)}d incl. premium: L/S ${(rates.token * 100).toFixed(2)}%/${(rates.usdc * 100).toFixed(2)}%`);
   const r = target.kind === 'call' ? rates.token : -rates.usdc;
   const oliveForward = serverSynthSpot * Math.exp(r * tau);
   // Verified convention (269d + 7d, DATA_SOURCES.md §2d): calls discount at
@@ -283,14 +309,14 @@ async function main() {
   const spot = index; // engine: dq.indexPrice ?? spotByUnderlying ?? forward
   // Fee models (verified 2026-09-29):
   //   Derive taker: $0.50/order + min(3bps × notional, 12.5% × leg premium)
-  //   Olive:        min(2.5bps × qty × ORACLE SPOT, 10% × premium) — spot base for both kinds
+  //   Olive:        min(cfg bps (5 since 2026-10-21) × qty × ORACLE SPOT, 10% × premium) — spot base for both kinds
   const deriveLegPremium =
     spreadVols >= 0 ? bid ?? deriveMark : ask ?? deriveMark;
   let deriveFee = spot * (cfg.deriveTakerFeeBps / 10_000);
   if (deriveLegPremium != null && deriveLegPremium > 0) {
     deriveFee = Math.min(deriveFee, deriveLegPremium * 0.125);
   }
-  const oliveFee = olivePremium > 0 ? Math.min(spot * 0.00025, olivePremium * 0.1) : 0;
+  const oliveFee = olivePremium > 0 ? Math.min(spot * (cfg.oliveFeeNotionalBps / 10_000), olivePremium * (cfg.oliveFeePremiumPct / 100)) : 0;
   const costs = deriveFee + oliveFee; // Solana tx fee is per clip — in total below
   const collateral = target.kind === 'call' ? spot : target.strike;
   const capital = collateral * cfg.capitalBorrowRateApr * tau;

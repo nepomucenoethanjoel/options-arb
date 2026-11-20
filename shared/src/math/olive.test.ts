@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { curveRateBpsAt, expectedFillVwap, oliveStrikeBounds, type OliveRateCurvePoint } from './olive';
+import {
+  curveRateBpsAt,
+  expectedFillVwap,
+  fixedRatePremiumBps,
+  oliveFixedQuoteBps,
+  oliveOrderRateBps,
+  oliveStrikeBounds,
+  type OliveRateCurvePoint,
+} from './olive';
 
 describe('oliveStrikeBounds — venue strike band (docs + live-UI verified)', () => {
   it('computes the documented ±1σ band: K_L = S·e^(−r_USDC·T − σ√T), K_U = S·e^(r_TOKEN·T + σ√T)', () => {
@@ -137,5 +145,88 @@ describe('expectedFillVwap — marginal-fill pricing along the borrow curve', ()
     expect(expectedFillVwap({ ...base, size: 5, curve: [] })).toBeNull();
     expect(expectedFillVwap({ ...base, size: 5, curve, owned: 0 })).toBeNull();
     expect(expectedFillVwap({ ...base, size: 5, curve, tauYears: 0 })).toBeNull();
+  });
+});
+
+// Live Olive asset-side curve (every pool, docs protocol/pool-parameters; market file borrowRateCurve).
+const ASSET_CURVE: OliveRateCurvePoint[] = [
+  { utilizationBps: 0, rateBps: 0 },
+  { utilizationBps: 7500, rateBps: 2000 },
+  { utilizationBps: 10000, rateBps: 12000 },
+];
+
+describe('fixedRatePremiumBps — fixed-rate premium on top of the curve (docs interest-rates)', () => {
+  // SOL pool 2026-11-15 08:41 UTC market file: owned 65.671025202 SOL, poolAccount.fixedRateStates[0]
+  // timeValueNative 402716025749638000, liveExposureNative 61661767000, fixedRateBetaBps 2500.
+  const sol = { betaBps: 2500, exposure: 61.661767, timeValue: 402716025.749638 };
+  it('reproduces the live 30-day display quote (state-history fixedRateLongBps 9822 = 9684 + 138)', () => {
+    expect(fixedRatePremiumBps(sol, 65.671025202, 30 * 86_400)).toBe(138);
+  });
+  it('is small at short tenors and saturates toward β·U2d at long ones', () => {
+    expect(fixedRatePremiumBps(sol, 65.671025202, 5 * 86_400)).toBe(30);
+    expect(fixedRatePremiumBps(sol, 65.671025202, 365 * 86_400)).toBe(403);
+  });
+  it('is zero for an idle side', () => {
+    expect(fixedRatePremiumBps({ betaBps: 2500, exposure: 0, timeValue: 0 }, 0.6868, 30 * 86_400)).toBe(0);
+  });
+});
+
+describe('oliveOrderRateBps — the rate an order pays (docs "The Rate Your Order Pays")', () => {
+  it('reproduces a live expiry-future fill exactly: SOL long $241, 2026-10-26 10:49:04, stored 959 bp', () => {
+    // transactions.json canonical.custodyEffects: owned 40906098015, locked 13307406471, lockedDelta 2399852021 (lamports);
+    // fixed-rate state from the 10:00 state-history bucket aged to the fill.
+    const side = { betaBps: 2500, exposure: 2.910077, timeValue: 15056319.346912 };
+    const owned = 40.906098015, locked = 13.307406471, tSeconds = 2_754_656;
+    expect(oliveFixedQuoteBps(ASSET_CURVE, side, owned, locked, tSeconds)).toBe(877);
+    expect(oliveOrderRateBps(ASSET_CURVE, side, owned, locked, tSeconds, 2.399852021)).toBe(959);
+  });
+  it('splits at the kink: an order across 75% pays the exact piecewise average', () => {
+    // 70% → 90% utilization, no premium: docs example "pays a variable part of 42.33%".
+    expect(oliveOrderRateBps(ASSET_CURVE, null, 100, 70, 86_400, 20)).toBe(4233);
+  });
+  it('never pays less than r(0)', () => {
+    expect(oliveOrderRateBps(ASSET_CURVE, null, 100, 10, 86_400, 0)).toBe(oliveFixedQuoteBps(ASSET_CURVE, null, 100, 10, 86_400));
+  });
+});
+
+describe('expectedFillVwap with fixed-rate state — Olive order mechanics (option window rule)', () => {
+  it('reproduces a live option fill: SOL 73-C 20NOV26, 2026-11-16 20:04:59, 18.944568 contracts at $1.371571 (stored 8517 bp)', () => {
+    // canonical.custodyEffects: owned 106651550202, locked 87258241999 (lamports); fixed-rate state from the
+    // 19:59:55 state-history bucket aged 304 s. Utilization 81.8% → 99.6%: the curve-only model misses badly.
+    const input = {
+      kind: 'call' as const, strike: 73, spot: 71.58227, vol: 0.623879,
+      tauYears: (Date.UTC(2026, 10, 20, 8) - Date.parse('2026-11-16T20:04:59Z')) / 1000 / (365 * 86_400),
+      size: 18.944568, curve: ASSET_CURVE, owned: 106.651550202, free: 106.651550202 - 87.258241999, perUnitLocked: 1,
+    };
+    const exact = expectedFillVwap({ ...input, fixedRate: { betaBps: 2500, exposure: 61.66176763180714, timeValue: 394859515.03067494 } })!;
+    expect(exact.vwapEntry).toBeCloseTo(1.371571, 3);
+    const curveOnly = expectedFillVwap(input)!;
+    expect(curveOnly.vwapEntry).toBeLessThan(exact.vwapEntry);
+  });
+});
+
+describe('quadratic curve shape above the kink (docs interest-rates since 2026-11-17, DATA_SOURCES row 79)', () => {
+  const ASSET_NEW: OliveRateCurvePoint[] = [
+    { utilizationBps: 0, rateBps: 0 }, { utilizationBps: 7500, rateBps: 2000 }, { utilizationBps: 10000, rateBps: 17000 },
+  ];
+  const USDC_NEW: OliveRateCurvePoint[] = [
+    { utilizationBps: 0, rateBps: 0 }, { utilizationBps: 7500, rateBps: 1000 }, { utilizationBps: 10000, rateBps: 16000 },
+  ];
+  it('reproduces the docs table', () => {
+    const table: Array<[number, number, number]> = [[2500, 666.67, 333.33], [8000, 2600, 1600], [8500, 4400, 3400], [9000, 7400, 6400], [9500, 11600, 10600], [9800, 14696, 13696], [10000, 17000, 16000]];
+    for (const [u, a, s] of table) {
+      expect(curveRateBpsAt(ASSET_NEW, u, 'quadratic')).toBeCloseTo(a, 1);
+      expect(curveRateBpsAt(USDC_NEW, u, 'quadratic')).toBeCloseTo(s, 1);
+    }
+  });
+  it('matches Olive’s own variable rate live (SOL state-history 2026-11-19 10:19 UTC: 86.15% → 4983 bp, USDC 91.69% → 7677 bp)', () => {
+    expect(oliveFixedQuoteBps(ASSET_NEW, null, 123.273331918, 106.202809999, 86_400, 0, 'quadratic')).toBe(4983);
+    expect(oliveFixedQuoteBps(USDC_NEW, null, 6889.357269, 6316.836027, 86_400, 0, 'quadratic')).toBe(7677);
+  });
+  it('averages exactly across the kink: 70% → 90% pays a variable part of 33.33% (docs example)', () => {
+    expect(oliveOrderRateBps(ASSET_NEW, null, 100, 70, 86_400, 20, 'quadratic')).toBe(3333);
+  });
+  it('defaults to the linear shape every earlier recording used', () => {
+    expect(curveRateBpsAt(ASSET_NEW, 9000)).toBeCloseTo(11000, 6);
   });
 });

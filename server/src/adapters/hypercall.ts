@@ -18,7 +18,9 @@ import { HealthTracker, RateLimiter, fetchWithTimeout } from '../util';
  *    max_ask_size (strings), updated_at (ms) } — what the app UI shows.
  *  - mark_iv is Hypercall's vol oracle (BTC/ETH read from Deribit) — not an
  *    independent market; mark_price 0 means "no mark".
- *  - Prices USD per 1 coin; expiry 08:00 UTC; BTC/ETH only (SOL/ZEC: []).
+ *  - Prices USD per 1 coin; crypto expiry 08:00 UTC (BTC/ETH; SOL/ZEC: []). Stock
+ *    underlyings (AAPL META MSFT MU NVDA SPCX, 2026-11-19) expire 21:00 UTC (the
+ *    16:00 ET close) — expiryTs is the instrument's own expiration_timestamp.
  *  - Size units: max_*_size (e.g. "7.30") vs indicative_*_size (7.3e-6)
  *    differ by 1e6 — UNVERIFIED which is contracts; we use the maker's own
  *    max_*_size and every quote carries `single_maker` while one wallet
@@ -26,6 +28,7 @@ import { HealthTracker, RateLimiter, fetchWithTimeout } from '../util';
  */
 
 export const HYPERCALL_BASE_URL = 'https://api.hypercall.xyz';
+const HYPERCALL_LISTING_TTL_MS = 10 * 60_000;
 const NAME_RE = /^([A-Z0-9]+)-(\d{8})-([\d.]+)-([CP])$/;
 
 interface RfqQuote {
@@ -124,14 +127,47 @@ export class HypercallAdapter implements OptionsVenueAdapter {
   private readonly health = new HealthTracker('hypercall', 'hypercall:rfq', 90_000);
   private readonly limiter = new RateLimiter(250, 2_000, 5);
 
+  private listing: { ts: number; read: Promise<Set<string> | null> } | null = null;
+
   constructor(private readonly baseUrl: string = HYPERCALL_BASE_URL) {}
 
   getHealth(): VenueHealth {
     return this.health.snapshot();
   }
 
+  /**
+   * Underlyings Hypercall lists (`GET /markets` → `data[].underlying`, cached
+   * 10 min, one read shared by concurrent callers). Null when the listing is
+   * unavailable or empty — callers then query every underlying as before.
+   * Without it every unlisted underlying (most stocks, SOL, ZEC) costs a
+   * rate-limited options-summary read each cycle (DATA_SOURCES row 80).
+   */
+  private listedUnderlyings(): Promise<Set<string> | null> {
+    if (this.listing && Date.now() - this.listing.ts < HYPERCALL_LISTING_TTL_MS) return this.listing.read;
+    const previous = this.listing?.read ?? Promise.resolve(null);
+    const read = (async () => {
+      try {
+        await this.limiter.acquire();
+        const res = await fetchWithTimeout(`${this.baseUrl}/markets`, { headers: { Accept: 'application/json' } });
+        if (!res.ok) return previous;
+        const body = (await res.json()) as { data?: Array<{ underlying?: unknown }> };
+        const names = Array.isArray(body.data) ? body.data.map((m) => m?.underlying).filter((u): u is string => typeof u === 'string' && u.length > 0) : [];
+        return names.length > 0 ? new Set(names) : previous;
+      } catch {
+        return previous;
+      }
+    })();
+    this.listing = { ts: Date.now(), read };
+    return read;
+  }
+
   async getChain(underlying: string): Promise<{ instruments: OptionInstrument[]; quotes: OptionQuote[] }> {
     try {
+      const listed = await this.listedUnderlyings();
+      if (listed && !listed.has(underlying)) {
+        this.health.ok();
+        return { instruments: [], quotes: [] };
+      }
       await this.limiter.acquire();
       const res = await fetchWithTimeout(
         `${this.baseUrl}/options-summary?currency=${encodeURIComponent(underlying)}&kind=option&include_rfq_provider_quotes=true`,
