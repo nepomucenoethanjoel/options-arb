@@ -31,7 +31,16 @@ export interface FeeConfig {
   oliveFeeNotionalBps: number;
   oliveFeePremiumPct: number;
   solanaFeeUsdc: number;
+  /** Callput keeper execution fee per request, USDC (CALLPUT_EXECUTION_FEE_ETH × ETH spot). */
+  callputExecutionFeeUsdc?: number;
 }
+
+/** Callput keeper fee per request, ETH: both of the owner's 2026-09-27 requests
+ *  paid exactly this, the cancelled one included (DATA_SOURCES row 85). */
+export const CALLPUT_EXECUTION_FEE_ETH = 0.00006;
+/** Used when no ETH spot is known: 0.00006 ETH at $4,000 — on the high side, so a
+ *  missing spot never understates the cost. */
+export const CALLPUT_EXECUTION_FEE_FALLBACK_USDC = 0.24;
 
 /** Derive taker base fee, per ORDER regardless of size (docs trading-fees,
  *  verified 2026-09-29) — charged once per clip, not per contract. */
@@ -136,8 +145,8 @@ export function feeModels(cfg: FeeConfig): Partial<Record<Venue, VenueFeeModel>>
       perOrder: 0,
     },
     // Callput (docs fees): open-buy 6 bps, open-sell 3 bps, settle 2 bps of
-    // notional, each capped at 12.5% of premium. The keeper's native-token
-    // execution fee is unpublished — quotes carry execution_fee_unknown.
+    // notional, each capped at 12.5% of premium; plus the keeper's ETH
+    // execution fee once per request (row 85).
     callput: {
       perContract: ({ legPrice, notional, side }) => {
         const cap = (bps: number) => {
@@ -146,7 +155,7 @@ export function feeModels(cfg: FeeConfig): Partial<Record<Venue, VenueFeeModel>>
         };
         return cap(side === 'buy' ? 6 : 3) + cap(2);
       },
-      perOrder: 0,
+      perOrder: cfg.callputExecutionFeeUsdc ?? CALLPUT_EXECUTION_FEE_FALLBACK_USDC,
     },
   };
 }

@@ -686,6 +686,40 @@ describe('computeSignals — venue quote flags', () => {
   });
 });
 
+describe('computeSignals — venues that publish no size (Callput, row 86)', () => {
+  const callput = (overrides: Partial<OptionQuote> = {}): OptionQuote => ({
+    ...deriveQuote(), venue: 'callput', instrumentId: 'ETH-30OCT26-2900-C', bid: 100, bidSize: null, ask: 102, askSize: null, mark: 101, iv: 0.62,
+    ivSource: 'model', flags: ['indicative_quote'], ...overrides,
+  });
+  const r = (q: OptionQuote): MatchRow => ({
+    ...row(null, null),
+    legs: { olive: { venue: 'olive', instrumentId: 'o', quote: oliveQuote(70, 0.55) }, callput: { venue: 'callput', instrumentId: q.instrumentId, quote: q } },
+  });
+
+  it('flags size_unknown, not thin_book: the pair is tradable (an opportunity) but stays out of the headline', () => {
+    const [s] = computeSignals([r(callput())], cfg, NOW);
+    expect([s.buyVenue, s.sellVenue]).toEqual(['olive', 'callput']);
+    expect(s.flags).toContain('size_unknown');
+    expect(s.flags).not.toContain('thin_book');
+    expect(s.isOpportunity).toBe(true);
+    expect(s.isProfitable).toBe(true);
+    expect(isHeadlineProfitable(s)).toBe(false);
+  });
+
+  it('an unknown size is null, not 0: no clip total, and no Olive capacity cap applied to it', () => {
+    const [s] = computeSignals([r(callput())], cfg, NOW);
+    expect(s.maxExecutableSize).toBeNull();
+    expect(s.totalNetUsdc).toBeNull();
+    expect(s.flags).not.toContain('pool_capacity_capped');
+  });
+
+  it('a wide Callput quote is still wide_book', () => {
+    const [s] = computeSignals([r(callput({ bid: 40, ask: 120 }))], cfg, NOW);
+    expect(s.flags).toContain('wide_book');
+    expect(s.isOpportunity).toBe(false);
+  });
+});
+
 describe('computeSignals — single-maker quotes that cross a book against the mark IVs (row 84)', () => {
   const flat = { perContract: () => 0.1, perOrder: 0 };
   const cfgM = { ...cfg, extraFeeModels: { hypercall: flat, coincall: flat, deribit: flat } };

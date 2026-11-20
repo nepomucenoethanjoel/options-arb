@@ -21,7 +21,9 @@ import { HealthTracker, fetchWithTimeout } from '../util';
  *  - Execution price is mark ± a vault risk premium (docs pricing-mechanism):
  *    ask = mark·(1 + rpBuy), bid = mark·(1 − rpSell). That is OUR reading of
  *    the formula — the keeper fills later at its own price — so every quote
- *    is `indicative_quote` (headline-blocking) with no published size.
+ *    is `indicative_quote` (headline-blocking) with no published size
+ *    (`VENUE_SPECS.callput.sizeUnpublished` → pairs carry `size_unknown`).
+ *    The keeper's ETH execution fee is known (row 85) and sits in the fee model.
  *  - BTC/ETH only (plus synthetic stocks we don't track).
  */
 
@@ -108,7 +110,7 @@ export function mapCallputChain(feed: CallputFeed, underlying: string): { instru
         greeks: { delta: num(raw.delta), gamma: num(raw.gamma), vega: num(raw.vega), theta: num(raw.theta), rho: null },
         openInterest: num(raw.openInterest),
         source: 'callput:s3-feed',
-        flags: ['indicative_quote', 'execution_fee_unknown'],
+        flags: ['indicative_quote'],
       });
     }
   }

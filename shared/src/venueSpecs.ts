@@ -29,6 +29,9 @@ export interface VenueSpec {
   settlementAsset(kind: OptionKind, underlying: string): SettlementAsset;
   /** Settlement averaging window, hours (0 = single print). */
   settlementWindowHours: number;
+  /** The venue publishes no quote size (vault-filled requests): pairs carry
+   *  `size_unknown` instead of `thin_book`, and their size is null, not 0. */
+  sizeUnpublished?: boolean;
 }
 
 const always = () => true;
@@ -47,6 +50,8 @@ export const VENUE_SPECS: Record<Venue, VenueSpec> = {
     tradingCutoffMs: 30 * 60_000,
     settlementAsset: (kind) => (kind === 'call' ? 'underlying' : 'USDC'),
     settlementWindowHours: 0.5,
+    // The OLP vault fills whatever the keeper accepts; no size is published (rows 40, 86).
+    sizeUnpublished: true,
   },
   // Tradeable since 2026-11-05 (row 48); REFERENCE_VENUES can make it reference-only.
   // BTC/ETH read from the inverse book (coin-settled); SOL from the USDC-linear book.

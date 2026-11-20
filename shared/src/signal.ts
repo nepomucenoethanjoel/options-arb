@@ -12,6 +12,8 @@ export const HEADLINE_BLOCKING_FLAGS: ReadonlySet<string> = new Set([
   'single_maker', 'indicative_quote',
   // A venue the user cannot trade (REFERENCE_VENUES): shown for reference, never headline.
   'reference_venue',
+  // A venue that publishes no quote size (Callput): tradable, but the clip is unknown.
+  'size_unknown',
   // Stock underlyings outside the NYSE session; an Olive wrapper (xStock, PAXG)
   // hedged with a different instrument (the stock, XAUT) — unverified basis.
   'market_closed', 'wrapper_basis',

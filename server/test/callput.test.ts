@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CallputAdapter, mapCallputChain } from '../src/adapters/callput';
-import { feeModels } from '../src/signals/fees';
+import { CALLPUT_EXECUTION_FEE_ETH, CALLPUT_EXECUTION_FEE_FALLBACK_USDC, feeModels } from '../src/signals/fees';
 
 /** Trimmed real market-data.json (ETH, one expiry) captured 2026-10-28. */
 const fixture = JSON.parse(readFileSync(new URL('./fixtures/callput-eth.json', import.meta.url), 'utf8'));
@@ -29,7 +29,8 @@ describe('Callput mapping (live fixture)', () => {
     expect(c.bidSize).toBeNull();
     expect(c.askSize).toBeNull();
     expect(c).toMatchObject({ iv: 0.7092970137738083, indexPrice: 2373.438666666666, forward: 2372.4531279066664, ts: 1793176302806, ivSource: 'model' });
-    expect(c.flags).toEqual(['indicative_quote', 'execution_fee_unknown']);
+    // The keeper's ETH fee is known (row 85) and priced in the fee model, not flagged.
+    expect(c.flags).toEqual(['indicative_quote']);
   });
 
   it('an unavailable option keeps its mark/IV but has no tradable side', () => {
@@ -65,6 +66,13 @@ describe('Callput fee model', () => {
     expect(fee.perContract({ ...ctx, legPrice: 100, side: 'buy' })).toBeCloseTo(2000 * 0.0006 + 2000 * 0.0002, 9);
     expect(fee.perContract({ ...ctx, legPrice: 100, side: 'sell' })).toBeCloseTo(2000 * 0.0003 + 2000 * 0.0002, 9);
     expect(fee.perContract({ ...ctx, legPrice: 4, side: 'buy' })).toBeCloseTo(0.5 + 0.4, 9); // 12.5% × 4 caps the 1.2 open fee
+  });
+
+  it("charges the keeper's ETH execution fee once per request (row 85), high-side fallback without an ETH spot", () => {
+    const base = { deriveTakerFeeBps: 3, oliveFeeNotionalBps: 2.5, oliveFeePremiumPct: 10, solanaFeeUsdc: 0.05 };
+    expect(feeModels({ ...base, callputExecutionFeeUsdc: CALLPUT_EXECUTION_FEE_ETH * 1590 }).callput!.perOrder).toBeCloseTo(0.0954, 9);
+    expect(fee.perOrder).toBe(CALLPUT_EXECUTION_FEE_FALLBACK_USDC);
+    expect(CALLPUT_EXECUTION_FEE_FALLBACK_USDC).toBeGreaterThanOrEqual(CALLPUT_EXECUTION_FEE_ETH * 4000 - 1e-9);
   });
 });
 
