@@ -29,8 +29,9 @@ describe('Callput mapping (live fixture)', () => {
     expect(c.bidSize).toBeNull();
     expect(c.askSize).toBeNull();
     expect(c).toMatchObject({ iv: 0.7092970137738083, indexPrice: 2373.438666666666, forward: 2372.4531279066664, ts: 1793176302806, ivSource: 'model' });
-    // The keeper's ETH fee is known (row 85) and priced in the fee model, not flagged.
-    expect(c.flags).toEqual(['indicative_quote']);
+    // The keeper's ETH fee is known (row 85) and priced in the fee model, not flagged;
+    // Callput trades legs only inside spreads (row 87).
+    expect(c.flags).toEqual(['indicative_quote', 'spread_only']);
   });
 
   it('an unavailable option keeps its mark/IV but has no tradable side', () => {

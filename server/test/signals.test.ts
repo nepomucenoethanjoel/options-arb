@@ -713,6 +713,13 @@ describe('computeSignals — venues that publish no size (Callput, row 86)', () 
     expect(s.flags).not.toContain('pool_capacity_capped');
   });
 
+  it('Callput quotes as the adapter flags them (spread_only) are never executable or opportunities', () => {
+    const [s] = computeSignals([r(callput({ flags: ['indicative_quote', 'spread_only'] }))], cfg, NOW);
+    expect(s.flags).toEqual(expect.arrayContaining(['spread_only', 'size_unknown']));
+    expect(s.isOpportunity).toBe(false);
+    expect(s.score).toBeCloseTo(s.netAfterCapitalUsdc! * 0.4, 2); // non-executable discount
+  });
+
   it('a wide Callput quote is still wide_book', () => {
     const [s] = computeSignals([r(callput({ bid: 40, ask: 120 }))], cfg, NOW);
     expect(s.flags).toContain('wide_book');

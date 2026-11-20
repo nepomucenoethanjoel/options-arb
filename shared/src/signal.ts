@@ -3,6 +3,8 @@ import type { Signal } from './types';
 /** Flags that make a row's quoted prices untradeable as shown. */
 export const NON_EXECUTABLE_FLAGS: ReadonlySet<string> = new Set([
   'no_book', 'one_sided', 'thin_book', 'wide_book', 'stale', 'mismatched_legs', 'trading_cutoff',
+  // The venue trades this leg only inside a spread (Callput, DATA_SOURCES row 87): a single-option quote is not a fill.
+  'spread_only',
 ]);
 
 /** Flags that keep a row out of headline totals/counts (still shown in the table). */
