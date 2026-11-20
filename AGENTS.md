@@ -18,7 +18,7 @@ make a number look better.**
 
 ## Non-negotiable rules
 
-1. **The verification stack is load-bearing.** 302 tests (incl. a golden
+1. **The verification stack is load-bearing.** 339 tests (incl. a golden
    replay of a recorded live Olive × Derive cycle), typechecks in three
    workspaces, and `server/src/scripts/handcheck.ts` /
    `handcheck-books.ts` (live field
@@ -71,7 +71,9 @@ bash deploy/deploy.sh root@<vps>  # deploy: build locally + ship + restart
   capacity caps + marginal-fill VWAP in `signals/olive.ts`.
 - `server/src/adapters/{coincall,hypercall,callput,deribit,okx,gate,paradex}.ts` — extra listed venues
   (`getChain`), enabled by `VENUES`; quote-level `flags` (`single_maker`,
-  `indicative_quote`) keep unproven venues out of headline totals.
+  `indicative_quote`) keep unproven venues out of headline totals. A pair whose only
+  blocking flag is `single_maker` still reaches the separate maker-quote alert lane
+  (`alerts.ts` `findMakerQuoteHits`, `MAKER_ALERT_*`, row 82) — never the KPI.
 - Adding a venue: adapter with `getChain` + fixture test from a captured live
   response, a `VENUE_SPECS` entry, a fee model, a raw fetcher in
   `handcheck-books.ts`, and DATA_SOURCES rows — same commit.

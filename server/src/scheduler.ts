@@ -400,7 +400,7 @@ export class Orchestrator extends EventEmitter {
       this.latest = payload;
       this.emit('cycle', payload);
 
-      if (this.alerter) void this.alerter.process(allSignals);
+      if (this.alerter) void this.alerter.process(allSignals, this.fullRows);
     } finally {
       this.busy = false;
     }

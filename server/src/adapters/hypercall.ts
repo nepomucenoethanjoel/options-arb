@@ -17,7 +17,9 @@ import { HealthTracker, RateLimiter, fetchWithTimeout } from '../util';
  *    `rfq_provider_quotes[]` { wallet, bid_price, ask_price, max_bid_size,
  *    max_ask_size (strings), updated_at (ms) } — what the app UI shows.
  *  - mark_iv is Hypercall's vol oracle (BTC/ETH read from Deribit) — not an
- *    independent market; mark_price 0 means "no mark".
+ *    independent market; mark_price 0 means "no mark". theoretical_price is
+ *    Hypercall's model price at mark_iv, published even with no maker quote
+ *    (row 82) — the maker-quote alert compares a maker's bid/ask against it.
  *  - Prices USD per 1 coin; crypto expiry 08:00 UTC (BTC/ETH; SOL/ZEC: []). Stock
  *    underlyings (AAPL META MSFT MU NVDA SPCX, 2026-11-19) expire 21:00 UTC (the
  *    16:00 ET close) — expiryTs is the instrument's own expiration_timestamp.
@@ -44,6 +46,7 @@ interface RawSummary {
   instrument_name?: string;
   expiration_timestamp?: number;
   mark_price?: number | null;
+  theoretical_price?: number | null;
   mark_iv?: number | null;
   underlying_price?: number | null;
   open_interest?: number | null;
@@ -111,6 +114,7 @@ export function mapHypercallSummary(
     ask,
     askSize,
     mark: pos(raw.mark_price),
+    theoreticalPrice: pos(raw.theoretical_price),
     indexPrice: pos(raw.underlying_price),
     iv: pos(raw.mark_iv),
     ivSource: 'model',
