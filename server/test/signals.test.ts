@@ -647,6 +647,14 @@ describe('computeSignals — N venues (best vol-consistent pair per contract)', 
     expect(s.isOpportunity).toBe(false);
   });
 
+  it('Olive legs inside 24 h of expiry are non-executable (Olive opens options only while expiry is more than one day away)', () => {
+    const [inside] = computeSignals([rowN({ derive: deriveQuote(), olive: oliveQuote() }, NOW + 23 * 3_600_000)], cfgN, NOW);
+    expect(inside.flags).toContain('trading_cutoff');
+    expect(inside.isOpportunity).toBe(false);
+    const [outside] = computeSignals([rowN({ derive: deriveQuote(), olive: oliveQuote() }, NOW + 25 * 3_600_000)], cfgN, NOW);
+    expect(outside.flags).not.toContain('trading_cutoff');
+  });
+
   it('flags legs that settle in different assets (Derive USDC vs Coincall USDT)', () => {
     const [s] = computeSignals([rowN({ derive: deriveQuote(), coincall: coincallQuote() })], cfgN, NOW);
     expect(s.flags).toContain('settlement_asset_mismatch');
