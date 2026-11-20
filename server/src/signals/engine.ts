@@ -83,6 +83,16 @@ const isAmm = (venue: Venue) => VENUE_SPECS[venue].quoteKind === 'amm_synthetic'
  * vol-consistent (sell-venue IV ≥ buy-venue IV). The row's signal is the
  * best candidate: user-shortable sell venue first, then clean books, then
  * the honest clip total. Remaining candidates ride along as `alternatives`.
+ *
+ * Exception: a single-maker quote whose PRICE crosses another venue's book
+ * (maker bid > book ask, or book bid > maker ask) is a candidate even when the
+ * mark IVs point the other way — a maker venue's IV is its oracle (Hypercall:
+ * Deribit's), not the vol implied by the maker's own quote (row 84). Those
+ * pairs carry `iv_inverted` and are never the row's signal (a two-venue row
+ * always has a vol-consistent direction). Up to two net-positive single-maker
+ * pairs beyond the top three alternatives (iv_inverted ones, and ones ranked
+ * last for a book flag) always ride along: the maker-quote alert lane reads
+ * them there.
  */
 export function computeSignals(
   rows: MatchRow[],
@@ -99,6 +109,7 @@ export function computeSignals(
       return q?.iv && fees[v] && (!isAmm(v) || q.mark);
     });
     const candidates: Signal[] = [];
+    const inverted: Signal[] = [];
     for (const buy of venues) {
       for (const sell of venues) {
         if (buy === sell) continue;
@@ -106,15 +117,22 @@ export function computeSignals(
         const sq = row.legs[sell]!.quote!;
         // Vol-consistent direction only; a tie buys the AMM / sells the book
         // (the original two-venue rule: spread ≥ 0 → buy Olive).
-        if (sq.iv! < bq.iv!) continue;
-        if (sq.iv === bq.iv && isAmm(sell)) continue;
+        if (sq.iv! < bq.iv! || (sq.iv === bq.iv && isAmm(sell))) {
+          if (crossesSingleMaker(buy, bq, sell, sq)) inverted.push(evaluatePair(row, buy, sell, cfg, fees, now, spotByUnderlying, true));
+          continue;
+        }
         candidates.push(evaluatePair(row, buy, sell, cfg, fees, now, spotByUnderlying));
       }
     }
     if (candidates.length === 0) continue;
     candidates.sort(comparePairs);
     const [best, ...rest] = candidates;
-    if (rest.length > 0) best.alternatives = rest.slice(0, 3).map(toAlternative);
+    const makerExtras = [...rest.slice(3), ...inverted]
+      .filter((c) => c.flags.includes(MAKER_FLAG) && (c.netAfterCapitalUsdc ?? 0) > 0)
+      .sort((a, b) => (honestTotalNetUsdc(b) ?? -Infinity) - (honestTotalNetUsdc(a) ?? -Infinity))
+      .slice(0, 2);
+    const alternatives = [...rest.slice(0, 3), ...makerExtras];
+    if (alternatives.length > 0) best.alternatives = alternatives.map(toAlternative);
     signals.push(best);
   }
 
@@ -125,6 +143,17 @@ export function computeSignals(
       b.score - a.score,
   );
   return signals;
+}
+
+const MAKER_FLAG = 'single_maker';
+
+/** A single-maker leg whose executable price crosses the other leg's book. */
+function crossesSingleMaker(buy: Venue, bq: OptionQuote, sell: Venue, sq: OptionQuote): boolean {
+  if (isAmm(buy) || isAmm(sell)) return false;
+  if (!bq.flags?.includes(MAKER_FLAG) && !sq.flags?.includes(MAKER_FLAG)) return false;
+  const bid = positive(sq.bid);
+  const ask = positive(bq.ask);
+  return bid != null && ask != null && bid > ask;
 }
 
 function comparePairs(a: Signal, b: Signal): number {
@@ -163,6 +192,7 @@ function evaluatePair(
   fees: Partial<Record<Venue, VenueFeeModel>>,
   now: number,
   spotByUnderlying: Record<string, number | null>,
+  ivInverted = false,
 ): Signal {
   const bq = row.legs[buy]!.quote!;
   const sq = row.legs[sell]!.quote!;
@@ -172,6 +202,8 @@ function evaluatePair(
     if (!flags.includes(f)) flags.push(f);
   };
   if (pair.some(isAmm)) flag('amm_pool_depth_unknown');
+  // Admitted on price alone (crossesSingleMaker): the mark-IV spread below is negative.
+  if (ivInverted) flag('iv_inverted');
 
   // ── Book-venue liquidity gating (each non-AMM leg) ──────────────────────
   for (const v of pair) {
@@ -199,7 +231,7 @@ function evaluatePair(
     flag('settlement_asset_mismatch');
   }
 
-  // ── IV spread (sell − buy: ≥ 0 by construction) ─────────────────────────
+  // ── IV spread (sell − buy: ≥ 0 by construction, except iv_inverted pairs) ──
   const spreadVols = (sq.iv! - bq.iv!) * 100;
   const spreadBps = ((sq.iv! - bq.iv!) / sq.iv!) * 10_000;
   if (!VENUE_SPECS[sell].canSell(row.underlying)) {

@@ -6,6 +6,7 @@ import {
   isTwoLegExecutable,
   yearsBetween,
   type MatchRow,
+  type OptionQuote,
   type Signal,
   type Venue,
 } from '@options-arb/shared';
@@ -302,10 +303,23 @@ export interface MakerQuoteHit {
 }
 
 const MAKER_FLAG = 'single_maker';
+/** Book-quality flags a maker leg raises by itself (an RFQ maker's rich bid
+ *  often sits far from its ask, or alone, or small): tolerated only when the
+ *  hedge leg's own book is two-sided, deep enough and tight enough. */
+const MAKER_LEG_BOOK_FLAGS: ReadonlySet<string> = new Set(['wide_book', 'thin_book', 'one_sided']);
+
+function hedgeBookClean(q: OptionQuote | null, cfg: Pick<AppConfig, 'minBookSize' | 'maxRelBookWidth'>): boolean {
+  const bid = q?.bid ?? 0;
+  const ask = q?.ask ?? 0;
+  if (!(bid > 0 && ask > 0)) return false;
+  if ((q!.bidSize ?? 0) < cfg.minBookSize || (q!.askSize ?? 0) < cfg.minBookSize) return false;
+  return (ask - bid) / ((ask + bid) / 2) <= cfg.maxRelBookWidth;
+}
 
 /**
  * Venue pairs (each signal's best pair and its alternatives) whose only
- * headline-blocking flag is `single_maker`, both legs user-executable, and
+ * headline-blocking flag is `single_maker` (plus wide/thin/one-sided book
+ * flags when the hedge leg's own book is clean), both legs user-executable, and
  * whose net after fees and capital clears MAKER_ALERT_MIN_NET_USDC per
  * contract and MAKER_ALERT_MIN_TOTAL_USDC at the clip. MAKER_ALERT_MIN_THEO_MULTIPLE
  * > 0 also requires the maker quote that far off its venue's own model price.
@@ -314,7 +328,7 @@ const MAKER_FLAG = 'single_maker';
 export function findMakerQuoteHits(
   signals: Signal[],
   rows: ReadonlyMap<string, MatchRow>,
-  cfg: Pick<AppConfig, 'makerAlertMinNetUsdc' | 'makerAlertMinTotalUsdc' | 'makerAlertMinTheoMultiple'>,
+  cfg: Pick<AppConfig, 'makerAlertMinNetUsdc' | 'makerAlertMinTotalUsdc' | 'makerAlertMinTheoMultiple' | 'minBookSize' | 'maxRelBookWidth'>,
   now: number,
 ): MakerQuoteHit[] {
   const hits: MakerQuoteHit[] = [];
@@ -330,7 +344,9 @@ export function findMakerQuoteHits(
     ];
     for (const c of candidates) {
       if (!c.buyVenue || !c.sellVenue || !isTwoLegExecutable({ buyVenue: c.buyVenue, sellVenue: c.sellVenue, flags: c.flags })) continue;
-      if (!c.flags.includes(MAKER_FLAG) || c.flags.some((f) => f !== MAKER_FLAG && HEADLINE_BLOCKING_FLAGS.has(f))) continue;
+      if (!c.flags.includes(MAKER_FLAG)) continue;
+      const blocking = c.flags.filter((f) => f !== MAKER_FLAG && HEADLINE_BLOCKING_FLAGS.has(f));
+      if (blocking.some((f) => !MAKER_LEG_BOOK_FLAGS.has(f))) continue;
       if (c.net == null || c.net < cfg.makerAlertMinNetUsdc || c.total == null || c.total < cfg.makerAlertMinTotalUsdc) continue;
       if (c.entry == null || c.exit == null) continue;
       const sellQuote = row.legs[c.sellVenue]?.quote ?? null;
@@ -339,6 +355,7 @@ export function findMakerQuoteHits(
       if (!makerIsSell && !buyQuote?.flags?.includes(MAKER_FLAG)) continue;
       const makerQuote = makerIsSell ? sellQuote! : buyQuote!;
       const hedgeQuote = makerIsSell ? buyQuote : sellQuote;
+      if (blocking.length > 0 && !hedgeBookClean(hedgeQuote, cfg)) continue;
       const makerPrice = makerIsSell ? c.exit : c.entry;
       const theo = makerQuote.theoreticalPrice ?? null;
       const theoMultiple = theo != null && theo > 0 && makerPrice > 0 ? (makerIsSell ? makerPrice / theo : theo / makerPrice) : null;

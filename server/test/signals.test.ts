@@ -685,3 +685,55 @@ describe('computeSignals — venue quote flags', () => {
     expect(isHeadlineProfitable(s)).toBe(false);
   });
 });
+
+describe('computeSignals — single-maker quotes that cross a book against the mark IVs (row 84)', () => {
+  const flat = { perContract: () => 0.1, perOrder: 0 };
+  const cfgM = { ...cfg, extraFeeModels: { hypercall: flat, coincall: flat, deribit: flat } };
+  // Hypercall's IV is its oracle (0.50, below Derive's 0.60), but its one maker bids 130 — far over
+  // Derive's 81 ask, enough to clear the full-collateral capital charge (~$22 here).
+  const maker = (overrides: Partial<OptionQuote> = {}): OptionQuote => ({
+    ...deriveQuote(), venue: 'hypercall', instrumentId: 'ETH-20261030-2900-C', bid: 130, bidSize: 1, ask: 135, askSize: 1, mark: 80, iv: 0.5, flags: ['single_maker'], ...overrides,
+  });
+  const legsRow = (legs: Partial<Record<'derive' | 'hypercall' | 'coincall' | 'deribit', OptionQuote>>): MatchRow => ({
+    ...row(null, null),
+    legs: Object.fromEntries(Object.entries(legs).map(([v, q]) => [v, { venue: v as 'derive', instrumentId: q!.instrumentId, quote: q! }])),
+  });
+
+  it('admits buy-the-book / sell-the-maker on price alone, flagged iv_inverted, as an alternative', () => {
+    const [s] = computeSignals([legsRow({ derive: deriveQuote(), hypercall: maker() })], cfgM, NOW);
+    expect([s.buyVenue, s.sellVenue]).toEqual(['hypercall', 'derive']); // the vol-consistent pair stays the signal
+    const inv = s.alternatives?.find((a) => a.buyVenue === 'derive' && a.sellVenue === 'hypercall');
+    expect(inv).toBeDefined();
+    expect(inv!.flags).toEqual(expect.arrayContaining(['iv_inverted', 'single_maker']));
+    expect(inv!.entryPriceUsdc).toBe(81);
+    expect(inv!.exitPriceUsdc).toBe(130);
+    expect(inv!.ivSpreadVols).toBeCloseTo(-10, 5);
+    expect(inv!.netAfterCapitalUsdc!).toBeGreaterThan(0);
+  });
+
+  it('needs a single-maker leg and an actual price cross', () => {
+    const noMaker = computeSignals([legsRow({ derive: deriveQuote(), hypercall: maker({ flags: undefined }) })], cfgM, NOW)[0]!;
+    expect(noMaker.alternatives?.some((a) => a.flags.includes('iv_inverted')) ?? false).toBe(false);
+    const noCross = computeSignals([legsRow({ derive: deriveQuote(), hypercall: maker({ bid: 80 }) })], cfgM, NOW)[0]!;
+    expect(noCross.alternatives?.some((a) => a.flags.includes('iv_inverted')) ?? false).toBe(false);
+  });
+
+  it('a crossed pair that does not net positive after costs is not kept', () => {
+    const [s] = computeSignals([legsRow({ derive: deriveQuote(), hypercall: maker({ bid: 95 }) })], cfgM, NOW);
+    expect(s.alternatives?.some((a) => a.flags.includes('iv_inverted')) ?? false).toBe(false);
+  });
+
+  it('keeps net-positive single-maker pairs beyond the top three alternatives (the maker-alert lane reads them)', () => {
+    const coincall = { ...deriveQuote(), venue: 'coincall' as const, instrumentId: 'c', bid: 74, ask: 76, mark: 75, iv: 0.58 };
+    const deribit = { ...deriveQuote(), venue: 'deribit' as const, instrumentId: 'd', bid: 76, ask: 78, mark: 77, iv: 0.59 };
+    // A wide maker quote: its pairs carry wide_book and rank last among the vol-consistent ones.
+    const [s] = computeSignals([legsRow({ derive: deriveQuote(), hypercall: maker({ ask: 300 }), coincall, deribit })], cfgM, NOW);
+    const all = [s, ...(s.alternatives ?? [])];
+    const makerPairs = all.filter((a) => a.sellVenue === 'hypercall');
+    expect(s.alternatives).toHaveLength(5); // top 3 + 2 maker extras
+    expect(makerPairs).toHaveLength(2);
+    expect(makerPairs.every((a) => a.flags.includes('iv_inverted') && (a.netAfterCapitalUsdc ?? 0) > 0)).toBe(true);
+    // Best two by total: buying the cheapest asks (coincall 76, deribit 78), not Derive's 81.
+    expect(makerPairs.map((a) => a.buyVenue).sort()).toEqual(['coincall', 'deribit']);
+  });
+});
