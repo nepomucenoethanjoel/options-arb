@@ -35,7 +35,9 @@ const always = () => true;
 
 export const VENUE_SPECS: Record<Venue, VenueSpec> = {
   derive: { label: 'Derive', quoteKind: 'book', canSell: always, tradingCutoffMs: 0, settlementAsset: () => 'USDC', settlementWindowHours: 0.5 },
-  olive: { label: 'Olive', quoteKind: 'amm_synthetic', canSell: () => false, tradingCutoffMs: 0, settlementAsset: () => 'USDC', settlementWindowHours: 0 },
+  // An Olive option can be opened only while its expiry is more than one day away (docs
+  // open-option "must exceed one day"; DATA_SOURCES rows 6, 81). The app's Olive leg is always a buy.
+  olive: { label: 'Olive', quoteKind: 'amm_synthetic', canSell: () => false, tradingCutoffMs: 24 * 3_600_000, settlementAsset: () => 'USDC', settlementWindowHours: 0 },
   coincall: { label: 'Coincall', quoteKind: 'book', canSell: always, tradingCutoffMs: 15 * 60_000, settlementAsset: () => 'USDT', settlementWindowHours: 0.5 },
   hypercall: { label: 'Hypercall', quoteKind: 'rfq', canSell: always, tradingCutoffMs: 0, settlementAsset: () => 'USDC', settlementWindowHours: 0.5 },
   callput: {
