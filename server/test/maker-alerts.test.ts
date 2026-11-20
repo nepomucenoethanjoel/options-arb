@@ -23,7 +23,7 @@ function row(hypercall: Partial<OptionQuote> = {}): MatchRow {
     pairKey: PAIR, underlying: 'BTC', expiryTs: EXPIRY, expiryDate: '20261127', strike: 46000, kind: 'put', matchType: 'exact_match',
     legs: {
       hypercall: { venue: 'hypercall', instrumentId: PAIR, quote: quote({ bid: 195.03, bidSize: 0.9, theoreticalPrice: 48.2, indexPrice: 59447, flags: ['single_maker'], ...hypercall }) },
-      okx: { venue: 'okx', instrumentId: 'BTC-USD-261127-46000-P', quote: quote({ venue: 'okx', ask: 53.5, askSize: 25, iv: 0.86, ivSource: 'market' }) },
+      okx: { venue: 'okx', instrumentId: 'BTC-USD-261127-46000-P', quote: quote({ venue: 'okx', bid: 50.5, bidSize: 25, ask: 53.5, askSize: 25, iv: 0.86, ivSource: 'market' }) },
     },
   };
 }
@@ -40,7 +40,7 @@ function sig(overrides: Partial<Signal> = {}): Signal {
   };
 }
 
-const lane = { makerAlertMinNetUsdc: 5, makerAlertMinTotalUsdc: 10, makerAlertMinTheoMultiple: 0 };
+const lane = { makerAlertMinNetUsdc: 5, makerAlertMinTotalUsdc: 10, makerAlertMinTheoMultiple: 0, minBookSize: 0.1, maxRelBookWidth: 0.2 };
 const rows = (r: MatchRow = row()) => new Map([[r.pairKey, r]]);
 
 describe('Hypercall short-option margin', () => {
@@ -71,9 +71,26 @@ describe('maker-quote lane — gating', () => {
     expect(h!.marginPerContract!.imUsd).toBeGreaterThan(3700);
   });
 
-  it('skips any other headline-blocking flag (stale, thin book, …)', () => {
-    expect(findMakerQuoteHits([sig({ flags: ['single_maker', 'stale'] })], rows(), lane, NOW)).toHaveLength(0);
-    expect(findMakerQuoteHits([sig({ flags: ['single_maker', 'thin_book'] })], rows(), lane, NOW)).toHaveLength(0);
+  it('skips any other headline-blocking flag (stale, trading cutoff, distortion, …)', () => {
+    for (const f of ['stale', 'trading_cutoff', 'price_distortion', 'mismatched_legs', 'no_book']) {
+      expect(findMakerQuoteHits([sig({ flags: ['single_maker', f] })], rows(), lane, NOW)).toHaveLength(0);
+    }
+  });
+
+  it("tolerates wide/thin/one-sided book flags only while the hedge leg's own book is clean", () => {
+    const flags = ['single_maker', 'wide_book', 'one_sided', 'thin_book'];
+    expect(findMakerQuoteHits([sig({ flags })], rows(), lane, NOW)).toHaveLength(1);
+    const wideHedge = row();
+    wideHedge.legs.okx!.quote = { ...wideHedge.legs.okx!.quote!, bid: 20 };
+    expect(findMakerQuoteHits([sig({ flags })], rows(wideHedge), lane, NOW)).toHaveLength(0);
+    const thinHedge = row();
+    thinHedge.legs.okx!.quote = { ...thinHedge.legs.okx!.quote!, bidSize: 0.05 };
+    expect(findMakerQuoteHits([sig({ flags })], rows(thinHedge), lane, NOW)).toHaveLength(0);
+    const oneSidedHedge = row();
+    oneSidedHedge.legs.okx!.quote = { ...oneSidedHedge.legs.okx!.quote!, bid: null };
+    expect(findMakerQuoteHits([sig({ flags })], rows(oneSidedHedge), lane, NOW)).toHaveLength(0);
+    // A clean single-maker pair needs no hedge-book check.
+    expect(findMakerQuoteHits([sig()], rows(oneSidedHedge), lane, NOW)).toHaveLength(1);
   });
 
   it('skips clean rows (the normal lane covers them) and LP-only directions', () => {
