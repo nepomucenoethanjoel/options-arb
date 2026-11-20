@@ -213,7 +213,8 @@ function evaluatePair(
     const ask = positive(q.ask);
     if (bid != null && ask != null) {
       const mid = (bid + ask) / 2;
-      if ((q.bidSize ?? 0) < cfg.minBookSize || (q.askSize ?? 0) < cfg.minBookSize) flag('thin_book');
+      if (VENUE_SPECS[v].sizeUnpublished) flag('size_unknown');
+      else if ((q.bidSize ?? 0) < cfg.minBookSize || (q.askSize ?? 0) < cfg.minBookSize) flag('thin_book');
       if (mid > 0 && (ask - bid) / mid > cfg.maxRelBookWidth) flag('wide_book');
     } else if (bid != null || ask != null) {
       flag('one_sided');
@@ -306,7 +307,8 @@ function evaluatePair(
     anyBookLeg = true;
     const q = row.legs[v]!.quote!;
     const side = v === buy ? (positive(q.ask) != null ? q.askSize ?? 0 : null) : positive(q.bid) != null ? q.bidSize ?? 0 : null;
-    if (side == null) missingSide = true;
+    // An unpublished size is unknown, not zero.
+    if (side == null || VENUE_SPECS[v].sizeUnpublished) missingSide = true;
     else bookSize = bookSize == null ? side : Math.min(bookSize, side);
   }
   if (!anyBookLeg || missingSide) bookSize = null;

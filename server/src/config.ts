@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import type { Venue } from '@options-arb/shared';
+import { CALLPUT_EXECUTION_FEE_ETH } from './signals/fees';
 
 function str(name: string, def: string): string {
   const v = process.env[name];
@@ -130,6 +131,8 @@ export interface AppConfig {
   maxRelBookWidth: number;
   nearExpiryDays: number;
   solanaFeeUsdc: number;
+  /** Callput keeper execution fee per request, ETH (row 85). */
+  callputExecutionFeeEth: number;
   /** Olive option/chooser open fee: min(bps × qty × oracle spot, pct × premium) — pool-admin config (DATA_SOURCES rows 7, 77). */
   oliveFeeNotionalBps: number;
   /** Olive variable-curve shape above the kink — not published in the market file (DATA_SOURCES row 79). */
@@ -286,6 +289,7 @@ export function loadConfig(): AppConfig {
     maxRelBookWidth: num('MAX_REL_BOOK_WIDTH', 0.2),
     nearExpiryDays: num('NEAR_EXPIRY_DAYS', 2),
     solanaFeeUsdc: num('SOLANA_FEE_USDC', 0.05),
+    callputExecutionFeeEth: num('CALLPUT_EXECUTION_FEE_ETH', CALLPUT_EXECUTION_FEE_ETH),
     // 5 bp on every non-capped fill since 2026-10-21 11:21 UTC (2.5 bp before) — DATA_SOURCES row 77.
     oliveFeeNotionalBps: num('OLIVE_FEE_NOTIONAL_BPS', 5),
     // Quadratic above the kink since 2026-11-17 10:59 UTC (docs + every state-history bucket) — row 79.

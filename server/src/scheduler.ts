@@ -411,11 +411,14 @@ export class Orchestrator extends EventEmitter {
   }
 
   private feeConfig() {
+    // ETH spot from the previous cycle; none yet → the fee model's high-side fallback.
+    const ethUsd = this.latest?.spots?.ETH ?? null;
     return {
       deriveTakerFeeBps: this.cfg.deriveTakerFeeBps,
       oliveFeeNotionalBps: this.cfg.oliveFeeNotionalBps,
       oliveFeePremiumPct: this.cfg.oliveFeePremiumPct,
       solanaFeeUsdc: this.cfg.solanaFeeUsdc,
+      callputExecutionFeeUsdc: ethUsd != null && ethUsd > 0 ? this.cfg.callputExecutionFeeEth * ethUsd : undefined,
     };
   }
 
