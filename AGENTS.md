@@ -48,6 +48,7 @@ npm run build -w shared -w web  # build dists
 npm run handcheck -w server   # LIVE check of an Olive pair vs real venue data (read-only)
 npm run handcheck:books -w server  # LIVE check of a book-venue pair (PAIR_KEY=… optional)
 npm run callput:fills -w server    # LIVE read of recent Callput requests/fills on Base (HOURS=… optional)
+npm run callput:settlements -w server  # LIVE Callput settlement prices vs Deribit delivery (DAYS=… optional)
 bash deploy/deploy.sh root@<vps>  # deploy: build locally + ship + restart
 ```
 
