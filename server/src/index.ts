@@ -10,6 +10,7 @@ import { OkxAdapter } from './adapters/okx';
 import { GateAdapter } from './adapters/gate';
 import { ParadexAdapter } from './adapters/paradex';
 import { OlivePoolWatcher } from './olivePools';
+import { CallputRecorder } from './callputRecorder';
 import { OliveAdapter } from './adapters/olive';
 import { OliveRealtimeClient } from './adapters/olive/realtime';
 import { SqliteStorage } from './storage/sqlite';
@@ -64,7 +65,10 @@ async function main(): Promise<void> {
   const olivePools = cfg.olivePoolWatch
     ? new OlivePoolWatcher({ thresholdUsd: cfg.olivePoolAlertUsd, sweepIntervalMs: cfg.olivePoolSweepMs, tracked: cfg.underlyings, sessionBound: cfg.stockUnderlyings, notify: (t) => alerter.notify(t), spacingMs: 500 })
     : null;
-  const app = await buildServer({ cfg, orchestrator, storage, olive, olivePools: olivePools ?? undefined });
+  const callputFills = cfg.callputRecorder
+    ? new CallputRecorder({ rpcUrl: cfg.callputRpcUrl, feedUrl: cfg.callputFeedUrl, file: join(cfg.dataDir, 'callput-fills.jsonl'), pollMs: cfg.callputRecorderPollMs })
+    : null;
+  const app = await buildServer({ cfg, orchestrator, storage, olive, olivePools: olivePools ?? undefined, callputFills: callputFills ?? undefined });
 
   await app.listen({ port: cfg.port, host: cfg.host });
   console.log(`[options-arb] API + WS listening on http://${cfg.host}:${cfg.port}`);
@@ -76,6 +80,7 @@ async function main(): Promise<void> {
   orchestrator.start();
   oliveRealtime?.start();
   olivePools?.start();
+  callputFills?.start();
   if (oliveRealtime) {
     console.log(
       `[options-arb] olive realtime stream on (${cfg.oliveRealtimeUrl}), early re-price trigger ${cfg.oliveRealtimeSpotTriggerPct}%`,
@@ -93,6 +98,7 @@ async function main(): Promise<void> {
     orchestrator.stop();
     oliveRealtime?.stop();
     olivePools?.stop();
+    callputFills?.stop();
     try {
       await app.close();
     } catch {

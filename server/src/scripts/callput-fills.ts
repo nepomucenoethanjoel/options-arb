@@ -7,8 +7,9 @@
  *   CALLPUT_RPC_URL=https://… npm run callput:fills -w server
  *
  * Prints each request with its outcome (executed / cancelled, latency, size,
- * all-in USDC per unit) and a tally of strategies (single legs vs spreads,
- * buy vs sell). The public RPC needs an address filter and caps ranges, so
+ * all-in USDC per unit; for a sell spread the credit paid back in the
+ * execution transaction), a tally of strategies (single legs vs spreads,
+ * debit vs credit), and cancellation rates by request size. The public RPC needs an address filter and caps ranges, so
  * logs are read in 10k-block chunks; block times come from the chain (Base's
  * block interval is not constant — never derive a block from a time by
  * arithmetic).
@@ -16,7 +17,9 @@
 import { CALLPUT_FEED_URL } from '../adapters/callput';
 import {
   CALLPUT_POSITION_MANAGER,
+  creditRawIn,
   decodeCallputLog,
+  isCreditSpread,
   describeLegs,
   sizeDecimals,
   toUnits,
@@ -110,6 +113,7 @@ async function main(): Promise<void> {
 
   console.log(`Callput PositionManager, last ${HOURS} h (blocks ${from}..${latest}), ${events.length} events\n`);
   const pending: Timed[] = [];
+  const sizes: Array<{ usdc: number; cancelled: boolean }> = [];
   for (const e of events) {
     if (e.type === 'openRequest' || e.type === 'closeRequest') {
       pending.push(e);
@@ -127,11 +131,22 @@ async function main(): Promise<void> {
     if (e.type === 'openExecuted') {
       const size = toUnits(e.sizeRaw, dec);
       const usdc = toUnits(e.amountInRaw, 6);
-      console.log(`${head}  OPEN  filled  ${size.toPrecision(6)} @ ${(usdc / size).toFixed(4)} USDC all-in (${usdc.toFixed(2)} in)  after ${latency}  ${e.tx}`);
-      count('open executed');
+      const credit = isCreditSpread(e.token.legs)
+        ? toUnits(creditRawIn((await rpc<{ logs: Array<{ address: string; topics: string[]; data: string }> }>('eth_getTransactionReceipt', [e.tx])).logs, e.account), 6)
+        : 0;
+      if (credit > 0) {
+        console.log(`${head}  OPEN  filled  ${size.toPrecision(6)} CREDIT ${(credit / size).toFixed(4)}/unit (${credit.toFixed(2)} paid out; ${(usdc / size).toFixed(4)}/unit deposited)  after ${latency}  ${e.tx}`);
+        count('open executed · credit');
+      } else {
+        console.log(`${head}  OPEN  filled  ${size.toPrecision(6)} @ ${(usdc / size).toFixed(4)} USDC all-in (${usdc.toFixed(2)} in)  after ${latency}  ${e.tx}`);
+        count('open executed · debit');
+      }
+      sizes.push({ usdc, cancelled: false });
     } else if (e.type === 'openCancelled') {
-      console.log(`${head}  OPEN  cancelled  ${toUnits(e.amountInRaw, 6).toFixed(2)} USDC refunded  after ${latency}  ${e.tx}`);
+      const usdc = toUnits(e.amountInRaw, 6);
+      console.log(`${head}  OPEN  cancelled  ${usdc.toFixed(2)} USDC refunded  after ${latency}  ${e.tx}`);
       count('open cancelled');
+      sizes.push({ usdc, cancelled: true });
     } else if (e.type === 'closeExecuted') {
       const size = toUnits(e.sizeRaw, dec);
       const usdc = toUnits(e.amountOutRaw, 6);
@@ -142,6 +157,11 @@ async function main(): Promise<void> {
   for (const p of pending) console.log(`${fmtTime(p.ts)}  ${sym(p.token.underlyingIndex)}  ${describeLegs(p.token.legs)}  ${p.type === 'openRequest' ? 'OPEN' : 'CLOSE'} request still pending/unmatched  ${p.tx}`);
   console.log('\nTally:');
   for (const [k, n] of [...tally].sort()) console.log(`  ${k.padEnd(28)} ${n}`);
+  console.log('\nOpen requests by USDC in (cancelled / total):');
+  for (const [lo, hi] of [[0, 10], [10, 100], [100, 500], [500, 1_000], [1_000, 5_000], [5_000, Infinity]] as const) {
+    const bucket = sizes.filter((x) => x.usdc >= lo && x.usdc < hi);
+    if (bucket.length > 0) console.log(`  ${`${lo}–${hi === Infinity ? '…' : hi}`.padEnd(12)} ${bucket.filter((x) => x.cancelled).length} / ${bucket.length}`);
+  }
 }
 
 main().catch((err) => {

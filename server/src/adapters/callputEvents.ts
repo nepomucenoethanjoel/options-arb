@@ -65,7 +65,8 @@ export function sizeDecimals(underlying: string | undefined): number {
 
 export interface RawLog {
   blockNumber: string;
-  blockTimestamp?: number;
+  /** Seconds; hex string when an RPC includes it on logs. */
+  blockTimestamp?: number | string;
   transactionHash: string;
   topics: string[];
   data: string;
@@ -111,3 +112,38 @@ export function decodeCallputLog(log: RawLog): CallputEvent | null {
 }
 
 export const toUnits = (raw: bigint, decimals: number): number => Number(raw) / 10 ** decimals;
+
+const USDC_BASE = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913';
+const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+const pad32 = (a: string) => `0x${a.toLowerCase().replace(/^0x/, '').padStart(64, '0')}`;
+
+/**
+ * A credit spread from its strikes: calls sold below the bought strike (bear
+ * call), puts sold above it (bull put). Matches every credit open in two weeks
+ * of fills (row 88); a debit spread's open never pays the account.
+ */
+export function isCreditSpread(legs: CallputLeg[]): boolean {
+  const sold = legs.find((l) => !l.isBuy);
+  const bought = legs.find((l) => l.isBuy);
+  if (!sold || !bought || legs.length !== 2) return false;
+  return sold.isCall ? sold.strike < bought.strike : sold.strike > bought.strike;
+}
+
+/**
+ * The credit a sell-spread open paid `account`, raw 6-decimal USDC: USDC the
+ * PositionManager sent it in the transaction, minus any close it executed for
+ * the same account in that transaction (one transaction can close one spread
+ * and open another — 2026-11-15 0xfbd5…).
+ */
+export function creditRawIn(logs: Array<{ address: string; topics: string[]; data: string }>, account: string): bigint {
+  let raw = 0n;
+  for (const l of logs) {
+    if (l.address.toLowerCase() === USDC_BASE && l.topics[0] === TRANSFER_TOPIC) {
+      if (l.topics[1]?.toLowerCase() === pad32(CALLPUT_POSITION_MANAGER) && l.topics[2]?.toLowerCase() === pad32(account)) raw += BigInt(l.data);
+    } else if (l.address.toLowerCase() === CALLPUT_POSITION_MANAGER.toLowerCase()) {
+      const e = decodeCallputLog({ blockNumber: '0x0', transactionHash: '', topics: l.topics, data: l.data });
+      if (e?.type === 'closeExecuted' && e.account === account.toLowerCase()) raw -= e.amountOutRaw;
+    }
+  }
+  return raw > 0n ? raw : 0n;
+}

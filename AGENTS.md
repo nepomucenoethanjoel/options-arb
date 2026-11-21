@@ -18,7 +18,7 @@ make a number look better.**
 
 ## Non-negotiable rules
 
-1. **The verification stack is load-bearing.** 354 tests (incl. a golden
+1. **The verification stack is load-bearing.** 363 tests (incl. a golden
    replay of a recorded live Olive × Derive cycle), typechecks in three
    workspaces, and `server/src/scripts/handcheck.ts` /
    `handcheck-books.ts` (live field
@@ -48,6 +48,7 @@ npm run build -w shared -w web  # build dists
 npm run handcheck -w server   # LIVE check of an Olive pair vs real venue data (read-only)
 npm run handcheck:books -w server  # LIVE check of a book-venue pair (PAIR_KEY=… optional)
 npm run callput:fills -w server    # LIVE read of recent Callput requests/fills on Base (HOURS=… optional)
+npm run callput:settlements -w server  # LIVE Callput settlement prices vs Deribit delivery (DAYS=… optional)
 bash deploy/deploy.sh root@<vps>  # deploy: build locally + ship + restart
 ```
 
@@ -82,6 +83,7 @@ bash deploy/deploy.sh root@<vps>  # deploy: build locally + ship + restart
   per-venue fee-adjusted prices on lite rows (`signals/bestVenue.ts`), surface
   flags (`signals/surfaceChecks.ts`), parity (`signals/parity.ts`).
 - `server/src/olivePools.ts` — sweeps every Olive market for free pool capacity → `/api/olive-pools`, alerts when a hedgeable untracked pool is funded.
+- `server/src/callputRecorder.ts` — records every Callput request/fill on Base with the feed's leg quotes at request time → `DATA_DIR/callput-fills.jsonl`, `/api/callput-fills` (row 88). Informational, like the pool watcher.
 - `server/src/episodes.ts` — gap episodes at cycle resolution (headline /
   reference / quote_only / parity) → `/api/episodes/summary`; never pruned, so the
   table is far larger than the heap (~65k rows/day): summaries read it in pages

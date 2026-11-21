@@ -10,6 +10,7 @@ import { honestTotalNetUsdc, isHeadlineProfitable, isTwoLegExecutable, type Sign
 import type { AppConfig } from '../config';
 import { flickerGapMs, summarizeStoredEpisodes } from '../episodes';
 import type { OlivePoolSnapshot } from '../olivePools';
+import { summarizeCallputFills, type CallputFillRecord } from '../callputRecorder';
 import type { Orchestrator } from '../scheduler';
 import type { Storage } from '../storage';
 
@@ -21,6 +22,7 @@ export interface ApiDeps {
     getRealtimeHealth(): RealtimeHealthLike | null;
   };
   olivePools?: { latest(): OlivePoolSnapshot[] };
+  callputFills?: { latest(limit?: number): CallputFillRecord[]; lastError: string | null };
 }
 
 type RealtimeHealthLike = {
@@ -251,6 +253,15 @@ export async function buildServer(deps: ApiDeps): Promise<FastifyInstance> {
     const hours = Math.min(720, Math.max(1, Number(q.hours) || 24));
     const points = storage.getSpreadHistory(q.pairKey, Date.now() - hours * 3_600_000);
     return { pairKey: q.pairKey, hours, points };
+  });
+
+  // Callput requests/fills with the feed's leg quotes at request time (recorder, row 88).
+  app.get('/api/callput-fills', async (req) => {
+    const limit = Math.min(500, Math.max(1, Number((req.query as { limit?: string }).limit) || 100));
+    const rec = deps.callputFills;
+    return rec
+      ? { enabled: true, lastError: rec.lastError, summary: summarizeCallputFills(rec.latest(500)), records: rec.latest(limit) }
+      : { enabled: false, lastError: null, summary: null, records: [] };
   });
 
   // Every Olive market's free capacity and hedge venues (watcher sweep, ~10 min old at most).

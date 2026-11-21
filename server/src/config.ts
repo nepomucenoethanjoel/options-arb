@@ -73,6 +73,10 @@ export interface AppConfig {
   hypercallBaseUrl: string;
   callputFeedUrl: string;
   callputMinIntervalMs: number;
+  /** Callput request/fill recorder (callputRecorder.ts, row 88): on by default when Callput is a venue. */
+  callputRecorder: boolean;
+  callputRpcUrl: string;
+  callputRecorderPollMs: number;
   deribitBaseUrl: string;
   okxBaseUrl: string;
   gateBaseUrl: string;
@@ -233,12 +237,13 @@ export function loadConfig(): AppConfig {
   const bookSource = str('DERIVE_BOOK_SOURCE', 'merge');
   const oliveMode = str('OLIVE_MODE', 'auto');
 
+  const extraVenues = extraVenueList();
   return {
     port: num('PORT', 8799),
     host: str('HOST', '127.0.0.1'),
     underlyings: list('UNDERLYINGS', ['SOL', 'BTC', 'ETH']),
     pollIntervalMs: Math.max(5000, num('POLL_INTERVAL_MS', 15000)),
-    extraVenues: extraVenueList(),
+    extraVenues,
     referenceVenues: list('REFERENCE_VENUES', []).map((v) => v.toLowerCase() as Venue),
     venueChainTimeoutMs: Math.max(2_000, num('VENUE_CHAIN_TIMEOUT_MS', 12_000)),
     olivePoolWatch: bool('OLIVE_POOL_WATCH', true),
@@ -252,6 +257,9 @@ export function loadConfig(): AppConfig {
     paradexBaseUrl: str('PARADEX_BASE_URL', 'https://api.prod.paradex.trade/v1'),
     callputMinIntervalMs: Math.max(15_000, num('CALLPUT_MIN_INTERVAL_MS', 60_000)),
     callputFeedUrl: str('CALLPUT_FEED_URL', 'https://app-data-base.s3.ap-southeast-1.amazonaws.com/market-data.json'),
+    callputRecorder: bool('CALLPUT_RECORDER', extraVenues.includes('callput')),
+    callputRpcUrl: str('CALLPUT_RPC_URL', 'https://base-rpc.publicnode.com'),
+    callputRecorderPollMs: Math.max(5_000, num('CALLPUT_RECORDER_POLL_MS', 15_000)),
 
     deriveBaseUrl: str('DERIVE_BASE_URL', 'https://api.derive.xyz/v3'),
     deriveLegacyUrl: str('DERIVE_LEGACY_URL', 'https://api.lyra.finance'),

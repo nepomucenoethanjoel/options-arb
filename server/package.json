@@ -22,6 +22,7 @@
     "check:trades": "tsx src/scripts/check-trades.ts",
     "handcheck:books": "tsx src/scripts/handcheck-books.ts",
     "callput:fills": "tsx src/scripts/callput-fills.ts",
+    "callput:settlements": "tsx src/scripts/callput-settlements.ts",
     "alert:test": "tsx src/scripts/alert-test.ts"
   },
   "dependencies": {
