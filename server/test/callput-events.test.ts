@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { decodeCallputLog, decodeCallputTokenId, describeLegs, type RawLog } from '../src/adapters/callputEvents';
+import { creditRawIn, decodeCallputLog, decodeCallputTokenId, describeLegs, isCreditSpread, type RawLog } from '../src/adapters/callputEvents';
 
 /** The owner's two 2026-09-27 Callput requests (DATA_SOURCES row 85): 0xb86f… cancelled, 0x62ee… executed. */
 const fixture = JSON.parse(readFileSync(new URL('./fixtures/callput-pm-logs.json', import.meta.url), 'utf8')) as { logs: RawLog[] };
@@ -47,6 +47,22 @@ describe('Callput PositionManager events (owner fixture)', () => {
     if (ex.type !== 'openExecuted') throw new Error('type');
     expect(ex.token.expiryTs).toBe(SEP28);
     expect(describeLegs(ex.token.legs)).toBe('buy 85000C / sell 85500C');
+  });
+
+  it('classifies credit spreads from their strikes (bear call, bull put)', () => {
+    const leg = (isBuy: boolean, strike: number, isCall: boolean) => ({ isBuy, strike, isCall });
+    expect(isCreditSpread([leg(false, 2200, true), leg(true, 2400, true)])).toBe(true); // bear call
+    expect(isCreditSpread([leg(true, 1400, false), leg(false, 1500, false)])).toBe(true); // bull put
+    expect(isCreditSpread([leg(true, 85000, true), leg(false, 85500, true)])).toBe(false); // bull call (the owner's)
+    expect(isCreditSpread([leg(false, 555, false), leg(true, 695, false)])).toBe(false); // bear put
+  });
+
+  it("a credit nets out a close executed for the same account in the same transaction", () => {
+    const PM = '0x83b04701b227b045cbbaf921377137ff595a54af';
+    const usdcTo = (raw: bigint) => ({ address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', topics: ['0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef', '0x' + PM.slice(2).padStart(64, '0'), '0x' + OWNER.slice(2).padStart(64, '0')], data: '0x' + raw.toString(16).padStart(64, '0') });
+    const close = { address: PM, topics: ['0xe00e5d5c' + '0'.repeat(56), '0x' + OWNER.slice(2).padStart(64, '0'), '0x' + '0'.repeat(63) + '1', '0x' + '0'.repeat(56) + '6aba1e80'], data: '0x' + ['0001006aba1e80560000000a60440000000a6fe4000000000000000000000000', '1'.padStart(64, '0'), 'c0'.padStart(64, '0'), (300_000_000n).toString(16).padStart(64, '0')].join('') };
+    expect(creditRawIn([usdcTo(336_000_000n), close], OWNER)).toBe(36_000_000n);
+    expect(creditRawIn([usdcTo(300_000_000n), close], OWNER)).toBe(0n);
   });
 
   it('ignores event types it does not read', () => {
