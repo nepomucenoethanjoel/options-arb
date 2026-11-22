@@ -19,25 +19,25 @@ export const OLIVE_MARKETS_URL = 'https://olive.exchange/public/markets.json';
  * 2026-11-05/06 (DATA_SOURCES row 62); PAXG→XAUT is a different gold token.
  */
 export const OLIVE_HEDGES: Record<string, { underlying: string; venues: string[] }> = {
-  BTC: { underlying: 'BTC', venues: ['derive', 'coincall', 'deribit', 'okx', 'gate', 'paradex', 'callput'] },
-  ETH: { underlying: 'ETH', venues: ['derive', 'coincall', 'deribit', 'okx', 'gate', 'paradex', 'callput'] },
-  SOL: { underlying: 'SOL', venues: ['derive', 'coincall', 'deribit', 'gate', 'paradex'] },
+  BTC: { underlying: 'BTC', venues: ['derive', 'coincall', 'deribit', 'okx', 'gate', 'paradex', 'callput', 'aevo'] },
+  ETH: { underlying: 'ETH', venues: ['derive', 'coincall', 'deribit', 'okx', 'gate', 'paradex', 'callput', 'aevo'] },
+  SOL: { underlying: 'SOL', venues: ['derive', 'coincall', 'deribit', 'gate', 'paradex', 'okx', 'aevo'] },
   ZEC: { underlying: 'ZEC', venues: ['derive', 'paradex'] },
   XRP: { underlying: 'XRP', venues: ['derive', 'coincall', 'deribit', 'gate'] },
   BNB: { underlying: 'BNB', venues: ['coincall', 'gate'] },
   DOGE: { underlying: 'DOGE', venues: ['coincall', 'gate'] },
-  HYPE: { underlying: 'HYPE', venues: ['derive', 'coincall', 'deribit', 'gate', 'paradex'] },
+  HYPE: { underlying: 'HYPE', venues: ['derive', 'coincall', 'deribit', 'gate', 'paradex', 'okx', 'aevo'] },
   TRX: { underlying: 'TRX', venues: ['deribit'] },
   AVAX: { underlying: 'AVAX', venues: ['deribit'] },
   LTC: { underlying: 'LTC', venues: ['gate'] },
-  ADA: { underlying: 'ADA', venues: ['gate'] },
+  ADA: { underlying: 'ADA', venues: ['gate', 'derive'] },
   AAVE: { underlying: 'AAVE', venues: ['coincall'] },
   TRUMP: { underlying: 'TRUMP', venues: ['coincall'] },
-  PAXG: { underlying: 'XAUT', venues: ['coincall', 'gate'] },
+  PAXG: { underlying: 'XAUT', venues: ['coincall', 'gate', 'derive', 'okx'] },
   SPYX: { underlying: 'SPY', venues: ['coincall', 'callput'] },
   QQQX: { underlying: 'QQQ', venues: ['coincall', 'callput'] },
   TSLAX: { underlying: 'TSLA', venues: ['callput'] },
-  NVDAX: { underlying: 'NVDA', venues: ['hypercall', 'callput'] },
+  NVDAX: { underlying: 'NVDA', venues: ['hypercall', 'callput', 'derive'] },
   METAX: { underlying: 'META', venues: ['callput'] },
   GOOGLX: { underlying: 'GOOGL', venues: ['callput'] },
   AAPLX: { underlying: 'AAPL', venues: ['callput'] },
@@ -49,6 +49,10 @@ export const OLIVE_HEDGES: Record<string, { underlying: string; venues: string[]
   MUX: { underlying: 'MU', venues: ['callput'] },
   SKHY: { underlying: 'SKHY', venues: ['callput'] },
   SPCXX: { underlying: 'SPCX', venues: ['callput'] },
+  // Derive option listings read 2026-11-22 (row 93); ANT also on Hypercall's /markets (row 80).
+  VVV: { underlying: 'VVV', venues: ['derive'] },
+  PUMP: { underlying: 'PUMP', venues: ['derive'] },
+  ANTX: { underlying: 'ANT', venues: ['derive', 'hypercall'] },
 };
 
 export interface OlivePoolSnapshot {

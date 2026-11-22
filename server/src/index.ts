@@ -9,6 +9,7 @@ import { DeribitAdapter } from './adapters/deribit';
 import { OkxAdapter } from './adapters/okx';
 import { GateAdapter } from './adapters/gate';
 import { ParadexAdapter } from './adapters/paradex';
+import { AevoAdapter } from './adapters/aevo';
 import { OlivePoolWatcher } from './olivePools';
 import { CallputRecorder } from './callputRecorder';
 import { OliveAdapter } from './adapters/olive';
@@ -58,6 +59,7 @@ async function main(): Promise<void> {
     okx: () => new OkxAdapter(cfg.okxBaseUrl),
     gate: () => new GateAdapter(cfg.gateBaseUrl),
     paradex: () => new ParadexAdapter(cfg.paradexBaseUrl),
+    aevo: () => new AevoAdapter(cfg.aevoBaseUrl),
   };
   const extraVenues = cfg.extraVenues.map((v) => extraAdapters[v]());
   const alerter = new Alerter(cfg);

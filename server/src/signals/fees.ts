@@ -116,6 +116,18 @@ export function feeModels(cfg: FeeConfig): Partial<Record<Venue, VenueFeeModel>>
       },
       perOrder: 0,
     },
+    // Aevo (docs options-fees, read 2026-11-22): taker 0.05% of index notional,
+    // capped at 12.5% of premium; settlement 0.015% of notional capped at 12.5%
+    // of the payout on Friday expiries only — no weekday in the context, so it
+    // is charged on every expiry (conservative, row 91).
+    aevo: {
+      perContract: ({ legPrice, notional, kind, strike }) => {
+        const trade = legPrice != null && legPrice > 0 ? Math.min(notional * 0.0005, legPrice * 0.125) : notional * 0.0005;
+        const intrinsic = Math.max(0, kind === 'call' ? notional - strike : strike - notional);
+        return trade + Math.min(notional * 0.00015, intrinsic * 0.125);
+      },
+      perOrder: 0,
+    },
     // Gate (per-contract fields on /options/contracts, live 2026-11-05 — the
     // formula reading is ours): taker_fee_rate 0.03% (BTC/ETH) / 0.05% (others)
     // of underlying notional, capped at price_limit_fee_rate 12.5% of premium;

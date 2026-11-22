@@ -10,7 +10,7 @@
 import { loadConfig } from '../config';
 
 const APP = process.env.APP_URL ?? 'http://127.0.0.1:8799';
-const BOOK_VENUES = ['derive', 'coincall', 'hypercall', 'callput', 'deribit', 'okx', 'gate', 'paradex'] as const;
+const BOOK_VENUES = ['derive', 'coincall', 'hypercall', 'callput', 'deribit', 'okx', 'gate', 'paradex', 'aevo'] as const;
 type BookVenue = (typeof BOOK_VENUES)[number];
 
 const n = (v: unknown): number | null => {
@@ -109,14 +109,23 @@ async function okxRaw(instId: string): Promise<RawQuote> {
     get(`/api/v5/public/instruments?instType=OPTION&instFamily=${family}&instId=${instId}`),
     get(`/api/v5/market/ticker?instId=${instId}`),
     get(`/api/v5/public/mark-price?instType=OPTION&instId=${instId}`),
-    get(`/api/v5/market/index-tickers?instId=${family}`),
+    get(`/api/v5/market/index-tickers?instId=${family.replace('_UM', '')}`),
   ]);
   if (!t || !inst[0]) throw new Error(`OKX ${instId} not found`);
-  // Prices: coin per 1 coin → × index. Sizes: contracts × ctVal × ctMult coin.
+  // Prices: coin per 1 coin → × index (USD per 1 coin on _UM families). Sizes: contracts × ctVal × ctMult coin.
   const idx = pos(i?.idxPx)!;
+  const fx = family.endsWith('_UM') ? 1 : idx;
   const coin = n(inst[0].ctVal)! * n(inst[0].ctMult)!;
   const bid = pos(t.bidPx), ask = pos(t.askPx);
-  return { bid: bid != null ? bid * idx : null, bidSize: bid != null ? n(t.bidSz)! * coin : null, ask: ask != null ? ask * idx : null, askSize: ask != null ? n(t.askSz)! * coin : null, mark: pos(m?.markPx) != null ? pos(m.markPx)! * idx : null, index: idx };
+  return { bid: bid != null ? bid * fx : null, bidSize: bid != null ? n(t.bidSz)! * coin : null, ask: ask != null ? ask * fx : null, askSize: ask != null ? n(t.askSz)! * coin : null, mark: pos(m?.markPx) != null ? pos(m.markPx)! * fx : null, index: idx };
+}
+
+async function aevoRaw(name: string): Promise<RawQuote> {
+  const body = (await (await fetch(`https://api.aevo.xyz/instrument/${encodeURIComponent(name)}`)).json()) as any;
+  if (!body?.instrument_name) throw new Error(`Aevo ${name} not found`);
+  // USD per 1 coin; amounts in coin.
+  const bid = pos(body.best_bid?.price), ask = pos(body.best_ask?.price);
+  return { bid, bidSize: bid != null ? n(body.best_bid?.amount) : null, ask, askSize: ask != null ? n(body.best_ask?.amount) : null, mark: pos(body.mark_price), index: pos(body.index_price) };
 }
 
 async function gateRaw(underlying: string, name: string): Promise<RawQuote> {
@@ -169,6 +178,12 @@ function feeOf(venue: BookVenue, legPrice: number | null, spot: number, underlyi
     const intrinsic = Math.max(0, kind === 'call' ? spot - strike : strike - spot);
     return trade + Math.min(spot * 0.000075, intrinsic);
   }
+  if (venue === 'aevo') {
+    // Docs options-fees: taker 0.05% index notional capped 12.5% premium; settlement 0.015% capped 12.5% payout (Fridays), charged every expiry.
+    const trade = legPrice != null && legPrice > 0 ? Math.min(spot * 0.0005, 0.125 * legPrice) : spot * 0.0005;
+    const intrinsic = Math.max(0, kind === 'call' ? spot - strike : strike - spot);
+    return trade + Math.min(spot * 0.00015, 0.125 * intrinsic);
+  }
   if (venue === 'hypercall') return spot * (5 + 1.5) / 10_000; // published 5 bps taker + 1.5 bps settlement
   if (venue === 'callput') {
     const capped = (bps: number) => (legPrice != null && legPrice > 0 ? Math.min(spot * bps / 10_000, 0.125 * legPrice) : spot * bps / 10_000);
@@ -179,7 +194,7 @@ function feeOf(venue: BookVenue, legPrice: number | null, spot: number, underlyi
   const intrinsic = Math.max(0, kind === 'call' ? spot - strike : strike - spot);
   return trade + (tteDays < 1 ? 0 : Math.min(spot * 0.00015, 0.125 * intrinsic));
 }
-const ORDER_FEE: Record<BookVenue, number> = { derive: 0.5, coincall: 0, hypercall: 0, callput: 0, deribit: 0, okx: 0, gate: 0, paradex: 0 };
+const ORDER_FEE: Record<BookVenue, number> = { derive: 0.5, coincall: 0, hypercall: 0, callput: 0, deribit: 0, okx: 0, gate: 0, paradex: 0, aevo: 0 };
 
 /** Exit codes (scheduled runs, deploy/options-arb-handcheck.sh): 0 all ✓, 1 a
  *  money field ✗ or an error, 3 nothing to check right now. Quote drift
@@ -222,7 +237,9 @@ async function main() {
                 ? gateRaw(row.underlying, row.legs.gate.instrumentId)
                 : v === 'paradex'
                   ? paradexRaw(row.legs.paradex.instrumentId)
-                  : deribitRaw(row.legs.deribit.instrumentId);
+                  : v === 'aevo'
+                    ? aevoRaw(row.legs.aevo.instrumentId)
+                    : deribitRaw(row.legs.deribit.instrumentId);
   const [freshB, freshS] = await Promise.all([raw(buy), raw(sell)]);
   // 1) Quote source: the fresh raw quote vs the quote the cycle used. RFQ
   //    makers re-quote every second or two, so allow drift; a wrong side,

@@ -63,17 +63,22 @@ export const VENUE_SPECS: Record<Venue, VenueSpec> = {
     settlementAsset: (_kind, underlying) => (underlying === 'BTC' || underlying === 'ETH' ? 'underlying' : 'USDC'),
     settlementWindowHours: 0.5,
   },
-  // Coin-margined BTC/ETH (settleCcy BTC/ETH). Settlement averaging and any
-  // pre-expiry halt are not documented in what we could read: 0.5 h and a
-  // conservative 30 min cutoff are assumptions (DATA_SOURCES row 56).
+  // Coin-margined BTC/ETH (settleCcy BTC/ETH); SOL, HYPE and gold (XAU) from the
+  // USD-margined _UM families (settleCcy USD — treated as USDT, row 92). Settlement
+  // averaging and any pre-expiry halt are not documented in what we could read:
+  // 0.5 h and a conservative 30 min cutoff are assumptions (DATA_SOURCES row 56).
   okx: {
     label: 'OKX',
     quoteKind: 'book',
     canSell: always,
     tradingCutoffMs: 30 * 60_000,
-    settlementAsset: () => 'underlying',
+    settlementAsset: (_kind, underlying) => (underlying === 'BTC' || underlying === 'ETH' ? 'underlying' : 'USDT'),
     settlementWindowHours: 0.5,
   },
+  // Cash-settled in USDC at 08:00 UTC on Aevo's spot index (docs, row 91). The
+  // settlement averaging window and any pre-expiry halt are not documented: a
+  // single print (largest basis estimate) and a 30 min cutoff are assumptions.
+  aevo: { label: 'Aevo', quoteKind: 'book', canSell: always, tradingCutoffMs: 30 * 60_000, settlementAsset: () => 'USDC', settlementWindowHours: 0 },
   // USDT-margined (one {U}_USDT family per underlying). Settlement averaging
   // and any pre-expiry halt are not documented in what we could read: 0.5 h
   // and a conservative 30 min cutoff are assumptions (DATA_SOURCES row 60).
@@ -94,4 +99,4 @@ export const VENUE_SPECS: Record<Venue, VenueSpec> = {
 };
 
 /** Fixed venue order: deterministic pair enumeration and display. */
-export const VENUE_ORDER: Venue[] = ['derive', 'olive', 'coincall', 'hypercall', 'callput', 'deribit', 'okx', 'gate', 'paradex', 'bybit', 'binance'];
+export const VENUE_ORDER: Venue[] = ['derive', 'olive', 'coincall', 'hypercall', 'callput', 'deribit', 'okx', 'gate', 'paradex', 'aevo', 'bybit', 'binance'];

@@ -2,7 +2,7 @@ import type { OliveFixedRateSide } from './math/olive';
 
 export type OptionKind = 'call' | 'put';
 /** Every venue the app knows; which are polled is config (VENUES). */
-export type Venue = 'derive' | 'olive' | 'coincall' | 'hypercall' | 'callput' | 'deribit' | 'okx' | 'gate' | 'paradex' | 'bybit' | 'binance';
+export type Venue = 'derive' | 'olive' | 'coincall' | 'hypercall' | 'callput' | 'deribit' | 'okx' | 'gate' | 'paradex' | 'aevo' | 'bybit' | 'binance';
 
 export const MS_PER_YEAR = 365 * 24 * 60 * 60 * 1000;
 
