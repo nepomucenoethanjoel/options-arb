@@ -28,6 +28,8 @@ make a number look better.**
 2. **Every new venue assumption gets a DATA_SOURCES.md matrix row** (status
    VERIFIED-LIVE / DOCS-CONFIRMED / DOCUMENTED-ASSUMPTION / UNVERIFIED +
    evidence) in the same commit that introduces the assumption.
+   Keep `docs/VENUES.md` (per-venue reference) and `docs/FINDINGS.md` (findings,
+   open items) in step when a venue fact or finding changes.
 3. **Honesty over headline numbers.** Fixes that reduce displayed edge are
    correct fixes (see git history: phantom-row removal, fee corrections,
    marginal-fill pricing). Never remove a flag or a cost to make totals

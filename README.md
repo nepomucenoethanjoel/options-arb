@@ -1,196 +1,195 @@
-# options-arb — Options IV Arbitrage Monitor
+# options-arb — multi-venue options arbitrage monitor
 
-Read-only, real-time analytics dashboard comparing options implied volatility
-across venues, surfacing relative IV mispricings for **manual review**. This is
-a signal tool — it does not route or execute orders.
+Read-only, real-time dashboard that prices the same option across ten venues
+and surfaces the gaps worth a manual trade: buy where it's cheap (usually
+Olive's AMM), sell where you can short it. **It never places orders.** Every
+number it shows is checked against venue reality — the verification rules
+are in [AGENTS.md](./AGENTS.md), the evidence in [DATA_SOURCES.md](./DATA_SOURCES.md).
 
-| Venue | Kind | Underlyings | How quotes are read | Headline-eligible |
-|---|---|---|---|---|
-| **Derive.xyz** (EVM) | order book | SOL BTC ETH ZEC | v3 REST (+ legacy-host book merge) | ✓ |
-| **Olive Exchange** (Solana) | AMM, model vol | SOL BTC ETH ZEC | market file + our own BS synthesis | ✓ (buy side only) |
-| **Coincall** | order book | SOL BTC ETH | public REST, whole chain per call | ✓ |
-| **Hypercall** (HyperEVM) | RFQ makers | BTC ETH | `options-summary` RFQ provider quotes | ✗ `single_maker` |
-| **Callput** (Base) | vault, keeper-filled | BTC ETH | app S3 feed, mark ± risk premium | ✗ `indicative_quote` |
-| **Deribit** | order book | SOL BTC ETH | public REST summary (+ ticker sizes for candidate pairs) | ✓ (`REFERENCE_VENUES=deribit` makes it reference-only) |
-| **OKX** | order book | BTC ETH | public REST tickers + opt-summary + mark + index (coin-margined) | ✓ |
-| **Gate** | order book | BTC ETH SOL (+ XRP BNB DOGE HYPE XAUT SUI ADA LTC CL listed) | public REST contracts + tickers (USDT) | ✓ |
-| **Paradex** | order book | BTC ETH SOL HYPE ZEC NEAR (dated, 08:00 UTC) | public REST markets + ALL summary (USDC) | ✓ |
-| Bybit, Binance | order book | — | deferred: they geo-block the US host | — |
+> Live at http://192.236.184.31:8799 — auto-deploys from `main` via CI + the box cron.
 
-Every contract (same underlying, 08:00 UTC expiry, strike, kind) is compared
-across all venues that list it; the row shows the best **vol-consistent pair**
-(buy the lower-IV venue at its ask, sell the higher-IV venue at its bid), with
-runner-up pairs in the detail panel. Enable venues with `VENUES`.
+## Documentation map
 
-Data-source provenance and discovery history: [DATA_SOURCES.md](./DATA_SOURCES.md).
+| Doc | For |
+|---|---|
+| [docs/FINDINGS.md](./docs/FINDINGS.md) | What the research established, how to read the alerts, open items |
+| [docs/VENUES.md](./docs/VENUES.md) | Per-venue reference: endpoints, units, fees, settlement, gaps |
+| [DATA_SOURCES.md](./DATA_SOURCES.md) | The evidence matrix — every venue assumption, its status and proof |
+| [AGENTS.md](./AGENTS.md) | Rules for changing the code (tests, rows, honesty) and architecture pointers |
+| [deploy/README.md](./deploy/README.md) | The VPS: install, cron deploys, firewall, operations |
+| [docs/live-fill-checklist.md](./docs/live-fill-checklist.md) | How a real fill lifts `single_maker` / `indicative_quote` |
 
-## What it shows
+## Venues
 
-- **Overview table**: per (underlying, expiry, strike, kind) — Derive
-  market-implied IV vs Olive model vol, spread in vol points/bps, liquidity
-  flags, match type, freshness.
-- **IV smile chart — the crossover view**: Derive's quote smile vs Olive's flat
-  model vol, with green dots marking strikes where Derive IV > Olive (the
-  two-leg-executable side), shaded bands for the profitable strikes that fall
-  inside Olive's ±1σ quotable range, and an ATM term-structure strip showing
-  which expiry is closest to flipping the whole surface.
-- **Opportunity feed**: threshold-crossing mispricings ranked by
-  liquidity/cost-adjusted score, with theoretical edge in USDC. A
-  `price_distortion` guard flags rows whose quoted edge is mostly book-vs-mark
-  dislocation rather than vol mispricing; the Direction filter isolates the
-  executable buy-Olive/sell-Derive rows.
-- **Spread history**: per-contract time series (persisted in SQLite).
-- **Health badges + caveat banner**: per-venue data freshness, and the
-  risk-equivalence warnings the brief requires (collateralized AMM vs margin
-  venue, Stork oracle vs 30-min TWAP settlement, model vol vs market IV).
+| Venue | Kind | What the app reads | In headline totals |
+|---|---|---|---|
+| **Derive** | order book | BTC ETH SOL ZEC HYPE XRP ADA PUMP VVV ANT NVDA XAUT | ✓ |
+| **Olive** (Solana) | AMM, one model vol | crypto, xStock wrappers (SPYX …), PAXG | ✓ (buy side only) |
+| **Coincall** | order book | BTC ETH SOL SPY QQQ | ✓ |
+| **Hypercall** (HyperEVM) | RFQ market makers | BTC ETH AAPL META MSFT MU NVDA SPCX ANT | ✗ `single_maker` → maker-quote alerts |
+| **Callput** (Base) | vault, keeper-filled, **spreads only** | BTC ETH + synthetic stocks | ✗ `spread_only` |
+| **Deribit** | order book | BTC ETH SOL | ✓ |
+| **OKX** | order book | BTC ETH (coin), SOL HYPE gold (USD-margined) | ✓ |
+| **Gate** | order book | BTC ETH SOL (+ alts) | ✓ |
+| **Paradex** | order book | BTC ETH SOL HYPE ZEC NEAR | ✓ |
+| **Aevo** | order book | BTC ETH SOL HYPE | ✓ |
+| Bybit, Binance | — | deferred: geo-block the US host | — |
 
-## Stack
+Enable venues with `VENUES`; choose underlyings with `UNDERLYINGS`. Details per
+venue: [docs/VENUES.md](./docs/VENUES.md).
 
-- **shared**: framework-free TypeScript types + Black-Scholes and SVI math.
-- **server**: Node 22+ / Fastify; venue adapters (`OptionsVenueAdapter`),
-  matching + signal engines, SQLite persistence (`node:sqlite`), REST + WS API,
-  polling scheduler, optional webhook alerts.
-- **web**: React + Vite + Recharts + TanStack Table.
+## How it works
 
-## Quickstart
-
-```bash
-npm install
-cp .env.example .env        # defaults work out of the box
-
-npm run dev:server          # API + scheduler on http://127.0.0.1:8799
-npm run dev:web             # dashboard on http://127.0.0.1:5173 (proxies /api)
+```
+every ~30 s, per underlying:
+  adapters (Derive anchor chain + listed venues + Olive synthesizer)
+    → matching (same underlying, expiry ±1 day, strike; Olive quoted on demand)
+    → signals (every vol-consistent venue pair per contract; best pair + alternatives)
+    → flags (book quality, cutoffs, venue caveats, market hours, wrappers)
+    → SQLite (change-gated) + WebSocket + alerts
+  side jobs: Olive pool watcher (capacity per market), Callput fill recorder
 ```
 
-The server also serves `web/dist` statically when present
-(`npm run build -w web` then visit :8799 directly).
+- **Pairs:** for each contract the engine tries every ordered venue pair whose
+  IVs point the right way (sell IV ≥ buy IV), plus single-maker quotes whose
+  prices cross another book (`iv_inverted`). It keeps the best by: shortable
+  sell venue → clean book → honest total.
+- **Olive** is synthesized with Olive's own pricing (model vol, per-custody
+  rate curve + fixed-rate premium) at whatever strike the row needs, within
+  its ±1σ band. Wrapper rows (SPY → SPYX) quote Olive at K × (token/ETF spot)
+  and price per share.
 
-## Useful scripts
+## Profit estimate — methodology
+
+```
+entry   = cheap leg's take price       (Olive premium, or the book's ask)
+exit    = rich leg's executable price  (the book's bid — never mid)
+net     = exit − entry − fees            (per-venue models in signals/fees.ts)
+profit  = net − capital cost             (full collateral × borrow APR × tenor; conservative)
+total   = profit × size − per-order fees (size = binding book touch, capped by Olive's pool capacity)
+honest  = min(quoted total, fill-model total)   (Olive's rate moves with order size)
+```
+
+Both legs are European options on the same underlying and expiry, so held to
+expiry their payoffs converge and the price gap locks in. What does **not**
+lock in, and how the app treats it:
+
+- **Settlement basis:** venues settle on different prices (30-min TWAPs, single
+  prints, futures VWAPs). Each signal carries a ~1σ estimate from both venues'
+  settlement windows — a risk figure, not subtracted.
+- **Wrapper basis:** an xStock is not the stock (SPYX ≈ 1.0069 × SPY, noise
+  30–65 bps, more over weekends) → `wrapper_basis`, headline-blocking.
+- **Short-leg margin:** the short venue can liquidate before expiry while the
+  Olive long stays open. Watch its margin.
+- **Direction:** you can only buy on Olive; selling there is the LPs' role →
+  `direction_limited`.
+
+The KPI headline sums only clean rows at the honest clip size.
+
+## Flags
+
+**Non-executable** (row isn't tradable as shown; never an opportunity):
+`no_book`, `one_sided`, `thin_book`, `wide_book`, `stale`, `mismatched_legs`,
+`trading_cutoff` (venue halt or Olive's 24 h rule), `spread_only` (Callput).
+
+**Headline-blocking** (shown, excluded from totals and normal alerts): the
+above plus `price_distortion`, `fill_model_skipped`, `single_maker`,
+`indicative_quote`, `reference_venue`, `size_unknown` (venue publishes no
+size), `market_closed` (stock outside the NYSE session), `wrapper_basis`.
+
+**Informational:** `amm_pool_depth_unknown`, `pool_capacity_capped`,
+`pool_capacity_estimated`, `execution_moves_rate`, `direction_limited`,
+`near_expiry`, `settlement_asset_mismatch`, `iv_inverted`,
+`iv_mark_inconsistent`, `smile_outlier`, `calendar_inversion`,
+`hedge_size_unverified`.
+
+## Alerts
+
+Transport: Discord webhook (`DISCORD_WEBHOOK_URL`), else Telegram, else a
+generic webhook. `ALERTS_ENABLED=true` turns them on;
+`npm run alert:test -w server` proves delivery.
+
+| Lane | Fires when | Settings |
+|---|---|---|
+| **Opportunities** | a clean, executable pair's honest total clears the threshold; one digest per cycle, best first | `ALERT_MIN_TOTAL_USDC`, `ALERT_COOLDOWN_MS` |
+| **Maker quotes** | a single-maker RFQ quote (Hypercall) crosses a clean book after fees — shows the maker's size, the venue's model price, an estimated margin | `MAKER_ALERTS`, `MAKER_ALERT_MIN_NET_USDC` (5), `MAKER_ALERT_MIN_TOTAL_USDC` (10), `MAKER_ALERT_MIN_THEO_MULTIPLE` (0 = off), `MAKER_ALERT_COOLDOWN_MS` |
+| **Olive pools** | a hedgeable Olive market the app doesn't track gets free capacity | `OLIVE_POOL_WATCH`, `OLIVE_POOL_ALERT_USD` |
+
+## Dashboard and API
+
+| Tab | Answers |
+|---|---|
+| Profit | Best venue pair per contract, honest clip totals |
+| Best venue | Cheapest place to buy / richest to sell each contract after fees |
+| Vol by venue | Each venue's IV vs the cross-venue median; smile and calendar flags |
+| Parity | Conversions / reversals hedged with Deribit futures (informational) |
+| Analysis | Smile and term structure |
+| Gaps | How often and how long gaps actually lasted (episodes) |
+
+REST: `/api/overview`, `/api/opportunities`, `/api/pair?pairKey=…`,
+`/api/history`, `/api/surface`, `/api/parity`, `/api/episodes/summary`,
+`/api/olive-pools`, `/api/callput-fills`, `/api/health`. WebSocket pushes each cycle.
+
+## Verification
 
 ```bash
-npm run verify:derive       # dump a live Derive option chain with IV/greeks/books
-npm run probe:olive         # re-run Olive discovery (REST probes + on-chain reads);
-                            # append findings to DATA_SOURCES.md
-npm test                    # vitest across shared + server
+npm test                               # shared + server suites (golden replay included)
+npx tsc -b shared server web           # typecheck
+npm run handcheck -w server            # LIVE: one Olive pair vs raw venue data, independent math
+npm run handcheck:books -w server      # LIVE: one book-venue pair (PAIR_KEY=… optional)
+npm run callput:fills -w server        # LIVE: recent Callput requests/fills on Base
+npm run callput:settlements -w server  # LIVE: Callput settlement prices vs Deribit delivery
 ```
+
+The box re-runs both handchecks daily (`deploy/options-arb-handcheck.sh`).
 
 ## Configuration
 
-All settings are environment variables — see [.env.example](./.env.example).
-Key ones:
+All settings are environment variables — the full list with comments is in
+[.env.example](./.env.example). The ones you'll touch:
 
-| Var | Default | Meaning |
-|---|---|---|
-| `UNDERLYINGS` | `SOL,BTC,ETH` | Normalized underlyings present on both venues (ZEC also overlaps) |
-| `POLL_INTERVAL_MS` | `15000` | Scheduler cycle; effective rate is also capped by Derive limits |
-| `DERIVE_BOOK_SOURCE` | `merge` | v3 books were observed zeroed; merge fills bid/ask/OI from legacy host |
-| `OLIVE_MODE` | `auto` | `rest` \| `onchain` \| `auto` (REST first, on-chain fallback) |
-| `OLIVE_REALTIME` | `1` | Subscribe to Olive's socket.io ticker stream (~1 s Stork spot; see DATA_SOURCES.md §2d-quat) |
-| `OLIVE_REALTIME_SPOT_TRIGGER_PCT` | `1` | Re-price early when spot moves ≥ this % vs the last cycle (0 = off; 30 s cooldown) |
-| `IV_SPREAD_THRESHOLD_VOLS` | `3` | Flag threshold in vol points |
-| `ALERTS_ENABLED` / `ALERT_WEBHOOK_URL` | off | POST a JSON alert when a pair crosses threshold (per-pair cooldown) |
+| Var | Meaning |
+|---|---|
+| `UNDERLYINGS` | Which underlyings to price (the box reads its own `server/.env`) |
+| `VENUES` | Extra venues to read (default: all ten) |
+| `REFERENCE_VENUES` | Venues shown for reference only (never headline) |
+| `OLIVE_SYMBOL_MAP` / `STOCK_UNDERLYINGS` | Wrapper mappings (SPY → SPYX …) and NYSE-hours underlyings |
+| `IV_SPREAD_THRESHOLD_VOLS` | Opportunity threshold in vol points (3) |
+| `OLIVE_FEE_NOTIONAL_BPS` / `OLIVE_FEE_PREMIUM_PCT` / `OLIVE_RATE_CURVE_SHAPE` | Olive fee and rate-curve config (5 bp, 10%, quadratic) |
+| `CAPITAL_BORROW_RATE_APR` | Capital charge on collateral (8%) |
+| `CALLPUT_EXECUTION_FEE_ETH` / `CALLPUT_RECORDER` / `CALLPUT_RPC_URL` | Callput keeper fee, fill recorder, Base RPC |
+| `ALERTS_ENABLED`, `DISCORD_WEBHOOK_URL`, `ALERT_*`, `MAKER_ALERT_*` | Alerts (above) |
 
-## Architecture
+## Operations
 
-```
-scheduler ──▶ adapters (DeriveAdapter | OliveAdapter)   [health-tracked]
-        ──▶ matching engine  ──▶ signal engine ──▶ SQLite + WS broadcast + webhook
-                                    │
-                          Fastify REST (/api/*) ──▶ React dashboard
-```
+- **Deploy:** merge to `main` → CI tests and publishes the `deploy` branch with
+  the built dashboard → the box pulls it within a minute, runs
+  `npm ci --omit=dev` and restarts. The box never compiles.
+- **Config on the box:** `/opt/options-arb/server/.env`, then
+  `systemctl restart options-arb`. `UNDERLYINGS` there overrides
+  `.env.example` — new underlyings need adding on the box.
+- **Data:** SQLite at `DATA_DIR/options-arb.db`; Callput fill records at
+  `DATA_DIR/callput-fills.jsonl`.
+- **Health:** `/api/health` (per-venue status, warnings). The dashboard is
+  unauthenticated — firewall guidance in deploy/README.md.
 
-- `server/src/adapters/` — `OptionsVenueAdapter` implementations; nothing
-  downstream touches venue-specific logic.
-- `server/src/matching/` — pure functions; expiry bucketing (±tolerance),
-  strike matching (exact → interpolated), AMM-continuum handling for Olive,
-  match-type + reason flags.
-- `server/src/signals/` — pure functions; IV spread, Black-Scholes synthetic
-  cross-check, liquidity gating, round-trip cost + capital-efficiency
-  adjustment, ranking, threshold flagging.
-- `server/src/storage/` — `Storage` interface over `node:sqlite`
-  (swappable for Postgres/Timescale later).
-
-## Testing
+## Local development
 
 ```bash
-npm test
+npm install
+cp .env.example .env
+npm run dev:server     # API + scheduler on http://127.0.0.1:8799
+npm run dev:web        # dashboard on http://127.0.0.1:5173 (proxies /api)
 ```
 
-Covers: BS pricing/IV inversion round-trips, SVI evaluation, Derive slim-ticker
-mapping + instrument-name parsing (incl. fractional strikes), matching engine
-cases (exact / interpolated / unmatched / out-of-bounds / tenor), and signal
-engine gating/costs/direction logic.
+## Caveats
 
-## Profit estimates — methodology
-
-Every signal carries a held-to-expiry profit estimate in USDC:
-
-```
-entry  = cheap leg's take price   (Olive AMM premium, or Derive ask)
-exit   = rich leg's executable px (Derive BID when Derive vol is rich — not mid)
-gross  = exit − entry
-net    = gross − fees − gas                     (Derive taker bps, Olive min(5bps, 10% premium), Solana fee)
-profit = net − collateral drag                  (Olive locks full collateral × borrow APR × tenor)
-total  = profit × size cap                      (min of Derive bid/ask touch size; Olive AMM depth unknown)
-```
-
-Why held-to-expiry works: both legs are European options on the same
-underlying and (within ±1 day tolerance) the same expiry, so their payoffs
-converge and the price difference locks in. What it does **not** lock in:
-
-- **Settlement basis** — Derive settles a 30-minute TWAP, Olive a Stork oracle
-  print. Each signal carries a ~1σ divergence estimate
-  (`|Δ|·S·σ·√(30min/1yr)`), shown as a risk, not subtracted.
-- **Direction** — options are bought *from* the Olive pool; writing fresh
-  shorts to it is an LP role. "Sell vol on Olive" directions are flagged
-  `direction_limited`.
-- **`syntheticCrossCheckUsdc`** — Derive mid minus the same leg repriced at
-  Olive's vol. Should sit near vega × Δσ; large deviations hint at
-  quote/settlement distortion rather than pure IV mispricing.
-
-`npm run handcheck -w server` re-verifies one live Olive-pair signal against raw venue
-APIs with independent math — every field must reproduce. The pair comes from
-`handcheck-target.json` (pairKey only) when present, else the top executable
-opportunity; all inputs are live (market-file vol/spot/custody, config rates),
-never pinned snapshots.
-
-`npm run handcheck:books -w server` does the same for book-vs-book pairs
-(Derive / Coincall / Hypercall / Callput): raw REST quotes are compared with the
-quotes the cycle used (drift reported), and every money field is recomputed
-from them with independently written fee formulas (`PAIR_KEY=…` to pick one).
-
-## Dashboard views
-
-| Tab | What it answers |
-|---|---|
-| Profit | Best vol-consistent venue pair per contract, honest clip totals |
-| Best venue | Cheapest place to buy / richest to sell each contract after per-contract fees |
-| Vol by venue | Each venue's IV vs the cross-venue median (rich / cheap), smile and calendar flags |
-| Parity | Cross-venue conversions / reversals hedged with Deribit dated futures (BTC/ETH, informational) |
-| Analysis | Smile and term structure |
-| Gaps | How often and how long gaps of each tier actually lasted (episodes) |
-
-The venue checkboxes filter every view for the viewer only; the KPI always counts every venue.
-`npm run alert:test -w server` proves alert delivery; `deploy/options-arb-handcheck.sh`
-re-runs both handchecks daily on the box.
-
-## Caveats encoded in the app
-
-1. **Not risk-equivalent venues**: Olive is fully collateralized (calls backed
-   by underlying, puts by USDC); Derive is margin-based. Capital efficiency,
-   liquidation mechanics, and settlement (Stork oracle print vs 30-min TWAP)
-   differ. Surfaced in the UI banner and as a capital-cost line on each signal.
-2. **Olive "IV" is a model vol**: their AMM prices with an EWMA realized-vol
-   oracle (per-asset, flat across strikes). The spread this dashboard shows is
-   market-implied (Derive) minus model (Olive) vol — labeled as such.
-3. **Directionality**: options are bought from the Olive pool (LPs are the
-   sellers). "Sell vol on Olive" directions are flagged `direction_limited`.
-4. **Data freshness**: on-chain/indexer data can lag; per-source freshness is
-   tracked and stale feeds downgrade signals and show a warning badge.
-5. **Settlement depends on Olive's keeper**: payoffs settle on a single oracle
-   print submitted by their backend keeper — which has been observed inactive
-   (2026-09-19+ redeploy). ITM positions may settle late if it stays down.
-6. **Signal generation and manual review only** — no execution logic exists in
-   this codebase by design.
-
-> Live at http://192.236.184.31:8799 — auto-deploys from `main` via CI + the box cron.
+1. **Signals only** — no execution logic exists in this codebase, by design.
+2. **Olive "IV" is a model vol** (EWMA realized, flat across strikes); spreads
+   shown are market IV minus model vol, labelled as such.
+3. **Not risk-equivalent venues:** Olive is fully collateralized and settles on
+   a single oracle print by its keeper; most others are margin venues settling
+   on averages. Capital and settlement differences are priced or flagged, not ignored.
+4. **Unproven venues stay out of totals** until real fills prove their quotes
+   (`single_maker`, `indicative_quote`, `spread_only`, `size_unknown`).
+5. **Freshness:** stale feeds are flagged and drop out of totals.
