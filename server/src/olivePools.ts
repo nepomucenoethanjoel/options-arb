@@ -33,12 +33,12 @@ export const OLIVE_HEDGES: Record<string, { underlying: string; venues: string[]
   ADA: { underlying: 'ADA', venues: ['gate', 'derive'] },
   AAVE: { underlying: 'AAVE', venues: ['coincall'] },
   TRUMP: { underlying: 'TRUMP', venues: ['coincall'] },
-  PAXG: { underlying: 'XAUT', venues: ['coincall', 'gate', 'derive', 'okx'] },
+  PAXG: { underlying: 'XAUT', venues: ['coincall', 'gate', 'derive', 'okx', 'paradex'] },
   SPYX: { underlying: 'SPY', venues: ['coincall', 'callput'] },
   QQQX: { underlying: 'QQQ', venues: ['coincall', 'callput'] },
   TSLAX: { underlying: 'TSLA', venues: ['callput'] },
-  NVDAX: { underlying: 'NVDA', venues: ['hypercall', 'callput', 'derive'] },
-  METAX: { underlying: 'META', venues: ['callput'] },
+  NVDAX: { underlying: 'NVDA', venues: ['hypercall', 'callput', 'derive', 'paradex'] },
+  METAX: { underlying: 'META', venues: ['callput', 'paradex'] },
   GOOGLX: { underlying: 'GOOGL', venues: ['callput'] },
   AAPLX: { underlying: 'AAPL', venues: ['callput'] },
   AMZNX: { underlying: 'AMZN', venues: ['callput'] },
@@ -46,13 +46,17 @@ export const OLIVE_HEDGES: Record<string, { underlying: string; venues: string[]
   COINX: { underlying: 'COIN', venues: ['callput'] },
   HOODX: { underlying: 'HOOD', venues: ['callput'] },
   CRCLX: { underlying: 'CRCL', venues: ['callput'] },
-  MUX: { underlying: 'MU', venues: ['callput'] },
+  MUX: { underlying: 'MU', venues: ['callput', 'paradex'] },
   SKHY: { underlying: 'SKHY', venues: ['callput'] },
-  SPCXX: { underlying: 'SPCX', venues: ['callput'] },
+  SPCXX: { underlying: 'SPCX', venues: ['callput', 'paradex'] },
   // Derive option listings read 2026-11-22 (row 93); ANT also on Hypercall's /markets (row 80).
   VVV: { underlying: 'VVV', venues: ['derive'] },
   PUMP: { underlying: 'PUMP', venues: ['derive'] },
   ANTX: { underlying: 'ANT', venues: ['derive', 'hypercall'] },
+  // Paradex TradFi options read 2026-11-22 (row 96).
+  MSTRX: { underlying: 'MSTR', venues: ['paradex'] },
+  // Coincall lists WLFI options (row 97).
+  WLFI: { underlying: 'WLFI', venues: ['coincall'] },
 };
 
 export interface OlivePoolSnapshot {

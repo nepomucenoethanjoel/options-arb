@@ -186,6 +186,8 @@ export const DEFAULT_OLIVE_SYMBOL_MAP: Record<string, string> = {
   AMZN: 'AMZNX', MSFT: 'MSFTX', COIN: 'COINX', HOOD: 'HOODX', CRCL: 'CRCLX', MU: 'MUX', SKHY: 'SKHY', SPCX: 'SPCXX',
   // Derive and Hypercall list ANT options; Olive's market is ANTX (row 93).
   ANT: 'ANTX',
+  // Paradex lists MSTR options (16:00 UTC); Olive's market is MSTRX (row 96).
+  MSTR: 'MSTRX',
 };
 
 export function loadConfig(): AppConfig {
@@ -282,7 +284,7 @@ export function loadConfig(): AppConfig {
     oliveUsdcRateApr: num('OLIVE_USDC_RATE_APR', 0),
     oliveVolOverrides,
     oliveSymbolMap: { ...DEFAULT_OLIVE_SYMBOL_MAP, ...jsonStringMap('OLIVE_SYMBOL_MAP') },
-    stockUnderlyings: list('STOCK_UNDERLYINGS', ['SPY', 'QQQ', 'TSLA', 'NVDA', 'META', 'GOOGL', 'AAPL', 'AMZN', 'MSFT', 'COIN', 'HOOD', 'CRCL', 'MU', 'SKHY', 'SPCX', 'EWY', 'PLTR', 'SNDK', 'DRAM']),
+    stockUnderlyings: list('STOCK_UNDERLYINGS', ['SPY', 'QQQ', 'TSLA', 'NVDA', 'META', 'GOOGL', 'AAPL', 'AMZN', 'MSFT', 'COIN', 'HOOD', 'CRCL', 'MU', 'SKHY', 'SPCX', 'EWY', 'PLTR', 'SNDK', 'DRAM', 'MSTR']),
     oliveRateOverrides,
     olivePoolLiquidityUsd,
 

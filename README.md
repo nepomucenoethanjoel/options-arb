@@ -25,13 +25,13 @@ are in [AGENTS.md](./AGENTS.md), the evidence in [DATA_SOURCES.md](./DATA_SOURCE
 |---|---|---|---|
 | **Derive** | order book | BTC ETH SOL ZEC HYPE XRP ADA PUMP VVV ANT NVDA XAUT | ✓ |
 | **Olive** (Solana) | AMM, one model vol | crypto, xStock wrappers (SPYX …), PAXG | ✓ (buy side only) |
-| **Coincall** | order book | BTC ETH SOL SPY QQQ | ✓ |
+| **Coincall** | order book | BTC ETH SOL SPY QQQ HYPE XRP XAUT DOGE AAVE WLFI BNB TRUMP | ✓ |
 | **Hypercall** (HyperEVM) | RFQ market makers | BTC ETH AAPL META MSFT MU NVDA SPCX ANT | ✗ `single_maker` → maker-quote alerts |
 | **Callput** (Base) | vault, keeper-filled, **spreads only** | BTC ETH + synthetic stocks | ✗ `spread_only` |
 | **Deribit** | order book | BTC ETH SOL | ✓ |
 | **OKX** | order book | BTC ETH (coin), SOL HYPE gold (USD-margined) | ✓ |
 | **Gate** | order book | BTC ETH SOL (+ alts) | ✓ |
-| **Paradex** | order book | BTC ETH SOL HYPE ZEC NEAR | ✓ |
+| **Paradex** | order book | BTC ETH SOL HYPE ZEC NEAR · META NVDA SPCX MU MSTR gold (16:00 UTC) | ✓ |
 | **Aevo** | order book | BTC ETH SOL HYPE | ✓ |
 | Bybit, Binance | — | deferred: geo-block the US host | — |
 

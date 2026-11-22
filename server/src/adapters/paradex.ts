@@ -17,14 +17,31 @@ import { HealthTracker, RateLimiter, fetchWithTimeout } from '../util';
  *  - GET /v1/markets/summary?market=ALL → bid/ask (USD per 1 coin),
  *    bid_size/ask_size (coin), mark_price, mark_iv (fraction),
  *    underlying_price (spot). One read shared by every underlying per cycle.
- *  - Crypto options expire 08:00 UTC; TradFi ones (XAU, CL, US100, US500,
- *    stocks) at 16:00 UTC — only CRYPTO_BASES are read, since the grid keys
- *    contracts on the 08:00 expiry.
+ *  - Crypto options expire 08:00 UTC; TradFi ones at 16:00 UTC (docs
+ *    expiries-and-listing). Read: crypto BTC ETH SOL HYPE ZEC NEAR, equities
+ *    META NVDA SPCX MU MSTR, and XAU gold for the app's XAUT row (flagged
+ *    wrapper_basis: Paradex's gold oracle is not the XAUT token). All settle
+ *    in USDC on a 30-min TWAP of Paradex's spot oracle (row 96). US500,
+ *    US100 and CL are listed but not mapped (no app underlying).
  *  - Empty side = "" (bid and size both blank). RFQ_ONLY markets have no book.
  */
 
 export const PARADEX_BASE_URL = 'https://api.prod.paradex.trade/v1';
-const CRYPTO_BASES = new Set(['BTC', 'ETH', 'SOL', 'HYPE', 'ZEC', 'NEAR']);
+export interface ParadexBase {
+  /** Paradex base_currency / symbol prefix. */
+  base: string;
+  /** Expiry time of day, UTC. */
+  expiryHourUtc: number;
+  flags?: string[];
+}
+const crypto = (base: string): ParadexBase => ({ base, expiryHourUtc: 8 });
+const tradfi = (base: string, flags?: string[]): ParadexBase => ({ base, expiryHourUtc: 16, ...(flags ? { flags } : {}) });
+/** App underlying → Paradex option family. */
+export const PARADEX_BASES: Record<string, ParadexBase> = {
+  BTC: crypto('BTC'), ETH: crypto('ETH'), SOL: crypto('SOL'), HYPE: crypto('HYPE'), ZEC: crypto('ZEC'), NEAR: crypto('NEAR'),
+  META: tradfi('META'), NVDA: tradfi('NVDA'), SPCX: tradfi('SPCX'), MU: tradfi('MU'), MSTR: tradfi('MSTR'),
+  XAUT: tradfi('XAU', ['wrapper_basis']),
+};
 const MARKETS_CACHE_TTL_MS = 10 * 60_000;
 /** The ALL summary is one budgeted read; underlyings in the same cycle share it. */
 const SUMMARY_TTL_MS = 5_000;
@@ -44,15 +61,16 @@ const pos = (v: unknown): number | null => {
 };
 
 export function parseParadexMarket(m: RawMarket, underlying: string): OptionInstrument | null {
+  const spec = PARADEX_BASES[underlying];
   const n = m.symbol ? NAME_RE.exec(m.symbol) : null;
-  if (!n || m.asset_kind !== 'OPTION' || m.base_currency !== underlying || !CRYPTO_BASES.has(underlying)) return null;
+  if (!spec || !n || n[1] !== spec.base || m.asset_kind !== 'OPTION' || m.base_currency !== spec.base) return null;
   if (num(m.funding_period_hours) !== 0 || m.trading_mode === 'RFQ_ONLY') return null;
   const expiryTs = num(m.expiry_at);
   const strike = num(m.strike_price);
   const month = MONTHS.indexOf(n[3]!);
   if (expiryTs == null || strike == null || month < 0) return null;
-  // The name's date at 08:00 UTC must be the market's own expiry (TradFi expires 16:00).
-  if (Date.UTC(2000 + Number(n[4]), month, Number(n[2]), 8) !== expiryTs) return null;
+  // The name's date at the family's expiry hour must be the market's own expiry.
+  if (Date.UTC(2000 + Number(n[4]), month, Number(n[2]), spec.expiryHourUtc) !== expiryTs) return null;
   return {
     venue: 'paradex',
     instrumentId: m.symbol!,
@@ -66,6 +84,7 @@ export function parseParadexMarket(m: RawMarket, underlying: string): OptionInst
 
 export function mapParadexChain(markets: RawMarket[], summary: RawSummary[], underlying: string, now: number): { instruments: OptionInstrument[]; quotes: OptionQuote[] } {
   const bySymbol = new Map(summary.map((s) => [s.symbol, s]));
+  const flags = PARADEX_BASES[underlying]?.flags;
   const instruments: OptionInstrument[] = [];
   const quotes: OptionQuote[] = [];
   for (const m of markets) {
@@ -89,6 +108,7 @@ export function mapParadexChain(markets: RawMarket[], summary: RawSummary[], und
       ivSource: 'market',
       greeks: { delta: num(s.delta), gamma: num(s.greeks?.gamma), vega: num(s.greeks?.vega), theta: num(s.greeks?.theta), rho: num(s.greeks?.rho) },
       source: 'paradex:rest',
+      ...(flags?.length ? { flags: [...flags] } : {}),
     });
   }
   return { instruments, quotes };
@@ -131,7 +151,7 @@ export class ParadexAdapter implements OptionsVenueAdapter {
   }
 
   async getChain(underlying: string): Promise<{ instruments: OptionInstrument[]; quotes: OptionQuote[] }> {
-    if (!CRYPTO_BASES.has(underlying)) return { instruments: [], quotes: [] };
+    if (!PARADEX_BASES[underlying]) return { instruments: [], quotes: [] };
     try {
       const [markets, summary] = await Promise.all([this.marketList(), this.summaryAll()]);
       const chain = mapParadexChain(markets, summary, underlying, Date.now());
@@ -148,7 +168,8 @@ export class ParadexAdapter implements OptionsVenueAdapter {
   }
 
   async getTicker(instrumentId: string): Promise<OptionQuote | null> {
-    const underlying = NAME_RE.exec(instrumentId)?.[1];
+    const base = NAME_RE.exec(instrumentId)?.[1];
+    const underlying = Object.entries(PARADEX_BASES).find(([, b]) => b.base === base)?.[0];
     if (!underlying) return null;
     return (await this.getChain(underlying)).quotes.find((q) => q.instrumentId === instrumentId) ?? null;
   }

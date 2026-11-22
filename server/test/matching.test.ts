@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { OptionInstrument, OptionQuote } from '@options-arb/shared';
 import type { AmmQuoteResult } from '../src/adapters/olive';
-import { matchChain as matchVenues, pairKeyOf, type MatchConfig } from '../src/matching/engine';
+import { expiryTag, matchChain as matchVenues, pairKeyOf, type MatchConfig } from '../src/matching/engine';
 
 const NOW = Date.UTC(2026, 8, 27, 12, 0, 0);
 const config: MatchConfig & { oliveMaxTenorMs: number } = {
@@ -290,5 +290,26 @@ describe('matchChain — structured leg offsets', () => {
     });
     expect(rows[0].legs.olive?.strikeOffset).toBeUndefined();
     expect(rows[0].legs.olive?.expiryOffsetDays).toBeUndefined();
+  });
+});
+
+describe('row keys carry the expiry time when it is not 08:00 UTC (row 96)', () => {
+  it('08:00 keeps the plain date; other times append HH (and MM when non-zero)', () => {
+    expect(expiryTag('20261127', Date.UTC(2026, 10, 27, 8))).toBe('20261127');
+    expect(expiryTag('20261127', Date.UTC(2026, 10, 27, 16))).toBe('20261127T16');
+    expect(expiryTag('20261127', Date.UTC(2026, 10, 27, 21, 30))).toBe('20261127T2130');
+    expect(pairKeyOf('META', '20261127', 600, 'put', Date.UTC(2026, 10, 27, 16))).toBe('META-20261127T16-600-P');
+    expect(pairKeyOf('BTC', '20261127', 60000, 'call', Date.UTC(2026, 10, 27, 8))).toBe('BTC-20261127-60000-C');
+  });
+
+  it('same-day contracts from venues with different expiry times are separate rows', () => {
+    const at = (venue: 'callput' | 'paradex', hour: number) => ({
+      venue, anchor: true,
+      instruments: [{ venue, instrumentId: `${venue}-600P`, underlying: 'META', expiryTs: Date.UTC(2026, 10, 27, hour), expiryDate: '20261127', strike: 600, kind: 'put' as const }],
+      quotes: new Map(),
+    });
+    const rows = matchVenues({ now: Date.UTC(2026, 10, 20), underlying: 'META', chains: [at('paradex', 16), at('callput', 17)] as never, config: { expiryToleranceMs: 86_400_000, maxStrikeRelDist: 0.02 } });
+    expect(rows.map((r) => r.pairKey).sort()).toEqual(['META-20261127T16-600-P', 'META-20261127T17-600-P']);
+    expect(rows.every((r) => Object.keys(r.legs).length === 1)).toBe(true);
   });
 });

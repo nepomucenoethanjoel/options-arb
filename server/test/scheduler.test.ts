@@ -57,8 +57,10 @@ describe('Orchestrator cadence', () => {
 
 describe('Orchestrator — extra listed venues', () => {
   const NOW = Date.now();
-  const expiryTs = NOW + 7 * 86_400_000;
-  const d = new Date(expiryTs);
+  // A real listing time: 08:00 UTC a week out (other expiry times key rows with their hour, row 96).
+  const d = new Date(NOW + 7 * 86_400_000);
+  d.setUTCHours(8, 0, 0, 0);
+  const expiryTs = d.getTime();
   const expiryDate = `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`;
   const inst = (venue: 'derive' | 'coincall', strike: number) => ({
     venue, instrumentId: `${venue}-${strike}`, underlying: 'ETH', expiryTs, expiryDate, strike, kind: 'call' as const,
