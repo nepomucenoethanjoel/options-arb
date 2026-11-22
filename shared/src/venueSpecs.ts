@@ -27,8 +27,8 @@ export interface VenueSpec {
   /** Quotes inside this window before expiry are not tradable (trading halt / request cutoff). */
   tradingCutoffMs: number;
   settlementAsset(kind: OptionKind, underlying: string): SettlementAsset;
-  /** Settlement averaging window, hours (0 = single print). */
-  settlementWindowHours: number;
+  /** Settlement averaging window, hours (0 = single print); per underlying where the venue differs by product. */
+  settlementWindowHours: number | ((underlying: string) => number);
   /** The venue publishes no quote size (vault-filled requests): pairs carry
    *  `size_unknown` instead of `thin_book`, and their size is null, not 0. */
   sizeUnpublished?: boolean;
@@ -37,7 +37,16 @@ export interface VenueSpec {
 const always = () => true;
 
 export const VENUE_SPECS: Record<Venue, VenueSpec> = {
-  derive: { label: 'Derive', quoteKind: 'book', canSell: always, tradingCutoffMs: 0, settlementAsset: () => 'USDC', settlementWindowHours: 0.5 },
+  // Docs settlement.md (row 95): crypto 30-min TWAP of spot to 08:00 UTC; NVDA a 2-min
+  // spot TWAP and WTI a 2-min futures VWAP; US500/US100 a 30-s VWAP of the assigned future.
+  derive: {
+    label: 'Derive',
+    quoteKind: 'book',
+    canSell: always,
+    tradingCutoffMs: 0,
+    settlementAsset: () => 'USDC',
+    settlementWindowHours: (u) => (u === 'US500' || u === 'US100' ? 30 / 3600 : u === 'NVDA' || u === 'WTI' ? 2 / 60 : 0.5),
+  },
   // An Olive option can be opened only while its expiry is more than one day away (docs
   // open-option "must exceed one day"; DATA_SOURCES rows 6, 81). The app's Olive leg is always a buy.
   olive: { label: 'Olive', quoteKind: 'amm_synthetic', canSell: () => false, tradingCutoffMs: 24 * 3_600_000, settlementAsset: () => 'USDC', settlementWindowHours: 0 },
@@ -99,4 +108,10 @@ export const VENUE_SPECS: Record<Venue, VenueSpec> = {
 };
 
 /** Fixed venue order: deterministic pair enumeration and display. */
+/** A venue's settlement averaging window for one underlying, hours. */
+export function settlementWindowHours(venue: Venue, underlying: string): number {
+  const w = VENUE_SPECS[venue].settlementWindowHours;
+  return typeof w === 'function' ? w(underlying) : w;
+}
+
 export const VENUE_ORDER: Venue[] = ['derive', 'olive', 'coincall', 'hypercall', 'callput', 'deribit', 'okx', 'gate', 'paradex', 'aevo', 'bybit', 'binance'];
