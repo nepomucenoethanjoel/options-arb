@@ -38,8 +38,11 @@ export function daysTo(ts: number): string {
 }
 
 export function pairLabel(pairKey: string): string {
-  const [u, date, strike, kind] = pairKey.split('-');
-  return `${u} ${expiryLabel(date)} ${Number(strike).toLocaleString()} ${kind === 'C' ? 'Call' : 'Put'}`;
+  const [u, dateTag, strike, kind] = pairKey.split('-');
+  // Non-08:00 UTC expiries carry their time: 20261127T16 → 2026-11-27 16:00 UTC.
+  const [date, hhmm] = dateTag.split('T');
+  const time = hhmm ? ` ${hhmm.slice(0, 2)}:${hhmm.slice(2, 4) || '00'} UTC` : '';
+  return `${u} ${expiryLabel(date)}${time} ${Number(strike).toLocaleString()} ${kind === 'C' ? 'Call' : 'Put'}`;
 }
 
 export const HEALTH_COLORS: Record<string, string> = {

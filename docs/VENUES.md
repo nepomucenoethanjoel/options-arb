@@ -13,13 +13,13 @@ fraction. A quote with no price on a side has that side `null` (never 0).
 |---|---|---|---|---|
 | Derive | order book | BTC ETH SOL ZEC HYPE XRP ADA PUMP VVV ANT NVDA XAUT (+ US500 US100 WTI listed, not mapped) | USDC | ✓ |
 | Olive | AMM, model vol | crypto + xStock wrappers + PAXG | USDC (puts) / coin (calls) | ✓ buy side only |
-| Coincall | order book | BTC ETH SOL SPY QQQ | USDT | ✓ |
+| Coincall | order book | BTC ETH SOL SPY QQQ HYPE XRP XAUT DOGE AAVE WLFI BNB TRUMP | USDT | ✓ |
 | Hypercall | RFQ makers | BTC ETH AAPL META MSFT MU NVDA SPCX ANT | USDC | ✗ `single_maker` (maker-quote alerts only) |
 | Callput | vault, keeper-filled | BTC ETH + synthetic stocks | USDC / coin | ✗ `indicative_quote`, `spread_only` |
 | Deribit | order book | BTC ETH SOL | coin (BTC/ETH), USDC (SOL) | ✓ |
 | OKX | order book | BTC ETH (coin-margined), SOL HYPE gold (USD-margined) | coin / USD | ✓ (gold: `wrapper_basis`) |
 | Gate | order book | BTC ETH SOL (+ alts listed) | USDT | ✓ |
-| Paradex | order book | BTC ETH SOL HYPE ZEC NEAR | USDC | ✓ |
+| Paradex | order book | BTC ETH SOL HYPE ZEC NEAR (08:00) · META NVDA SPCX MU MSTR gold (16:00 UTC) | USDC | ✓ (gold: `wrapper_basis`) |
 | Aevo | order book | BTC ETH SOL HYPE | USDC | ✓ |
 | Bybit, Binance | — | deferred (geo-block the US host) | — | — |
 
@@ -82,6 +82,9 @@ fraction. A quote with no price on a side has that side `null` (never 0).
 - **Fees (row 34):** taker 0.03% of index notional (BTC/ETH) / 0.06% (alts), capped at
   12.5% of premium; delivery min(0.015% × index, 12.5% × intrinsic) except dailies.
 - **Settles:** USDT; 15-min pre-expiry halt (`trading_cutoff`).
+- **Coverage (row 97):** reads any underlying it lists (24 bases); mapped to
+  Olive: BTC ETH SOL HYPE XRP XAUT SPY QQQ DOGE AAVE WLFI BNB TRUMP. Silver
+  (XAG) is not mapped — Olive's SLVON is a trust share (~0.906 oz).
 - **Note:** SPY/QQQ books are often marks only or wide.
 
 ## Hypercall (HyperEVM)
@@ -159,7 +162,11 @@ fraction. A quote with no price on a side has that side `null` (never 0).
 
 ## Paradex
 
-- **Read:** public REST markets + `/markets/summary?market=ALL` (rows 65–68).
+- **Read:** public REST markets + `/markets/summary?market=ALL` (rows 65–68, 96).
+- **TradFi (row 96):** equities META NVDA SPCX MU MSTR and XAU gold (→ the
+  XAUT row, `wrapper_basis`) expire **16:00 UTC**; US500/US100/CL listed, not
+  mapped. Settles on a 30-min TWAP of Paradex's oracle (a weighted median of
+  Pyth, Stork and exchange perps); equities trade 24/5, books are empty at weekends.
 - **Fees (row 66):** retail 0%; modelled at the Pro/API 0.01% taker capped at
   12.5% + 0.0075% settlement on ITM legs.
 - **Settles:** USDC, 30-min TWAP of the Paradex spot oracle ending at expiry.

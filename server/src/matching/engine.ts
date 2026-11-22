@@ -34,13 +34,30 @@ export interface MatchInput {
   config: MatchConfig;
 }
 
+/**
+ * Row key. Contracts expiring at 08:00 UTC (every crypto venue) keep the
+ * plain date; any other expiry time gets it appended (`20261127T16`), so
+ * same-day contracts from venues with different expiry times (stocks: Paradex
+ * 16:00, Callput 17:00, Hypercall/Derive 21:00 UTC) are separate rows — legs
+ * hours apart never converge (row 96).
+ */
 export function pairKeyOf(
   underlying: string,
   expiryDate: string,
   strike: number,
   kind: 'call' | 'put',
+  expiryTs?: number,
 ): string {
-  return `${underlying}-${expiryDate}-${strike}-${kind === 'call' ? 'C' : 'P'}`;
+  return `${underlying}-${expiryTag(expiryDate, expiryTs)}-${strike}-${kind === 'call' ? 'C' : 'P'}`;
+}
+
+export function expiryTag(expiryDate: string, expiryTs?: number): string {
+  if (expiryTs == null) return expiryDate;
+  const d = new Date(expiryTs);
+  const h = d.getUTCHours();
+  const m = d.getUTCMinutes();
+  if (h === 8 && m === 0) return expiryDate;
+  return `${expiryDate}T${String(h).padStart(2, '0')}${m ? String(m).padStart(2, '0') : ''}`;
 }
 
 function expiryOffsetDays(a: number, b: number): number {
@@ -60,8 +77,8 @@ interface GridPoint {
  * Build comparison rows for one underlying.
  *
  * The grid is the union of every anchor chain's live contracts, keyed by
- * pairKey (all anchor venues expire 08:00 UTC, so the same contract matches
- * exactly). Each non-anchor venue then fills its leg per grid point:
+ * pairKey (date, plus the expiry time when it isn't 08:00 UTC — so a row's
+ * listed legs always share one expiry instant). Each non-anchor venue then fills its leg per grid point:
  *  1. exact listed strike within expiry tolerance → leg note `listed`
  *  2. nearest listed strike within maxStrikeRelDist → interpolated (offsets
  *     recorded — not the same payoff; signals null the profit)
@@ -78,7 +95,7 @@ export function matchChain(input: MatchInput): MatchRow[] {
   for (const chain of anchors) {
     for (const inst of chain.instruments) {
       if (inst.underlying !== underlying || inst.expiryTs <= now) continue;
-      const key = pairKeyOf(underlying, inst.expiryDate, inst.strike, inst.kind);
+      const key = pairKeyOf(underlying, inst.expiryDate, inst.strike, inst.kind, inst.expiryTs);
       let point = grid.get(key);
       if (!point) {
         point = { pairKey: key, expiryTs: inst.expiryTs, expiryDate: inst.expiryDate, strike: inst.strike, kind: inst.kind, legs: {} };
@@ -182,7 +199,7 @@ export function matchChain(input: MatchInput): MatchRow[] {
     for (const o of chain.instruments) {
       if (o.underlying !== underlying || matchedSecondaryIds.has(o.instrumentId) || o.expiryTs <= now) continue;
       rows.push({
-        pairKey: pairKeyOf(underlying, o.expiryDate, o.strike, o.kind),
+        pairKey: pairKeyOf(underlying, o.expiryDate, o.strike, o.kind, o.expiryTs),
         underlying,
         expiryTs: o.expiryTs,
         expiryDate: o.expiryDate,

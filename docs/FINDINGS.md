@@ -102,7 +102,11 @@ what the data showed when it was checked.
   integrated (empty on weekends; build from a weekday capture). If they are
   the same xStock tokens as Olive's, there is no wrapper gap.
 - **Paradex:** "Margin Ratio" = maintenance margin ÷ equity; liquidation at
-  100%, not when it gets low.
+  100%, not when it gets low. Its stock/gold options expire **16:00 UTC** and
+  settle on its own oracle TWAP (row 96); MSTR is the only hedge for Olive's MSTRX.
+- **Expiry times differ by venue for stocks** (Paradex 16:00, Callput 17:00,
+  Hypercall/Derive 21:00 UTC); rows are now split by expiry time, so a pair's
+  legs always settle at the same instant (row 96).
 - **Panoptic:** perpetual options — can't hedge a dated option.
 
 ## 6. Tokens vs ETFs vs indices (row 94)
@@ -154,7 +158,9 @@ One month of hourly data (2026-10-22 → 11-21):
 |---|---|
 | Callput spread pricing vs feed | a few weekdays of `/api/callput-fills` records |
 | OKX Simple Options adapter | a weekday capture of `/priapi/v1/sfp/simple-option/products` |
-| Derive ANT/VVV/PUMP/ADA/XRP/HYPE on the box | add them to `UNDERLYINGS` in `/opt/options-arb/server/.env`, restart |
+| MSTR, DOGE, LTC, AAVE, WLFI, BNB, TRUMP on the box | add them to `UNDERLYINGS` in `/opt/options-arb/server/.env`, restart |
+| Paradex TradFi weekday books | check META/NVDA/MSTR rows on a weekday (weekend capture had marks only) |
+| Silver (Olive SLVON ↔ Coincall XAG) | a measured, stable SLVON/XAG ratio (~0.906 on one snapshot) |
 | Wrapper basis at Olive's own oracle | Pyth history (needs a key) or Olive's own history |
 | Hypercall `single_maker` lift | more fills at size (see docs/live-fill-checklist.md) |
 | Derive ANT/XAUT settlement | undocumented — ask Derive |

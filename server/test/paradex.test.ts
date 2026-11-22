@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { bsPrice } from '@options-arb/shared';
-import { ParadexAdapter, mapParadexChain, parseParadexMarket } from '../src/adapters/paradex';
+import { PARADEX_BASES, ParadexAdapter, mapParadexChain, parseParadexMarket } from '../src/adapters/paradex';
 import { feeModels } from '../src/signals/fees';
 
 /** Trimmed real responses captured 2026-11-06 (GET /v1/markets + /v1/markets/summary?market=ALL). */
@@ -72,5 +72,37 @@ describe('Paradex fee model', () => {
     expect(fee.perContract({ ...ctx, legPrice: 500 })).toBeCloseTo(8, 9);
     expect(fee.perContract({ ...ctx, legPrice: 40 })).toBeCloseTo(5, 9);
     expect(fee.perContract({ ...ctx, strike: 70_000, legPrice: 10_500 })).toBeCloseTo(8 + 6, 9);
+  });
+});
+
+/** Trimmed real TradFi responses captured Sunday 2026-11-22 (books empty in closing hours) — row 96. */
+const tradfi = JSON.parse(readFileSync(new URL('./fixtures/paradex-tradfi.json', import.meta.url), 'utf8'));
+const DEC11_16 = Date.UTC(2026, 11, 11, 16);
+
+describe('Paradex TradFi options (equities, gold) — 16:00 UTC', () => {
+  const tm = tradfi.markets.results;
+  const find = (sym: string) => tm.find((x: { symbol: string }) => x.symbol === sym);
+
+  it('parses equity options at their 16:00 UTC expiry; MSTR too', () => {
+    expect(parseParadexMarket(find('META-USD-11DEC26-470-C'), 'META')).toMatchObject({ underlying: 'META', expiryTs: DEC11_16, expiryDate: '20261211', strike: 470, kind: 'call' });
+    expect(parseParadexMarket(find('MSTR-USD-11DEC26-100-P'), 'MSTR')).toMatchObject({ underlying: 'MSTR', strike: 100, kind: 'put' });
+    // A TradFi base at the crypto hour, or a crypto base at 16:00, is not its listing.
+    expect(parseParadexMarket({ ...find('META-USD-11DEC26-470-C'), expiry_at: Date.UTC(2026, 11, 11, 8) }, 'META')).toBeNull();
+  });
+
+  it("XAU gold maps to the app's XAUT row and carries wrapper_basis", () => {
+    expect(PARADEX_BASES.XAUT).toMatchObject({ base: 'XAU', expiryHourUtc: 16, flags: ['wrapper_basis'] });
+    expect(parseParadexMarket(find('XAU-USD-11DEC26-3100-C'), 'XAUT')).toMatchObject({ underlying: 'XAUT', instrumentId: 'XAU-USD-11DEC26-3100-C' });
+    const { quotes } = mapParadexChain(tm, tradfi.summary.results, 'XAUT', 0);
+    expect(quotes).toHaveLength(2);
+    expect(quotes.every((q) => q.flags?.includes('wrapper_basis'))).toBe(true);
+  });
+
+  it('in closing hours the book is empty: marks and the underlying price only', () => {
+    const { quotes } = mapParadexChain(tm, tradfi.summary.results, 'META', 0);
+    const c = quotes.find((q) => q.instrumentId === 'META-USD-11DEC26-470-C')!;
+    expect(c).toMatchObject({ bid: null, bidSize: null, ask: null, askSize: null, indexPrice: 574.08 });
+    expect(c.mark).toBeCloseTo(109.16586799, 6);
+    expect(c.flags).toBeUndefined();
   });
 });
