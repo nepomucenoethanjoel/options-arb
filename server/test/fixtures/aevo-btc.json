@@ -1,0 +1,360 @@
+{
+ "note": "Trimmed real Aevo BTC responses captured 2026-11-22T06:35:44.812Z: /markets?asset=BTC&instrument_type=OPTION (27NOV26 58000/60000/90000 + one other expiry), /options-chain?asset=BTC&expiry=27NOV26 (same strikes), /index?asset=BTC",
+ "markets": [
+  {
+   "instrument_id": "133605",
+   "instrument_name": "BTC-27NOV26-58000-P",
+   "instrument_type": "OPTION",
+   "underlying_asset": "BTC",
+   "quote_asset": "USDC",
+   "price_step": "2.5",
+   "amount_step": "0.01",
+   "min_order_value": "0.05",
+   "max_order_value": "2000000",
+   "max_notional_value": "10000000",
+   "price_band": "0.7",
+   "mark_price": "1388.924136",
+   "forward_price": "58928.61",
+   "index_price": "58941.771157",
+   "is_active": true,
+   "option_type": "put",
+   "expiry": "1795766400000000000",
+   "strike": "58000",
+   "greeks": {
+    "delta": "-0.404031",
+    "theta": "-175.670162",
+    "gamma": "0.000084",
+    "rho": "-3.492158",
+    "vega": "26.871162",
+    "iv": "0.661400"
+   },
+   "is_rwa": false,
+   "market_type": "crypto"
+  },
+  {
+   "instrument_id": "133611",
+   "instrument_name": "BTC-27NOV26-58000-C",
+   "instrument_type": "OPTION",
+   "underlying_asset": "BTC",
+   "quote_asset": "USDC",
+   "price_step": "2.5",
+   "amount_step": "0.01",
+   "min_order_value": "0.05",
+   "max_order_value": "2000000",
+   "max_notional_value": "10000000",
+   "price_band": "0.7",
+   "mark_price": "2317.534136",
+   "forward_price": "58928.61",
+   "index_price": "58941.771157",
+   "is_active": true,
+   "option_type": "call",
+   "expiry": "1795766400000000000",
+   "strike": "58000",
+   "greeks": {
+    "delta": "0.595969",
+    "theta": "-175.670162",
+    "gamma": "0.000084",
+    "rho": "4.546022",
+    "vega": "26.871162",
+    "iv": "0.661400"
+   },
+   "is_rwa": false,
+   "market_type": "crypto"
+  },
+  {
+   "instrument_id": "133411",
+   "instrument_name": "BTC-27NOV26-60000-P",
+   "instrument_type": "OPTION",
+   "underlying_asset": "BTC",
+   "quote_asset": "USDC",
+   "price_step": "2.5",
+   "amount_step": "0.01",
+   "min_order_value": "0.05",
+   "max_order_value": "2000000",
+   "max_notional_value": "10000000",
+   "price_band": "0.7",
+   "mark_price": "2278.693569",
+   "forward_price": "58928.61",
+   "index_price": "58941.771157",
+   "is_active": true,
+   "option_type": "put",
+   "expiry": "1795766400000000000",
+   "strike": "60000",
+   "greeks": {
+    "delta": "-0.586039",
+    "theta": "-161.638227",
+    "gamma": "0.000093",
+    "rho": "-5.101907",
+    "vega": "27.029707",
+    "iv": "0.605000"
+   },
+   "is_rwa": false,
+   "market_type": "crypto"
+  },
+  {
+   "instrument_id": "133401",
+   "instrument_name": "BTC-27NOV26-60000-C",
+   "instrument_type": "OPTION",
+   "underlying_asset": "BTC",
+   "quote_asset": "USDC",
+   "price_step": "2.5",
+   "amount_step": "0.01",
+   "min_order_value": "0.05",
+   "max_order_value": "2000000",
+   "max_notional_value": "10000000",
+   "price_band": "0.7",
+   "mark_price": "1207.303569",
+   "forward_price": "58928.61",
+   "index_price": "58941.771157",
+   "is_active": true,
+   "option_type": "call",
+   "expiry": "1795766400000000000",
+   "strike": "60000",
+   "greeks": {
+    "delta": "0.413961",
+    "theta": "-161.638227",
+    "gamma": "0.000093",
+    "rho": "3.213452",
+    "vega": "27.029707",
+    "iv": "0.605000"
+   },
+   "is_rwa": false,
+   "market_type": "crypto"
+  },
+  {
+   "instrument_id": "133277",
+   "instrument_name": "BTC-27NOV26-90000-P",
+   "instrument_type": "OPTION",
+   "underlying_asset": "BTC",
+   "quote_asset": "USDC",
+   "price_step": "2.5",
+   "amount_step": "0.01",
+   "min_order_value": "0.05",
+   "max_order_value": "2000000",
+   "max_notional_value": "10000000",
+   "price_band": "0.7",
+   "mark_price": "31072.682883",
+   "forward_price": "58928.61",
+   "index_price": "58941.771157",
+   "is_active": true,
+   "option_type": "put",
+   "expiry": "1795766400000000000",
+   "strike": "90000",
+   "greeks": {
+    "delta": "-0.999347",
+    "theta": "-1.711307",
+    "gamma": "0.000000",
+    "rho": "-12.467884",
+    "vega": "0.157824",
+    "iv": "1.097000"
+   },
+   "is_rwa": false,
+   "market_type": "crypto"
+  },
+  {
+   "instrument_id": "133368",
+   "instrument_name": "BTC-27NOV26-90000-C",
+   "instrument_type": "OPTION",
+   "underlying_asset": "BTC",
+   "quote_asset": "USDC",
+   "price_step": "2.5",
+   "amount_step": "0.01",
+   "min_order_value": "0.05",
+   "max_order_value": "2000000",
+   "max_notional_value": "10000000",
+   "price_band": "0.7",
+   "mark_price": "1.295806",
+   "forward_price": "58933.08",
+   "index_price": "58941.771157",
+   "is_active": true,
+   "option_type": "call",
+   "expiry": "1795766400000000000",
+   "strike": "90000",
+   "greeks": {
+    "delta": "0.000654",
+    "theta": "-1.714671",
+    "gamma": "0.000000",
+    "rho": "0.005166",
+    "vega": "0.158135",
+    "iv": "1.097000"
+   },
+   "is_rwa": false,
+   "market_type": "crypto"
+  },
+  {
+   "instrument_id": "154267",
+   "instrument_name": "BTC-22NOV26-50000-P",
+   "instrument_type": "OPTION",
+   "underlying_asset": "BTC",
+   "quote_asset": "USDC",
+   "price_step": "2.5",
+   "amount_step": "0.01",
+   "min_order_value": "0.05",
+   "max_order_value": "2000000",
+   "max_notional_value": "10000000",
+   "price_band": "0.7",
+   "mark_price": "0",
+   "forward_price": "58934.37",
+   "index_price": "58941.771157",
+   "is_active": true,
+   "option_type": "put",
+   "expiry": "1795334400000000000",
+   "strike": "50000",
+   "greeks": {
+    "delta": "-0.000000",
+    "theta": "-0.000000",
+    "gamma": "0.000000",
+    "rho": "-0.000000",
+    "vega": "0.000000",
+    "iv": "1.210500"
+   },
+   "is_rwa": false,
+   "market_type": "crypto"
+  }
+ ],
+ "chain": {
+  "asset": "BTC",
+  "options": {
+   "calls": [
+    {
+     "instrument_name": "BTC-27NOV26-60000-C",
+     "instrument_id": "133401",
+     "mark_price": "1207.289049",
+     "iv": "0.605",
+     "delta": "0.4139584735718111",
+     "open_interest": "0",
+     "strike": "60000",
+     "ticker": {
+      "bid": {
+       "price": "1125",
+       "volume": "1.6",
+       "iv": "0.5745055932929699"
+      },
+      "ask": {
+       "price": "1290",
+       "volume": "1.6",
+       "iv": "0.6355544576973962"
+      }
+     },
+     "expiry": "1795766400000000000"
+    },
+    {
+     "instrument_name": "BTC-27NOV26-90000-C",
+     "instrument_id": "133368",
+     "mark_price": "1.292841",
+     "iv": "1.097",
+     "delta": "0.0006531104295494203",
+     "open_interest": "1.6",
+     "strike": "90000",
+     "ticker": {
+      "bid": {
+       "price": "0",
+       "volume": "0",
+       "iv": "0"
+      },
+      "ask": {
+       "price": "0",
+       "volume": "0",
+       "iv": "0"
+      }
+     },
+     "expiry": "1795766400000000000"
+    },
+    {
+     "instrument_name": "BTC-27NOV26-58000-C",
+     "instrument_id": "133611",
+     "mark_price": "2316.989556",
+     "iv": "0.6614",
+     "delta": "0.595892565455791",
+     "open_interest": "0",
+     "strike": "58000",
+     "ticker": {
+      "bid": {
+       "price": "2190",
+       "volume": "1.6",
+       "iv": "0.614070081734725"
+      },
+      "ask": {
+       "price": "2437.5",
+       "volume": "1.6",
+       "iv": "0.7061898283899677"
+      }
+     },
+     "expiry": "1795766400000000000"
+    }
+   ],
+   "puts": [
+    {
+     "instrument_name": "BTC-27NOV26-60000-P",
+     "instrument_id": "133411",
+     "mark_price": "2279.224801",
+     "iv": "0.605",
+     "delta": "-0.5861232184740145",
+     "open_interest": "0",
+     "strike": "60000",
+     "ticker": {
+      "bid": {
+       "price": "2185",
+       "volume": "1.6",
+       "iv": "0.5700712031889058"
+      },
+      "ask": {
+       "price": "2410",
+       "volume": "1.6",
+       "iv": "0.6532735045718231"
+      }
+     },
+     "expiry": "1795766400000000000"
+    },
+    {
+     "instrument_name": "BTC-27NOV26-58000-P",
+     "instrument_id": "133605",
+     "mark_price": "1389.289556",
+     "iv": "0.6614",
+     "delta": "-0.404107434544209",
+     "open_interest": "0",
+     "strike": "58000",
+     "ticker": {
+      "bid": {
+       "price": "1302.5",
+       "volume": "1.6",
+       "iv": "0.6290697548445406"
+      },
+      "ask": {
+       "price": "1467.5",
+       "volume": "1.6",
+       "iv": "0.6904807687896558"
+      }
+     },
+     "expiry": "1795766400000000000"
+    },
+    {
+     "instrument_name": "BTC-27NOV26-90000-P",
+     "instrument_id": "133277",
+     "mark_price": "31072.712841",
+     "iv": "1.097",
+     "delta": "-0.9993468895704506",
+     "open_interest": "0",
+     "strike": "90000",
+     "ticker": {
+      "bid": {
+       "price": "0",
+       "volume": "0",
+       "iv": "0"
+      },
+      "ask": {
+       "price": "0",
+       "volume": "0",
+       "iv": "0"
+      }
+     },
+     "expiry": "1795766400000000000"
+    }
+   ]
+  }
+ },
+ "index": {
+  "timestamp": "1795329345609472459",
+  "price": "58941.771157"
+ }
+}

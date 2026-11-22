@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { bsPrice } from '@options-arb/shared';
-import { OkxAdapter, mapOkxChain, parseOkxId } from '../src/adapters/okx';
+import { OKX_FAMILIES, OkxAdapter, mapOkxChain, parseOkxId } from '../src/adapters/okx';
 import { feeModels } from '../src/signals/fees';
 
 /** Trimmed real BTC-USD responses captured 2026-11-05 13:16 UTC (instruments, tickers, opt-summary, mark-price, index). */
@@ -96,5 +96,33 @@ describe('OKX fee model', () => {
   it('adds the exercise fee in the money: min(0.02% notional, 7% intrinsic)', () => {
     expect(fee.perContract({ ...ctx, strike: 70_000, legPrice: 10_500 })).toBeCloseTo(24 + 16, 9);
     expect(fee.perContract({ ...ctx, strike: 79_900, legPrice: 600 })).toBeCloseTo(24 + 7, 9); // 7% × $100 intrinsic
+  });
+});
+
+/** Trimmed real SOL-USD_UM (USD-margined) responses captured 2026-11-22 — row 92. */
+const solUm = JSON.parse(readFileSync(new URL('./fixtures/okx-sol-um.json', import.meta.url), 'utf8'));
+
+describe('OKX USD-margined families (SOL, HYPE, gold)', () => {
+  it("parses _UM ids; the XAU prefix maps to the app's XAUT row", () => {
+    expect(parseOkxId('SOL-USD_UM-261127-70-C', 'SOL')).toMatchObject({ underlying: 'SOL', strike: 70, kind: 'call', expiryTs: Date.UTC(2026, 10, 27, 8) });
+    expect(parseOkxId('XAU-USD_UM-261124-3450-C', 'XAUT', 'XAU')).toMatchObject({ underlying: 'XAUT', instrumentId: 'XAU-USD_UM-261124-3450-C', strike: 3450 });
+    expect(parseOkxId('XAU-USD_UM-261124-3450-C', 'XAUT')).toBeNull();
+    expect(OKX_FAMILIES.XAUT).toMatchObject({ family: 'XAU-USD_UM', index: 'XAU-USD', usd: true, flags: ['wrapper_basis'] });
+  });
+
+  it('prices are already USD (no × index); sizes are contracts × 0.1 SOL', () => {
+    const { quotes } = mapOkxChain(solUm, 'SOL', 0, OKX_FAMILIES.SOL);
+    const c = quotes.find((q) => q.instrumentId === 'SOL-USD_UM-261127-70-C')!;
+    expect(c).toMatchObject({ bid: 1.91, ask: 2.49, indexPrice: 68.87 });
+    expect(c.bidSize).toBeCloseTo(500, 9);
+    expect(c.askSize).toBeCloseTo(500, 9);
+    expect(c.flags).toBeUndefined();
+  });
+
+  it('gold quotes carry wrapper_basis (OKX XAU index vs the XAUT token)', () => {
+    const xau = { ...solUm, instruments: { code: '0', data: [{ instId: 'XAU-USD_UM-261124-3450-C', stk: '3450', optType: 'C', ctVal: '1', ctMult: '0.01', state: 'live' }] }, tickers: { code: '0', data: [{ instId: 'XAU-USD_UM-261124-3450-C', bidPx: '104.5', bidSz: '198', askPx: '117.5', askSz: '198' }] }, optSummary: { code: '0', data: [] }, markPrice: { code: '0', data: [] }, index: { code: '0', data: [{ idxPx: '3540.84' }] } };
+    const [q] = mapOkxChain(xau, 'XAUT', 0, OKX_FAMILIES.XAUT).quotes;
+    expect(q).toMatchObject({ bid: 104.5, ask: 117.5, flags: ['wrapper_basis'] });
+    expect(q!.bidSize).toBeCloseTo(1.98, 9);
   });
 });

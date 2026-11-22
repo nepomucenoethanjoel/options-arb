@@ -10,8 +10,10 @@ import { HealthTracker, RateLimiter, fetchWithTimeout } from '../util';
 
 /**
  * OKX options — public REST v5, no key (verified live from the US host
- * 2026-11-05, DATA_SOURCES.md rows 53-57). Coin-margined families only
- * ({U}-USD: BTC, ETH; no SOL, no USDC family).
+ * 2026-11-05, DATA_SOURCES.md rows 53-57). Coin-margined BTC-USD / ETH-USD,
+ * plus the USD-margined {U}-USD_UM families for SOL, HYPE and gold (XAU,
+ * mapped to the app's XAUT row and flagged wrapper_basis) — row 92: there
+ * prices are already USD per 1 coin (no × index) and settleCcy is USD.
  *  - GET /api/v5/public/instruments?instType=OPTION&instFamily=BTC-USD →
  *    instId BTC-USD-261106-79750-C, stk, optType, expTime (ms, 08:00 UTC),
  *    ctVal 1 × ctMult 0.01 → one contract = 0.01 coin; settleCcy BTC.
@@ -28,7 +30,26 @@ import { HealthTracker, RateLimiter, fetchWithTimeout } from '../util';
 
 export const OKX_BASE_URL = 'https://www.okx.com';
 const INSTRUMENT_CACHE_TTL_MS = 10 * 60_000;
-const ID_RE = /^([A-Z]+)-USD-(\d{2})(\d{2})(\d{2})-([\d.]+)-([CP])$/;
+const ID_RE = /^([A-Z]+)-USD(?:_UM)?-(\d{2})(\d{2})(\d{2})-([\d.]+)-([CP])$/;
+
+export interface OkxFamily {
+  family: string;
+  /** The instId prefix (XAU for the app's XAUT row). */
+  prefix: string;
+  index: string;
+  /** USD-margined: prices are USD per 1 coin. Coin-margined: coin per 1 coin (× index). */
+  usd: boolean;
+  flags?: string[];
+}
+
+export const OKX_FAMILIES: Record<string, OkxFamily> = {
+  BTC: { family: 'BTC-USD', prefix: 'BTC', index: 'BTC-USD', usd: false },
+  ETH: { family: 'ETH-USD', prefix: 'ETH', index: 'ETH-USD', usd: false },
+  SOL: { family: 'SOL-USD_UM', prefix: 'SOL', index: 'SOL-USD', usd: true },
+  HYPE: { family: 'HYPE-USD_UM', prefix: 'HYPE', index: 'HYPE-USD', usd: true },
+  // Options on OKX's XAU (spot gold) index, not on the XAUT token the row is named for.
+  XAUT: { family: 'XAU-USD_UM', prefix: 'XAU', index: 'XAU-USD', usd: true, flags: ['wrapper_basis'] },
+};
 
 interface Envelope<T> {
   code?: string;
@@ -49,9 +70,9 @@ const pos = (v: unknown): number | null => {
   return n != null && n > 0 ? n : null;
 };
 
-export function parseOkxId(instId: string, underlying: string): OptionInstrument | null {
+export function parseOkxId(instId: string, underlying: string, prefix: string = underlying): OptionInstrument | null {
   const m = ID_RE.exec(instId);
-  if (!m || m[1] !== underlying) return null;
+  if (!m || m[1] !== prefix) return null;
   const expiryTs = Date.UTC(2000 + Number(m[2]), Number(m[3]) - 1, Number(m[4]), 8);
   const strike = Number(m[5]);
   if (!Number.isFinite(strike)) return null;
@@ -75,16 +96,22 @@ export interface OkxRaw {
 }
 
 /** One family's reads → instruments + USD quotes with sizes in coin. */
-export function mapOkxChain(raw: OkxRaw, underlying: string, now: number): { instruments: OptionInstrument[]; quotes: OptionQuote[] } {
+export function mapOkxChain(
+  raw: OkxRaw,
+  underlying: string,
+  now: number,
+  fam: Pick<OkxFamily, 'prefix' | 'usd' | 'flags'> = { prefix: underlying, usd: false },
+): { instruments: OptionInstrument[]; quotes: OptionQuote[] } {
   const index = pos(raw.index.data?.[0]?.idxPx);
   if (index == null) return { instruments: [], quotes: [] };
+  const fx = fam.usd ? 1 : index;
   const tick = new Map((raw.tickers.data ?? []).map((t) => [t.instId, t]));
   const summ = new Map((raw.optSummary.data ?? []).map((s) => [s.instId, s]));
   const mark = new Map((raw.markPrice.data ?? []).map((m) => [m.instId, m]));
   const instruments: OptionInstrument[] = [];
   const quotes: OptionQuote[] = [];
   for (const r of raw.instruments.data ?? []) {
-    const inst = r.instId && r.state === 'live' ? parseOkxId(r.instId, underlying) : null;
+    const inst = r.instId && r.state === 'live' ? parseOkxId(r.instId, underlying, fam.prefix) : null;
     // Contract size in coin: ctVal × ctMult (0.01 BTC on every BTC-USD option).
     const coinPerContract = (num(r.ctVal) ?? 0) * (num(r.ctMult) ?? 0);
     if (!inst || !(coinPerContract > 0)) continue;
@@ -98,17 +125,18 @@ export function mapOkxChain(raw: OkxRaw, underlying: string, now: number): { ins
       venue: 'okx',
       instrumentId: inst.instrumentId,
       ts: num(t?.ts) ?? now,
-      bid: bid != null ? bid * index : null,
+      bid: bid != null ? bid * fx : null,
       bidSize: bid != null ? (num(t?.bidSz) ?? 0) * coinPerContract : null,
-      ask: ask != null ? ask * index : null,
+      ask: ask != null ? ask * fx : null,
       askSize: ask != null ? (num(t?.askSz) ?? 0) * coinPerContract : null,
-      mark: markPx != null ? markPx * index : null,
+      mark: markPx != null ? markPx * fx : null,
       indexPrice: index,
       forward: pos(s?.fwdPx),
       iv: pos(s?.markVol),
       ivSource: 'market',
       greeks: { delta: num(s?.delta), gamma: num(s?.gamma), vega: num(s?.vega), theta: num(s?.theta), rho: null },
       source: 'okx:rest',
+      ...(fam.flags?.length ? { flags: [...fam.flags] } : {}),
     });
   }
   return { instruments, quotes };
@@ -146,17 +174,18 @@ export class OkxAdapter implements OptionsVenueAdapter {
   }
 
   async getChain(underlying: string): Promise<{ instruments: OptionInstrument[]; quotes: OptionQuote[] }> {
-    if (underlying !== 'BTC' && underlying !== 'ETH') return { instruments: [], quotes: [] };
-    const family = `${underlying}-USD`;
+    const fam = OKX_FAMILIES[underlying];
+    if (!fam) return { instruments: [], quotes: [] };
+    const family = fam.family;
     try {
       const [instruments, tickers, optSummary, markPrice, index] = await Promise.all([
         this.instruments(family),
         this.get<RawTicker>(`/api/v5/market/tickers?instType=OPTION&instFamily=${family}`),
         this.get<RawSummary>(`/api/v5/public/opt-summary?instFamily=${family}`, this.summaryLimiter),
         this.get<RawMark>(`/api/v5/public/mark-price?instType=OPTION&instFamily=${family}`),
-        this.get<{ idxPx?: string }>(`/api/v5/market/index-tickers?instId=${family}`),
+        this.get<{ idxPx?: string }>(`/api/v5/market/index-tickers?instId=${fam.index}`),
       ]);
-      const chain = mapOkxChain({ instruments, tickers, optSummary, markPrice, index }, underlying, Date.now());
+      const chain = mapOkxChain({ instruments, tickers, optSummary, markPrice, index }, underlying, Date.now(), fam);
       this.health.ok();
       return chain;
     } catch (err) {
@@ -170,7 +199,8 @@ export class OkxAdapter implements OptionsVenueAdapter {
   }
 
   async getTicker(instrumentId: string): Promise<OptionQuote | null> {
-    const underlying = ID_RE.exec(instrumentId)?.[1];
+    const prefix = ID_RE.exec(instrumentId)?.[1];
+    const underlying = Object.entries(OKX_FAMILIES).find(([, f]) => f.prefix === prefix)?.[0];
     if (!underlying) return null;
     return (await this.getChain(underlying)).quotes.find((q) => q.instrumentId === instrumentId) ?? null;
   }

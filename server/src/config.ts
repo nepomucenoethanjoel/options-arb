@@ -42,11 +42,11 @@ function list(name: string, def: string[]): string[] {
 
 /** Venues with an adapter that can be enabled via VENUES (Bybit/Binance:
  *  deferred — geo-blocked from the US host, see DATA_SOURCES row 32). */
-export const EXTRA_VENUES = ['coincall', 'hypercall', 'callput', 'deribit', 'okx', 'gate', 'paradex'] as const;
+export const EXTRA_VENUES = ['coincall', 'hypercall', 'callput', 'deribit', 'okx', 'gate', 'paradex', 'aevo'] as const;
 export type ExtraVenue = (typeof EXTRA_VENUES)[number];
 
 function extraVenueList(): ExtraVenue[] {
-  const requested = list('VENUES', ['COINCALL', 'HYPERCALL', 'CALLPUT', 'DERIBIT', 'OKX', 'GATE', 'PARADEX']).map((v) => v.toLowerCase());
+  const requested = list('VENUES', ['COINCALL', 'HYPERCALL', 'CALLPUT', 'DERIBIT', 'OKX', 'GATE', 'PARADEX', 'AEVO']).map((v) => v.toLowerCase());
   const known = requested.filter((v): v is ExtraVenue => (EXTRA_VENUES as readonly string[]).includes(v));
   for (const v of requested) {
     if (!known.includes(v as ExtraVenue) && v !== 'derive' && v !== 'olive') console.warn(`[config] VENUES: no adapter for "${v}" — ignored`);
@@ -81,6 +81,7 @@ export interface AppConfig {
   okxBaseUrl: string;
   gateBaseUrl: string;
   paradexBaseUrl: string;
+  aevoBaseUrl: string;
 
   deriveBaseUrl: string;
   deriveLegacyUrl: string;
@@ -183,6 +184,8 @@ export interface AppConfig {
 export const DEFAULT_OLIVE_SYMBOL_MAP: Record<string, string> = {
   XAUT: 'PAXG', SPY: 'SPYX', QQQ: 'QQQX', TSLA: 'TSLAX', NVDA: 'NVDAX', META: 'METAX', GOOGL: 'GOOGLX', AAPL: 'AAPLX',
   AMZN: 'AMZNX', MSFT: 'MSFTX', COIN: 'COINX', HOOD: 'HOODX', CRCL: 'CRCLX', MU: 'MUX', SKHY: 'SKHY', SPCX: 'SPCXX',
+  // Derive and Hypercall list ANT options; Olive's market is ANTX (row 93).
+  ANT: 'ANTX',
 };
 
 export function loadConfig(): AppConfig {
@@ -255,6 +258,7 @@ export function loadConfig(): AppConfig {
     okxBaseUrl: str('OKX_BASE_URL', 'https://www.okx.com'),
     gateBaseUrl: str('GATE_BASE_URL', 'https://api.gateio.ws/api/v4'),
     paradexBaseUrl: str('PARADEX_BASE_URL', 'https://api.prod.paradex.trade/v1'),
+    aevoBaseUrl: str('AEVO_BASE_URL', 'https://api.aevo.xyz'),
     callputMinIntervalMs: Math.max(15_000, num('CALLPUT_MIN_INTERVAL_MS', 60_000)),
     callputFeedUrl: str('CALLPUT_FEED_URL', 'https://app-data-base.s3.ap-southeast-1.amazonaws.com/market-data.json'),
     callputRecorder: bool('CALLPUT_RECORDER', extraVenues.includes('callput')),
