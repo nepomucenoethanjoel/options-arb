@@ -15,7 +15,7 @@ import {
 import type { OptionsVenueAdapter } from '@options-arb/shared';
 import type { AppConfig } from './config';
 import type { DeriveAdapter } from './adapters/derive';
-import type { OliveAdapter } from './adapters/olive';
+import type { AmmQuoteResult, OliveAdapter } from './adapters/olive';
 import { matchChain } from './matching/engine';
 import { computeSignals, isPersistWorthy } from './signals/engine';
 import { effectivePrices } from './signals/bestVenue';
@@ -511,6 +511,14 @@ export class Orchestrator extends EventEmitter {
       }
     }
 
+    // Wrapper markets (Olive SPYX for SPY, …): one token is not one share
+    // (SPYX ≈ 1.0069 × SPY over 2026-10/11, row 94), so the hedge's strike K
+    // is Olive's strike K·r on the token, r = token spot / hedge spot, and the
+    // token option's price ÷ r is its cost per hedge unit.
+    const wrapped = (this.cfg.oliveSymbolMap?.[underlying] ?? underlying) !== underlying;
+    const hedgeSpot = wrapped ? wrapperHedgeSpot(quotes, extraChains) : null;
+    const wrapRatio = wrapped && hedgeSpot != null && oliveState?.spot != null ? oliveState.spot / hedgeSpot : null;
+
     const matched = matchChain({
       now,
       underlying,
@@ -519,7 +527,10 @@ export class Orchestrator extends EventEmitter {
         {
           venue: 'olive',
           maxTenorMs: this.cfg.oliveMaxTenorDays * 86_400_000,
-          quote: (strike, expiryTs, kind) => this.olive.getAmmQuote(underlying, strike, expiryTs, kind, now, oliveState),
+          quote: (strike, expiryTs, kind) =>
+            wrapped
+              ? wrapperAmmQuote(wrapRatio, strike, (k) => this.olive.getAmmQuote(underlying, k, expiryTs, kind, now, oliveState))
+              : this.olive.getAmmQuote(underlying, strike, expiryTs, kind, now, oliveState),
         },
       ],
       config: {
@@ -668,6 +679,50 @@ export class Orchestrator extends EventEmitter {
     }
     return payload;
   }
+}
+
+/** A wrapper ratio outside this band means a mismatched feed (split, wrong asset), not a basis. */
+export const WRAPPER_RATIO_BAND = { min: 0.95, max: 1.05 } as const;
+
+/** The hedge instrument's spot: the first non-Olive venue index price (Derive first, as for `spot`). */
+export function wrapperHedgeSpot(deriveQuotes: Map<string, OptionQuote>, extraChains: Array<{ quotes: Map<string, OptionQuote> }>): number | null {
+  for (const q of [...deriveQuotes.values(), ...extraChains.flatMap((c) => [...c.quotes.values()])]) {
+    if (q.venue !== 'olive' && q.indexPrice != null && q.indexPrice > 0) return q.indexPrice;
+  }
+  return null;
+}
+
+/**
+ * Olive leg for a wrapper market at the hedge's strike K: quoted on the token
+ * at K·r (rounded to a cent — the strike to enter on Olive, in the instrument
+ * id), then priced per hedge unit (mark, spot, forward ÷ r_eff, IV unchanged).
+ * Black-Scholes is homogeneous in (S, K), so this equals Olive's model at the
+ * hedge's own spot and strike. No ratio, or one outside WRAPPER_RATIO_BAND →
+ * no Olive leg.
+ */
+export function wrapperAmmQuote(
+  ratio: number | null,
+  strike: number,
+  quoteAt: (tokenStrike: number) => AmmQuoteResult,
+): AmmQuoteResult {
+  if (ratio == null) return { rejected: 'wrapper_ratio_unknown' };
+  if (!(ratio >= WRAPPER_RATIO_BAND.min && ratio <= WRAPPER_RATIO_BAND.max)) return { rejected: 'wrapper_ratio_out_of_band' };
+  const tokenStrike = Math.round(strike * ratio * 100) / 100;
+  const res = quoteAt(tokenStrike);
+  if (!('quote' in res)) return res;
+  const r = tokenStrike / strike;
+  const q = res.quote;
+  const div = (v: number | null | undefined) => (v == null ? (v as null | undefined) : v / r);
+  return {
+    quote: {
+      ...q,
+      bid: div(q.bid) ?? null,
+      ask: div(q.ask) ?? null,
+      mark: div(q.mark) ?? null,
+      indexPrice: div(q.indexPrice),
+      forward: div(q.forward),
+    },
+  };
 }
 
 /**
