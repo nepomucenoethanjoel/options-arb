@@ -21,7 +21,7 @@ import { OLIVE_MARKET_FILE_BASE, fetchOliveMarketFile, isMarketFileFresh, type O
 import type { OliveRealtimeClient, RealtimeHealth } from './realtime';
 export type AmmQuoteResult =
   | { quote: OptionQuote }
-  | { rejected: 'strike_out_of_olive_bounds' | 'beyond_max_tenor' | 'no_market_state' | 'no_vol' };
+  | { rejected: 'strike_out_of_olive_bounds' | 'beyond_max_tenor' | 'no_market_state' | 'no_vol' | 'wrapper_ratio_unknown' | 'wrapper_ratio_out_of_band' };
 
 export interface OliveAdapterOptions {
   apiBase: string;

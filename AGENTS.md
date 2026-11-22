@@ -18,7 +18,7 @@ make a number look better.**
 
 ## Non-negotiable rules
 
-1. **The verification stack is load-bearing.** 373 tests (incl. a golden
+1. **The verification stack is load-bearing.** 378 tests (incl. a golden
    replay of a recorded live Olive × Derive cycle), typechecks in three
    workspaces, and `server/src/scripts/handcheck.ts` /
    `handcheck-books.ts` (live field
@@ -80,6 +80,8 @@ bash deploy/deploy.sh root@<vps>  # deploy: build locally + ship + restart
   response, a `VENUE_SPECS` entry, a fee model, a raw fetcher in
   `handcheck-books.ts`, and DATA_SOURCES rows — same commit.
 - `server/src/scheduler.ts` — cycle orchestration + change-gated persistence;
+  wrapper markets (Olive SPYX for SPY …) quote the Olive leg at K·(token/ETF spot) and price it per
+  hedge unit (`wrapperAmmQuote`, row 94);
   per-venue fee-adjusted prices on lite rows (`signals/bestVenue.ts`), surface
   flags (`signals/surfaceChecks.ts`), parity (`signals/parity.ts`).
 - `server/src/olivePools.ts` — sweeps every Olive market for free pool capacity → `/api/olive-pools`, alerts when a hedgeable untracked pool is funded.

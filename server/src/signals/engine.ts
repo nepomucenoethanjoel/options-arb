@@ -4,6 +4,7 @@ import {
   NON_EXECUTABLE_FLAGS,
   VENUE_ORDER,
   VENUE_SPECS,
+  settlementWindowHours,
   yearsBetween,
   type MatchRow,
   type OptionQuote,
@@ -391,7 +392,7 @@ function evaluatePair(
 
   // ~1σ settlement basis risk: |delta|·S·σ·sqrt(window / 1yr) per unit, the
   // window being the longer of the two venues' settlement averaging windows.
-  const windowHours = Math.max(...pair.map((v) => VENUE_SPECS[v].settlementWindowHours));
+  const windowHours = Math.max(...pair.map((v) => settlementWindowHours(v, row.underlying)));
   const delta = rq.greeks?.delta;
   const settlementBasisUsdc =
     typeof delta === 'number' && Number.isFinite(delta) && spot != null
