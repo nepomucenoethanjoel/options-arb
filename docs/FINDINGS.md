@@ -18,6 +18,12 @@ what the data showed when it was checked.
   be large (BTC puts ~$150/contract vs OKX) while the honest clip total is
   a few dollars. The pool watcher alerts when capacity appears on a market
   you can hedge.
+- **When Olive's pools are nearly full, Olive is expensive.** Its borrow
+  rate climbs the quadratic curve toward 170% (tokens) / 160% (USDC), and
+  that rate goes straight into the option price — on 2026-11-23 Olive priced
+  an ETH Feb-27 3400 put at $3,147 (intrinsic ~$1,605) and a BTC Dec-25 71k
+  call at $3,851 vs Hypercall's $954. Those rows only "profit" by selling to
+  Olive (`direction_limited`); there is nothing to buy until pools free up.
 - **A brokerage hedge doesn't help yet.** One US-listed option covers 100
   shares ($35k+ of TSLA, $62k of QQQ); Olive's whole TSLAX pool was ~4 shares
   of capacity. US options are also American-style and physically settled.

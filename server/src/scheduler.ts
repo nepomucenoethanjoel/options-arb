@@ -469,14 +469,18 @@ export class Orchestrator extends EventEmitter {
     const expiryDates = [...new Set(instruments.map((i) => i.expiryDate))].sort();
     const limited = this.cfg.deriveMaxExpiries > 0 ? expiryDates.slice(0, this.cfg.deriveMaxExpiries) : expiryDates;
     const quotes = new Map<string, OptionQuote>();
-    for (const expiryDate of limited) {
-      try {
-        const qs = await this.derive.getTickers(underlying, expiryDate);
-        for (const q of qs) quotes.set(q.instrumentId, q);
-      } catch (err) {
-        console.warn(`[scheduler] Derive tickers ${underlying} ${expiryDate} failed:`, err instanceof Error ? err.message : err);
-      }
-    }
+    // All expiries at once: the adapter's shared rate limiter still paces Derive.
+    // One-by-one per underlying, the deepest chains (ETH, HYPE) waited ~90 s behind
+    // every other underlying's calls and their other venues' quotes went stale (row 98).
+    const perExpiry = await Promise.all(
+      limited.map((expiryDate) =>
+        this.derive.getTickers(underlying, expiryDate).catch((err) => {
+          console.warn(`[scheduler] Derive tickers ${underlying} ${expiryDate} failed:`, err instanceof Error ? err.message : err);
+          return [] as OptionQuote[];
+        }),
+      ),
+    );
+    for (const qs of perExpiry) for (const q of qs) quotes.set(q.instrumentId, q);
 
     // Underlying spot: a venue index price (Derive first), else Olive's own feeds.
     let spot: number | null = null;
