@@ -34,6 +34,14 @@ what the data showed when it was checked.
 - **Rates changed 2026-11-17** (no announcement): β 2500 → 10000 and the
   borrow curve became quadratic above the 75% kink (rows 78–79). Big orders
   pay noticeably more than the quoted price — the app's fill model prices this.
+- **Demand surface since 2026-11-25 (row 99):** buys pay a vol markup that
+  their own size pushes up — about 1.5 × (amount spent ÷ depth), with depth
+  only ~6–8% of what the pool holds on that side. On 2026-11-28 an ATM
+  30-day $500 buy paid **+45% over the flat price on BTC calls, +36% SOL
+  calls, +114% ETH calls**; put sides hold $1–$600, so puts cost +100% or
+  more even at $100. The extra ("push") is refunded only if you sell back to
+  Olive — held to expiry it is lost. The app prices it (quote + fill model),
+  so many Olive rows that used to look profitable no longer do.
 - **Fee:** min(5 bp × qty × spot, 10% × premium) since 2026-10-21 (row 77).
   Visible in Olive's "Breakeven" column (breakeven − entry ≈ fee per contract).
 - **Can't open inside 24 h of expiry** (row 81). The app flags those legs
@@ -171,3 +179,5 @@ One month of hourly data (2026-10-22 → 11-21):
 | Hypercall `single_maker` lift | more fills at size (see docs/live-fill-checklist.md) |
 | Derive ANT/XAUT settlement | undocumented — ask Derive |
 | Olive call settlement asset in `VENUE_SPECS` | set calls → underlying (golden replay needs re-recording) |
+| Olive order rate on small pools (row 99) | model the fixed-rate premium from `fixedRateWheel` as Olive's client does (2 fills off by 3–6%) |
+| Olive demand-surface sell-back value | price the refund when closing early (client `D`: min(worth, held)) — the app assumes hold-to-expiry |

@@ -18,7 +18,7 @@ make a number look better.**
 
 ## Non-negotiable rules
 
-1. **The verification stack is load-bearing.** 383 tests (incl. a golden
+1. **The verification stack is load-bearing.** 411 tests (incl. a golden
    replay of a recorded live Olive × Derive cycle), typechecks in three
    workspaces, and `server/src/scripts/handcheck.ts` /
    `handcheck-books.ts` (live field
@@ -73,6 +73,10 @@ bash deploy/deploy.sh root@<vps>  # deploy: build locally + ship + restart
   per contract, keeps the best (shortable sell venue → clean book → honest
   total) plus `alternatives`. Per-venue fees in `signals/fees.ts`; Olive-only
   capacity caps + marginal-fill VWAP in `signals/olive.ts`.
+- `shared/src/math/oliveSurface.ts` — Olive's demand surface (row 99): port of Olive's
+  client math, pinned by 8 replayed chain fills (`oliveSurface.test.ts`). Quotes are priced
+  at σ·(1 + markup standing there) (adapter, account read via `decodeDemandSurface`);
+  `expectedFillVwap` adds the order's push. Change it only with new chain evidence.
 - `server/src/adapters/{coincall,hypercall,callput,deribit,okx,gate,paradex,aevo}.ts` — extra listed venues
   (`getChain`), enabled by `VENUES`; quote-level `flags` (`single_maker`,
   `indicative_quote`) keep unproven venues out of headline totals. A pair whose only

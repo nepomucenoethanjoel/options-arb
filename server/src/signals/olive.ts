@@ -1,4 +1,4 @@
-import { expectedFillVwap, type OliveCurveShape, type OliveFixedRateSide, type OptionKind, type OliveRateCurvePoint } from '@options-arb/shared';
+import { expectedFillVwap, type OliveCurveShape, type OliveFixedRateSide, type OptionKind, type OliveRateCurvePoint, type VenueMarketState } from '@options-arb/shared';
 
 /** Olive pool custody for one underlying (market-file on-chain snapshot). */
 export interface OliveCustody {
@@ -13,6 +13,8 @@ export interface OliveCustody {
   usdcFixedRate?: OliveFixedRateSide | null;
   /** Curve shape above the kink; absent (recordings before 2026-11-17) = linear. */
   curveShape?: OliveCurveShape;
+  /** Demand surface (row 99); absent in recordings before 2026-11-25. */
+  demandSurface?: VenueMarketState['oliveDemandSurface'];
 }
 
 /**
@@ -58,7 +60,16 @@ export function oliveExecutionImpact(input: {
   size: number;
   custody: OliveCustody;
   /** Price the fill only when buying from Olive on a same-contract leg. */
-  priceFill: { spot: number | null; vol: number; tauYears: number; quotedMark: number; entryPrice: number | null } | null;
+  priceFill: {
+    spot: number | null;
+    /** Oracle (model) vol — the quote's IV without its surface markup. */
+    vol: number;
+    tauYears: number;
+    quotedMark: number;
+    entryPrice: number | null;
+    nowSec?: number;
+    expiresAtSec?: number;
+  } | null;
 }): { movesRate: boolean; vwapEntry: number | null } {
   const { kind, strike, size, custody } = input;
   const owned = kind === 'call' ? custody.underlyingOwned : custody.usdcOwnedUsd;
@@ -72,6 +83,12 @@ export function oliveExecutionImpact(input: {
   if (!p || p.entryPrice == null || curve == null || curve.length === 0 || p.spot == null || !(p.vol > 0) || !(p.tauYears > 0)) {
     return { movesRate, vwapEntry: null };
   }
+  // An unreadable surface leaves the push unknown: no honest fill price.
+  const ds = custody.demandSurface;
+  if (ds?.status === 'unavailable') return { movesRate, vwapEntry: null };
+  const side = ds?.surface ? (kind === 'call' ? ds.surface.calls : ds.surface.puts) : null;
+  const heldUsd = ds?.heldUsd ? (kind === 'call' ? ds.heldUsd.calls : ds.heldUsd.puts) : null;
+  if (side && (heldUsd == null || p.nowSec == null || p.expiresAtSec == null)) return { movesRate, vwapEntry: null };
   const fill = expectedFillVwap({
     kind,
     strike,
@@ -85,6 +102,7 @@ export function oliveExecutionImpact(input: {
     perUnitLocked: perUnit,
     fixedRate: kind === 'call' ? custody.tokenFixedRate ?? null : custody.usdcFixedRate ?? null,
     curveShape: custody.curveShape ?? 'linear',
+    surface: side ? { side, heldUsd: heldUsd!, nowSec: p.nowSec!, expiresAtSec: p.expiresAtSec! } : null,
   });
   if (fill && p.quotedMark > 0 && Math.abs(fill.quoteEntry - p.quotedMark) <= 0.02 * p.quotedMark) {
     return { movesRate, vwapEntry: fill.vwapEntry };

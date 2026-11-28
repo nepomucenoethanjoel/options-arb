@@ -1,4 +1,5 @@
 import type { OliveFixedRateSide } from './math/olive';
+import type { OliveDemandSurface } from './math/oliveSurface';
 
 export type OptionKind = 'call' | 'put';
 /** Every venue the app knows; which are polled is config (VENUES). */
@@ -58,6 +59,8 @@ export interface OptionQuote {
   source: string;
   /** Venue-level caveats carried into any signal using this quote (e.g. `single_maker`). */
   flags?: string[];
+  /** Olive only: demand-surface markup standing at this point (iv = model vol × (1 + markup); row 99). */
+  oliveSurfaceMarkup?: number;
 }
 
 export interface IVSurfacePoint {
@@ -88,6 +91,16 @@ export interface VenueMarketState {
   oliveFixedRate?: {
     token: (OliveFixedRateSide & { owned: number }) | null;
     usdc: (OliveFixedRateSide & { owned: number }) | null;
+  } | null;
+  /**
+   * Olive only: the pool's demand surface (row 99) and what liquidity providers
+   * hold per side in USD (calls: coin × spot, puts: USDC; pending escrow
+   * excluded) — its depth basis. 'unavailable' = the account could not be read.
+   */
+  oliveDemandSurface?: {
+    status: 'live' | 'unavailable';
+    surface: OliveDemandSurface | null;
+    heldUsd: { calls: number; puts: number } | null;
   } | null;
   /** Strike bounds if the venue enforces them (Olive ±1σ bands). */
   strikeBounds?: { lower: number | null; upper: number | null };

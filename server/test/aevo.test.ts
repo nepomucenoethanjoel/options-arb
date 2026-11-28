@@ -60,9 +60,14 @@ describe('Aevo fee model (docs options-fees)', () => {
 });
 
 describe('AevoAdapter', () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
   it('reads the expiry list once, one options-chain per live expiry, and skips assets Aevo does not list', async () => {
+    // The fixture's expiries are live only as of its capture: shift the clock back to it, still
+    // ticking (a frozen Date stalls the rate limiter).
+    const realNow = Date.now.bind(Date);
+    const offset = realNow() - Date.parse('2026-11-22T12:00:00Z');
+    vi.spyOn(Date, 'now').mockImplementation(() => realNow() - offset);
     const urls: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       urls.push(url);

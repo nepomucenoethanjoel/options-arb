@@ -54,9 +54,9 @@ every ~30 s, per underlying:
   IVs point the right way (sell IV ≥ buy IV), plus single-maker quotes whose
   prices cross another book (`iv_inverted`). It keeps the best by: shortable
   sell venue → clean book → honest total.
-- **Olive** is synthesized with Olive's own pricing (model vol, per-custody
-  rate curve + fixed-rate premium) at whatever strike the row needs, within
-  its ±1σ band. Wrapper rows (SPY → SPYX) quote Olive at K × (token/ETF spot)
+- **Olive** is synthesized with Olive's own pricing (model vol × the
+  demand-surface markup at that point, per-custody rate curve + fixed-rate
+  premium) at whatever strike the row needs, within its ±1σ band. Wrapper rows (SPY → SPYX) quote Olive at K × (token/ETF spot)
   and price per share.
 
 ## Profit estimate — methodology
@@ -67,7 +67,7 @@ exit    = rich leg's executable price  (the book's bid — never mid)
 net     = exit − entry − fees            (per-venue models in signals/fees.ts)
 profit  = net − capital cost             (full collateral × borrow APR × tenor; conservative)
 total   = profit × size − per-order fees (size = binding book touch, capped by Olive's pool capacity)
-honest  = min(quoted total, fill-model total)   (Olive's rate moves with order size)
+honest  = min(quoted total, fill-model total)   (Olive's rate and demand-surface markup move with order size)
 ```
 
 Both legs are European options on the same underlying and expiry, so held to
@@ -95,7 +95,8 @@ The KPI headline sums only clean rows at the honest clip size.
 **Headline-blocking** (shown, excluded from totals and normal alerts): the
 above plus `price_distortion`, `fill_model_skipped`, `single_maker`,
 `indicative_quote`, `reference_venue`, `size_unknown` (venue publishes no
-size), `market_closed` (stock outside the NYSE session), `wrapper_basis`.
+size), `market_closed` (stock outside the NYSE session), `wrapper_basis`,
+`demand_surface_unknown` (Olive's demand surface could not be read).
 
 **Informational:** `amm_pool_depth_unknown`, `pool_capacity_capped`,
 `pool_capacity_estimated`, `execution_moves_rate`, `direction_limited`,
@@ -185,8 +186,9 @@ npm run dev:web        # dashboard on http://127.0.0.1:5173 (proxies /api)
 ## Caveats
 
 1. **Signals only** — no execution logic exists in this codebase, by design.
-2. **Olive "IV" is a model vol** (EWMA realized, flat across strikes); spreads
-   shown are market IV minus model vol, labelled as such.
+2. **Olive "IV" is a model vol** (EWMA realized) times its demand-surface
+   markup at that strike/expiry (0 where nobody has bought); spreads shown are
+   market IV minus that, labelled as such.
 3. **Not risk-equivalent venues:** Olive is fully collateralized and settles on
    a single oracle print by its keeper; most others are margin venues settling
    on averages. Capital and settlement differences are priced or flagged, not ignored.

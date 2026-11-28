@@ -66,6 +66,8 @@ export interface OliveMarketFileData {
   /** Last on-chain EWMA write (ms) — the projection base. */
   volOnChainMs: number | null;
   projectionBranch: string | null;
+  /** On-chain pool account (`rawOnChainPoolSnapshot.poolAddress`) — keys the pool's demand surface. */
+  poolAddress: string | null;
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -198,6 +200,7 @@ export function parseOliveMarketFile(json: any, underlying: string, curveShape: 
     asOfMs,
     volOnChainMs,
     projectionBranch: volObj?.projectionBranch ?? null,
+    poolAddress: typeof raw?.poolAddress === 'string' ? raw.poolAddress : typeof summary?.address === 'string' ? summary.address : null,
   };
 }
 

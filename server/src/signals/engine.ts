@@ -334,6 +334,8 @@ function evaluatePair(
   let expectedEntryUsdc: number | null = null;
   let expectedNetAfterCapitalUsdc: number | null = null;
   let expectedTotalNetUsdc: number | null = null;
+  // The fill model prices from the oracle vol; an Olive quote's IV carries the surface markup standing there.
+  const oracleVol = bq.iv! / (1 + (bq.oliveSurfaceMarkup ?? 0));
   if (custody != null && maxExecutableSize != null && maxExecutableSize > 0) {
     const impact = oliveExecutionImpact({
       kind: row.kind,
@@ -342,7 +344,7 @@ function evaluatePair(
       custody,
       priceFill:
         buy === 'olive' && !mismatchedLegs
-          ? { spot, vol: bq.iv!, tauYears: tau, quotedMark: bq.mark ?? 0, entryPrice }
+          ? { spot, vol: oracleVol, tauYears: tau, quotedMark: bq.mark ?? 0, entryPrice, nowSec: now / 1000, expiresAtSec: row.expiryTs / 1000 }
           : null,
     });
     if (impact.movesRate) flag('execution_moves_rate');
@@ -364,7 +366,7 @@ function evaluatePair(
         strike: row.strike,
         size,
         custody,
-        priceFill: { spot, vol: bq.iv!, tauYears: tau, quotedMark: bq.mark ?? 0, entryPrice },
+        priceFill: { spot, vol: oracleVol, tauYears: tau, quotedMark: bq.mark ?? 0, entryPrice, nowSec: now / 1000, expiresAtSec: row.expiryTs / 1000 },
       });
       return vwapEntry != null ? orderFees((netAfterCapitalUsdc - (vwapEntry - entryPrice)) * size) : null;
     };
