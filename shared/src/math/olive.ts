@@ -1,4 +1,5 @@
 import { bsPrice } from './bs';
+import { prepareSurfacePoint, surfaceBuyForBudget, type OliveDemandSide } from './oliveSurface';
 
 /**
  * Olive strike bounds: σ-band around oracle spot — K_L = S·e^(−rS·τ − σ√τ),
@@ -183,6 +184,12 @@ export interface MarginalFillInput {
   fixedRate?: OliveFixedRateSide | null;
   /** Curve shape above the kink (default 'linear', as every pre-2026-11-17 recording). */
   curveShape?: OliveCurveShape;
+  /**
+   * Demand-surface side the order buys on (row 99), with the side's held USD.
+   * Priced only with `fixedRate` (Olive's live order mechanics); `vol` is then
+   * the oracle vol the surface multiplies.
+   */
+  surface?: { side: OliveDemandSide; heldUsd: number; nowSec: number; expiresAtSec: number } | null;
 }
 
 export interface MarginalFillResult {
@@ -238,6 +245,9 @@ export function expectedFillVwap(input: MarginalFillInput): MarginalFillResult |
     const rate = (lock: number): number => (oliveOrderRateBps(curve, input.fixedRate!, owned, locked0, tSeconds, lock, input.curveShape) ?? 0) / 10_000;
     const p0 = premiumAtRate(rate(0));
     if (!(p0 > 0)) return null;
+    if (input.surface) {
+      return surfaceFill(input, p0, rate, tSeconds, locked0, endUtil);
+    }
     let p1 = p0;
     for (let i = 0; i < 12; i++) {
       const next = premiumAtRate(rate((size * p1 * perUnitLocked) / p0));
@@ -247,6 +257,7 @@ export function expectedFillVwap(input: MarginalFillInput): MarginalFillResult |
     const endRate = oliveFixedQuoteBps(curve, input.fixedRate, owned, locked0, tSeconds, size * perUnitLocked, input.curveShape) / 10_000;
     return { quoteEntry: p0, vwapEntry: p1, endEntry: premiumAtRate(endRate), endUtilization: endUtil };
   }
+  // Curve-only path (recordings without fixed-rate state): `surface` is not priced here.
   const TRANCHE_COUNT = 32;
   const step = size / TRANCHE_COUNT;
   let sum = 0;
@@ -258,6 +269,69 @@ export function expectedFillVwap(input: MarginalFillInput): MarginalFillResult |
     quoteEntry: premiumAtUtil(u0),
     vwapEntry: sum / TRANCHE_COUNT,
     endEntry: premiumAtUtil(endUtil),
+    endUtilization: endUtil,
+  };
+}
+
+/**
+ * The fixed-rate fill with Olive's demand surface (row 99), in Olive's own
+ * order of operations (client `hl` then `AA`): a premium budget B sets the
+ * rate window B/p0 and the order rate r; the push comes out of the same
+ * budget, so contracts = (B − push(B)) / p(r). Solves contracts(B) = size
+ * (increasing in B) by Illinois regula falsi; the entry is B / size.
+ * quoteEntry is the zero-size price at the markup already standing there.
+ */
+function surfaceFill(
+  input: MarginalFillInput,
+  p0: number,
+  rate: (lock: number) => number,
+  tSeconds: number,
+  locked0: number,
+  endUtil: number,
+): MarginalFillResult | null {
+  const { kind, strike, spot, vol, tauYears, size, perUnitLocked } = input;
+  const s = input.surface!;
+  const prep = prepareSurfacePoint(s.side, { isCall: kind === 'call', strike, spot, vol, expiresAtSec: s.expiresAtSec, heldUsd: s.heldUsd }, s.nowSec);
+  if (prep.kind === 'refused') return null;
+  const premium = (r: number, m: number): number => {
+    const v = vol * (1 + m);
+    return kind === 'call'
+      ? bsPrice({ forward: spot * Math.exp(r * tauYears), strike, tauYears, vol: v, discountFactor: Math.exp(-r * tauYears), kind: 'call' })
+      : bsPrice({ forward: spot * Math.exp(-r * tauYears), strike, tauYears, vol: v, discountFactor: Math.exp(r * tauYears), kind: 'put' });
+  };
+  const r0 = rate(0);
+  const m0 = prep.kind === 'point' ? prep.point.markup : 0;
+  const buyAt = (budget: number): { contracts: number; markupAfter: number; r: number } | null => {
+    const r = rate((budget / p0) * perUnitLocked);
+    const flat = premium(r, 0);
+    if (!(flat > 0)) return null;
+    if (prep.kind !== 'point') return { contracts: budget / flat, markupAfter: 0, r };
+    const buy = surfaceBuyForBudget(prep.point, flat, (m) => premium(r, m), budget);
+    return buy ? { contracts: buy.contracts, markupAfter: buy.markupAfter, r } : null;
+  };
+  // contracts(B) ≤ B/p0, so B = size·p0 buys at most `size`; widen hi until it buys at least `size`.
+  let lo = size * p0;
+  let fLo = (buyAt(lo)?.contracts ?? 0) - size;
+  let hi = lo * 2;
+  let fHi = (buyAt(hi)?.contracts ?? 0) - size;
+  for (let i = 0; i < 60 && fHi < 0; i++) { lo = hi; fLo = fHi; hi *= 2; fHi = (buyAt(hi)?.contracts ?? 0) - size; }
+  if (fHi < 0) return null;
+  let side = 0;
+  let budget = hi;
+  for (let i = 0; i < 80; i++) {
+    budget = fLo === fHi ? (lo + hi) / 2 : (lo * fHi - hi * fLo) / (fHi - fLo);
+    const f = (buyAt(budget)?.contracts ?? 0) - size;
+    if (Math.abs(f) <= 1e-10 * size || hi - lo <= 1e-12 * hi) break;
+    if (f < 0) { lo = budget; fLo = f; if (side === -1) fHi /= 2; side = -1; }
+    else { hi = budget; fHi = f; if (side === 1) fLo /= 2; side = 1; }
+  }
+  const fill = buyAt(budget);
+  if (!fill) return null;
+  const endRate = oliveFixedQuoteBps(input.curve, input.fixedRate!, input.owned, locked0, tSeconds, size * perUnitLocked, input.curveShape) / 10_000;
+  return {
+    quoteEntry: premium(r0, m0),
+    vwapEntry: budget / size,
+    endEntry: premium(endRate, fill.markupAfter),
     endUtilization: endUtil,
   };
 }

@@ -1,5 +1,5 @@
 import { Connection, PublicKey, type AccountInfo } from '@solana/web3.js';
-import { oliveStrikeBounds } from '@options-arb/shared';
+import { oliveStrikeBounds, type OliveDemandSide, type OliveDemandSurface } from '@options-arb/shared';
 import { fetchWithTimeout } from '../../util';
 
 export { oliveStrikeBounds };
@@ -125,6 +125,13 @@ export class OliveOnChainReader {
     return result;
   }
 
+  /** A pool's demand surface; null when the account is missing or not the expected layout. */
+  async readDemandSurface(pool: string): Promise<OliveDemandSurface | null> {
+    const info = await this.getAccountInfo(demandSurfaceAddress(pool));
+    if (info == null || info.owner.toBase58() !== OLIVE_PROGRAM_ID) return null;
+    return decodeDemandSurface(Buffer.from(info.data), pool);
+  }
+
   /** Decode the underlying custody's volatility-oracle account. */
   async readVolOracle(underlying: string): Promise<VolOracleState> {
     const empty: VolOracleState = {
@@ -177,6 +184,52 @@ export class OliveOnChainReader {
     // require an override; revisit when the keeper runs.
     return { vol: null, reason: 'no_override', oracle };
   }
+}
+
+/**
+ * Olive's `DemandSurface` account (row 99): PDA ["demand_surface", pool],
+ * bytemuck repr(C) per the IDL Olive's web app bundles —
+ *   0  8   discriminator 9fc6adb3550d639a
+ *   8  32  pool, 40 bump, 41 version, 42 padding[6]
+ *   48     calls: DemandSide (3,680 bytes)
+ *   3728   puts:  DemandSide
+ *   7408   reserved u64[6]                                    (7,456 bytes)
+ * DemandSide: grid_strength_e6, date_strength_e6, depth_usd (e6), half_life_seconds,
+ * spare[2], fade_index_q32, last_fade_at (i64), reserve_grid/date_usd, paid_in/out_usd,
+ * released_usd, enabled u8 + padding[7], pushes u64[78] (e6), date_levels u64[367] (e6),
+ * date_today — all u64 unless noted.
+ */
+export const DEMAND_SURFACE_DISCRIMINATOR = '9fc6adb3550d639a';
+const DEMAND_SURFACE_LEN = 7456;
+const DEMAND_SIDE_LEN = 3680;
+
+export function demandSurfaceAddress(pool: string): string {
+  return PublicKey.findProgramAddressSync([Buffer.from('demand_surface'), new PublicKey(pool).toBuffer()], new PublicKey(OLIVE_PROGRAM_ID))[0].toBase58();
+}
+
+export function decodeDemandSurface(data: Buffer, pool?: string): OliveDemandSurface | null {
+  if (data.length !== DEMAND_SURFACE_LEN || data.subarray(0, 8).toString('hex') !== DEMAND_SURFACE_DISCRIMINATOR) return null;
+  if (pool != null && new PublicKey(data.subarray(8, 40)).toBase58() !== pool) return null;
+  const u64 = (o: number): number => Number(data.readBigUInt64LE(o));
+  const side = (o: number): OliveDemandSide => {
+    const pushes: number[] = [];
+    for (let i = 0; i < 78; i++) pushes.push(u64(o + 112 + 8 * i) / 1e6);
+    const dateLevels: number[] = [];
+    for (let i = 0; i < 367; i++) dateLevels.push(u64(o + 736 + 8 * i) / 1e6);
+    return {
+      gridStrength: u64(o) / 1e6,
+      dateStrength: u64(o + 8) / 1e6,
+      depthUsd: u64(o + 16) / 1e6,
+      halfLifeSeconds: u64(o + 24),
+      fadeIndex: u64(o + 48) / 2 ** 32,
+      lastFadeAt: Number(data.readBigInt64LE(o + 56)),
+      enabled: data[o + 104] === 1,
+      pushes,
+      dateLevels,
+      dateToday: u64(o + 3672),
+    };
+  };
+  return { calls: side(48), puts: side(48 + DEMAND_SIDE_LEN) };
 }
 
 /** Canonical Pyth mainnet feed IDs (public constants; lookup API is flaky here). */

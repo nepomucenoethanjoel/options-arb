@@ -11,7 +11,8 @@
  * same source the running server uses.
  */
 import { existsSync, readFileSync } from 'node:fs';
-import { bsPrice, oliveStrikeBounds } from '@options-arb/shared';
+import { bsPrice, oliveStrikeBounds, oliveSurfaceMarkup } from '@options-arb/shared';
+import { OliveOnChainReader } from '../adapters/olive/onchain';
 import { loadConfig } from '../config';
 
 const API = 'https://api.derive.xyz/v3';
@@ -41,6 +42,9 @@ interface MarketFile {
   liquidityUsd: number | null;
   rates: { tokenApr: number; usdcApr: number } | null;
   premium: { token: PremiumSide | null; usdc: PremiumSide | null } | null;
+  poolAddress: string | null;
+  /** Demand-surface depth basis (row 99): (owned − escrow) coin × spot for calls, USDC for puts. */
+  heldUsd: { calls: number; puts: number } | null;
 }
 interface PremiumSide { beta: number; owned: number; exposure: number; timeValue: number }
 
@@ -140,7 +144,11 @@ async function fetchMarketFile(sym: string, curveShape: 'linear' | 'quadratic'):
           : aum != null && claims != null
             ? Math.max(0, aum - claims)
             : null;
-      return { spot, vol, underlyingFree, usdcFreeUsd, liquidityUsd, rates, premium };
+      const ownedUnits = (c: any): number | null => { const o = ownedRaw(c), dec = n(c?.decimals); return o == null || dec == null ? null : o / Math.pow(10, dec); };
+      const coinOwned = ownedUnits(raw?.underlyingCustody), usdcOwned = ownedUnits(raw?.usdcCustody);
+      const heldUsd = coinOwned != null && usdcOwned != null ? { calls: coinOwned * spot, puts: usdcOwned } : null;
+      const poolAddress = typeof raw?.poolAddress === 'string' ? raw.poolAddress : null;
+      return { spot, vol, underlyingFree, usdcFreeUsd, liquidityUsd, rates, premium, poolAddress, heldUsd };
     } catch (e) {
       lastErr = e instanceof Error ? e.message : String(e);
       await new Promise((r) => setTimeout(r, 1500));
@@ -285,6 +293,22 @@ async function main() {
   rates.token += premiumBps(market.premium?.token ?? null, tSec) / 10_000;
   rates.usdc += premiumBps(market.premium?.usdc ?? null, tSec) / 10_000;
   console.log(`fixed rates at ${(tau * 365).toFixed(2)}d incl. premium: L/S ${(rates.token * 100).toFixed(2)}%/${(rates.usdc * 100).toFixed(2)}%`);
+  // Demand surface (row 99), read live from chain: the zero-size price is at σ·(1 + markup standing there).
+  let markup = 0;
+  if (market.poolAddress) {
+    const surface = await new OliveOnChainReader(cfg.solanaRpcUrl).readDemandSurface(market.poolAddress).catch(() => undefined);
+    if (surface === undefined) {
+      failures++;
+      console.log('demand surface: ✗ unreadable — the Olive price cannot be checked');
+    } else if (surface && market.heldUsd) {
+      const isCall = target.kind === 'call';
+      markup = oliveSurfaceMarkup(isCall ? surface.calls : surface.puts, {
+        isCall, strike: target.strike, spot: serverSynthSpot, vol: market.vol, expiresAtSec: expiryTs / 1000,
+        heldUsd: isCall ? market.heldUsd.calls : market.heldUsd.puts,
+      }, now / 1000);
+    }
+    console.log(`demand surface: markup ${(markup * 100).toFixed(3)}% at this point → Olive vol ${(market.vol * (1 + markup) * 100).toFixed(2)}%`);
+  }
   const r = target.kind === 'call' ? rates.token : -rates.usdc;
   const oliveForward = serverSynthSpot * Math.exp(r * tau);
   // Verified convention (269d + 7d, DATA_SOURCES.md §2d): calls discount at
@@ -295,12 +319,12 @@ async function main() {
     forward: oliveForward,
     strike: target.strike,
     tauYears: tau,
-    vol: market.vol,
+    vol: market.vol * (1 + markup),
     discountFactor: oliveDf,
     kind: target.kind,
   });
 
-  const spreadVols = (deriveIv - market.vol) * 100;
+  const spreadVols = (deriveIv - market.vol * (1 + markup)) * 100;
   const direction = spreadVols >= 0 ? 'buy_olive_sell_derive' : 'buy_derive_sell_olive';
   const entry = direction === 'buy_olive_sell_derive' ? olivePremium : ask ?? deriveMark;
   const exit = direction === 'buy_olive_sell_derive' ? bid ?? deriveMark : olivePremium;
@@ -354,7 +378,7 @@ async function main() {
     return `${label}: mine=${mine.toFixed(4)} theirs=${theirs} ${ok ? '✓' : `✗ DIFF ${Math.abs(mine - theirs).toFixed(4)}`}`;
   };
   console.log(`hand-check of ${target.pairKey} (tau=${tau.toFixed(6)}y, Derive index=${index}, server synth spot=${serverSynthSpot}, stork=${market.spot})`);
-  console.log(`Derive IV: mine(fresh)=${(deriveIv * 100).toFixed(2)}% theirs(cycle)=${signal.ivSpreadVols != null ? (((signal.ivSpreadVols / 100) + market.vol) * 100).toFixed(2) : '?'}% — quoted IVs drift between the cycle and this check`);
+  console.log(`Derive IV: mine(fresh)=${(deriveIv * 100).toFixed(2)}% theirs(cycle)=${signal.ivSpreadVols != null ? (((signal.ivSpreadVols / 100) + market.vol * (1 + markup)) * 100).toFixed(2) : '?'}% — quoted IVs drift between the cycle and this check`);
   const theirs = `buy_${signal.buyVenue}_sell_${signal.sellVenue}`;
   if (direction !== theirs) failures++;
   console.log(`direction: mine=${direction} theirs=${theirs} ${direction === theirs ? '✓' : '✗'}`);

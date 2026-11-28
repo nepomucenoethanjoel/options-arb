@@ -1,6 +1,8 @@
 import {
   fixedRatePremiumBps,
+  oliveSurfaceMarkup,
   type IVSurfacePoint,
+  type OliveDemandSurface,
   type OliveCurveShape,
   type OliveFixedRateSide,
   type OliveRateCurvePoint,
@@ -49,6 +51,9 @@ export interface OliveAdapterOptions {
 }
 
 const STATE_CACHE_TTL_MS = 10_000;
+/** Surfaces move only on Olive option trades; a read failure reuses the last good copy this long. */
+const SURFACE_CACHE_TTL_MS = 15_000;
+export const SURFACE_MAX_AGE_MS = 120_000;
 const MARKET_FILE_CACHE_TTL_MS = 10_000;
 /**
  * A brief market-file outage reuses the last live vol, not the pins: live
@@ -98,6 +103,36 @@ export class OliveAdapter implements OptionsVenueAdapter {
   /** True when at least one underlying's vol comes from the live market file. */
   private volLive = false;
 
+  private surfaceCache = new Map<string, { ts: number; okTs: number | null; surface: OliveDemandSurface | null }>();
+
+  /** A pool's demand surface (row 99), 15s-cached; `ok` false when no read succeeded within SURFACE_MAX_AGE_MS. */
+  private async getDemandSurface(pool: string): Promise<{ ok: boolean; surface: OliveDemandSurface | null }> {
+    const now = Date.now();
+    const cached = this.surfaceCache.get(pool);
+    if (cached && now - cached.ts < SURFACE_CACHE_TTL_MS) return { ok: cached.okTs != null && now - cached.okTs <= SURFACE_MAX_AGE_MS, surface: cached.surface };
+    try {
+      const surface = await this.onchain.readDemandSurface(pool);
+      this.surfaceCache.set(pool, { ts: now, okTs: now, surface });
+      return { ok: true, surface };
+    } catch {
+      const okTs = cached?.okTs ?? null;
+      this.surfaceCache.set(pool, { ts: now, okTs, surface: cached?.surface ?? null });
+      return { ok: okTs != null && now - okTs <= SURFACE_MAX_AGE_MS, surface: cached?.surface ?? null };
+    }
+  }
+
+  /** Surface + its depth basis for a market file (spot: the price held coin is valued at). */
+  private surfaceState(
+    file: OliveMarketFileData,
+    ds: { ok: boolean; surface: OliveDemandSurface | null },
+    spot: number | null,
+  ): NonNullable<VenueMarketState['oliveDemandSurface']> {
+    const heldUsd = file.underlyingOwned != null && file.usdcOwnedUsd != null && spot != null
+      ? { calls: file.underlyingOwned * spot, puts: file.usdcOwnedUsd }
+      : null;
+    return { status: ds.ok ? 'live' : 'unavailable', surface: ds.ok ? ds.surface : null, heldUsd };
+  }
+
   /** Live market-state file (their frontend's own source), 10s-cached. */
   private async getMarketFile(underlying: string): Promise<OliveMarketFileData | null> {
     const cached = this.marketFileCache.get(underlying);
@@ -145,6 +180,7 @@ export class OliveAdapter implements OptionsVenueAdapter {
     tokenFixedRate?: OliveFixedRateSide | null;
     usdcFixedRate?: OliveFixedRateSide | null;
     curveShape?: OliveCurveShape;
+    demandSurface?: VenueMarketState['oliveDemandSurface'];
   } | null {
     const cached = this.marketFileCache.get(underlying.toUpperCase());
     if (!cached?.ts || Date.now() - cached.ts > 60_000) return null;
@@ -160,6 +196,7 @@ export class OliveAdapter implements OptionsVenueAdapter {
       tokenFixedRate: d.fixedRate?.token ?? null,
       usdcFixedRate: d.fixedRate?.usdc ?? null,
       curveShape: d.curveShape,
+      demandSurface: this.getCachedState(underlying)?.oliveDemandSurface ?? null,
     };
   }
 
@@ -288,6 +325,13 @@ export class OliveAdapter implements OptionsVenueAdapter {
       : null;
     if (oliveFixedRate?.token || oliveFixedRate?.usdc) caveats.push('fixed_rate_premium_live');
 
+    // Demand surface (row 99): quotes are priced at the markup standing at their point.
+    let oliveDemandSurface: VenueMarketState['oliveDemandSurface'] = null;
+    if (file?.poolAddress) {
+      oliveDemandSurface = this.surfaceState(file, await this.getDemandSurface(file.poolAddress), spot ?? null);
+      caveats.push(oliveDemandSurface.status === 'live' ? 'demand_surface_live' : 'demand_surface_unavailable');
+    }
+
     const state: VenueMarketState = {
       venue: 'olive',
       underlying: u,
@@ -296,6 +340,7 @@ export class OliveAdapter implements OptionsVenueAdapter {
       tokenRateApr: liveRates?.tokenApr ?? this.ratesFor(u).tokenApr,
       usdcRateApr: liveRates?.usdcApr ?? this.ratesFor(u).usdcApr,
       oliveFixedRate,
+      oliveDemandSurface,
       ts: Date.now(),
       source: file ? 'olive:market-file(live)' : this.rest ? 'olive:rest-health+onchain' : 'olive:onchain',
       caveats,
@@ -392,19 +437,28 @@ export class OliveAdapter implements OptionsVenueAdapter {
         return { rejected: 'strike_out_of_olive_bounds' };
       }
     }
-    return {
-      quote: buildSyntheticAmmQuote({
-        underlying,
-        strike,
-        expiryTs,
-        kind,
-        spot: state.spot,
-        vol: state.modelVol,
-        tokenRateApr: rates.tokenApr,
-        usdcRateApr: rates.usdcApr,
-        now,
-      }),
-    };
+    // The surface multiplies the oracle vol; the strike band above stays on the oracle vol (Olive's own check).
+    const ds = state.oliveDemandSurface;
+    const side = ds?.surface ? (kind === 'call' ? ds.surface.calls : ds.surface.puts) : null;
+    const heldUsd = ds?.heldUsd ? (kind === 'call' ? ds.heldUsd.calls : ds.heldUsd.puts) : null;
+    const unknown = ds?.status === 'unavailable' || (side != null && heldUsd == null);
+    const markup = side && heldUsd != null
+      ? oliveSurfaceMarkup(side, { isCall: kind === 'call', strike, spot: state.spot, vol: state.modelVol, expiresAtSec: expiryTs / 1000, heldUsd }, now / 1000)
+      : 0;
+    const quote = buildSyntheticAmmQuote({
+      underlying,
+      strike,
+      expiryTs,
+      kind,
+      spot: state.spot,
+      vol: state.modelVol * (1 + markup),
+      tokenRateApr: rates.tokenApr,
+      usdcRateApr: rates.usdcApr,
+      now,
+    });
+    if (markup > 0) quote.oliveSurfaceMarkup = markup;
+    if (unknown) quote.flags = [...(quote.flags ?? []), 'demand_surface_unknown'];
+    return { quote };
   }
 
   getHealth(): VenueHealth {

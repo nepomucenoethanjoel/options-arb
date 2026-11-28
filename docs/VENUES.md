@@ -50,14 +50,29 @@ fraction. A quote with no price on a side has that side `null` (never 0).
   custody, rate curve, fixed-rate state) is the primary source; on-chain
   reads and the REST API are fallbacks (rows 4, 52, §2d-ter). The app
   **synthesizes** Olive quotes with Olive's own pricing.
-- **Pricing (rows 1–2, 4, 10, 16, 78, 79):** Black-Scholes at Olive's per-asset EWMA model
-  vol (flat across strikes).
+- **Pricing (rows 1–2, 4, 10, 16, 78, 79, 99):** Black-Scholes at Olive's per-asset EWMA model
+  vol × (1 + the demand-surface markup at that point — below).
   - Calls: F = S·e^(rL·T), df = e^(−rL·T). Puts: F = S·e^(−rS·T), df = e^(+rS·T).
   - Rate = per-custody borrow curve at locked / (owned − escrow), whole bps,
     floored; **quadratic above the 75% kink since 2026-11-17** (max 170%
     asset / 160% USDC) **plus** the fixed-rate premium β·U2d·t/(t+τ) (β 10000).
   - An order pays the Simpson average rate over its own lock — big orders
     move the price (`execution_moves_rate`, fill model in `signals/olive.ts`).
+- **Demand surface (row 99, since 2026-11-25):** the pricing vol is
+  σ_oracle × (1 + markup), and every buy also pays a "push" that raises the
+  markup around its strike/expiry for everyone after it.
+  - Per pool, per side (calls, puts): a 13-strike × 6-tenor grid (fades with a
+    90-day half-life) plus one slot per expiry day (no fading). Account: PDA
+    `["demand_surface", pool]`, read every 15 s (`decodeDemandSurface`).
+  - Depth = what LPs hold on the side × the ATM 30-day call fraction (~6–8%);
+    the markup after a buy ≈ 1.5 × (spent ÷ depth), smaller for long tenors.
+    No cap.
+  - Contracts = (budget − push) ÷ flat price. The push is refunded on
+    sell-back; **at expiry it stays with the pool** — a pure cost held to expiry.
+  - The app quotes Olive at the markup standing at each point (the quote's IV
+    includes it, `oliveSurfaceMarkup` carries it) and the fill model adds the
+    order's push. Unreadable surface → `demand_surface_unknown` (headline-blocking).
+  - The market file's `pricingVolatilityE6` does **not** include the markup.
 - **Fees (row 77):** min(5 bp × qty × oracle spot, 10% × premium) since
   2026-10-21; plus a Solana network fee.
 - **Rules:** buy only (writing is the LPs' role → `direction_limited`);

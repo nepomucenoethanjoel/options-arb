@@ -19,6 +19,8 @@ export const HEADLINE_BLOCKING_FLAGS: ReadonlySet<string> = new Set([
   // Stock underlyings outside the NYSE session; an Olive wrapper (xStock, PAXG)
   // hedged with a different instrument (the stock, XAUT) — unverified basis.
   'market_closed', 'wrapper_basis',
+  // Olive's demand surface (row 99) could not be read: its markup and push are unknown, so the Olive price is a floor.
+  'demand_surface_unknown',
 ]);
 
 type ClipFields = Pick<Signal, 'totalNetUsdc' | 'expectedTotalNetUsdc' | 'maxExecutableSize'> &
